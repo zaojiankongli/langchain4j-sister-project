@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zjkl.user.mapper.UserMapper">
+
+    <!-- 根据邮箱查找用户 -->
+    <select id="findByEmail" resultType="com.zjkl.user.domain.User">
+        SELECT * FROM users WHERE email = #{email}
+    </select>
+    
+    <!-- 根据 ID 查找用户 -->
+    <select id="findById" resultType="com.zjkl.user.domain.User">
+        SELECT * FROM users WHERE id = #{id}
+    </select>
+    
+    <!-- 插入新用户 -->
+    <insert id="insert">
+        INSERT INTO users (id, email, username, ai_type, gender, hobbies, birthday, created_at, updated_at) 
+        VALUES (#{id}, #{email}, #{username}, #{aiType}, #{gender}, #{hobbies}, #{birthday}, NOW(), NOW())
+    </insert>
+    
+    <!-- 更新用户信息 -->
+    <update id="update">
+        UPDATE users 
+        SET username = #{username}, 
+            ai_type = #{aiType}, 
+            gender = #{gender}, 
+            hobbies = #{hobbies}, 
+            birthday = #{birthday}, 
+            avatar_url = #{avatarUrl}, 
+            updated_at = NOW() 
+        WHERE id = #{id}
+    </update>
+    
+    <!-- 更新最后活跃时间 -->
+    <update id="updateLastActiveAt">
+        UPDATE users 
+        SET last_active_at = NOW() 
+        WHERE id = #{id}
+    </update>
+
+</mapper>

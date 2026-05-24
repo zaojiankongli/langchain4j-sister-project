@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zjkl.recommendation.mapper.UserRecommendationMapper">
+
+    <resultMap id="BaseResultMap" type="com.zjkl.recommendation.entity.UserRecommendation">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="resource_type" property="resourceType"/>
+        <result column="title" property="title"/>
+        <result column="url" property="url"/>
+        <result column="description" property="description"/>
+        <result column="source" property="source"/>
+        <result column="relevance_score" property="relevanceScore"/>
+        <result column="recommendation_date" property="recommendationDate"/>
+        <result column="is_clicked" property="isClicked"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.zjkl.recommendation.entity.UserRecommendation"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO user_recommendations (user_id, resource_type, title, url, description,
+                                          source, relevance_score, recommendation_date, is_clicked)
+        VALUES (#{userId}, #{resourceType}, #{title}, #{url}, #{description},
+                #{source}, #{relevanceScore}, #{recommendationDate}, #{isClicked})
+    </insert>
+
+    <insert id="batchInsert" parameterType="java.util.List">
+        INSERT INTO user_recommendations (user_id, resource_type, title, url, description,
+                                          source, relevance_score, recommendation_date, is_clicked)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.userId}, #{item.resourceType}, #{item.title}, #{item.url}, #{item.description},
+             #{item.source}, #{item.relevanceScore}, #{item.recommendationDate}, #{item.isClicked})
+        </foreach>
+    </insert>
+
+    <select id="selectByUserIdAndDate" resultMap="BaseResultMap">
+        SELECT * FROM user_recommendations
+        WHERE user_id = #{userId} AND recommendation_date = #{recommendationDate}
+        ORDER BY relevance_score DESC
+    </select>
+
+    <update id="markAsClicked">
+        UPDATE user_recommendations SET is_clicked = 1 WHERE id = #{id}
+    </update>
+
+</mapper>

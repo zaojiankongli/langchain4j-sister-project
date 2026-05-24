@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zjkl.memory.mapper.ConversationMemoryMapper">
+
+    <!-- 插入记忆 -->
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO conversation_memories (
+            user_id, 
+            title, 
+            content, 
+            mood,
+            memory_date, 
+            image_url, 
+            created_at
+        ) VALUES (
+            #{userId}, 
+            #{title}, 
+            #{content}, 
+            #{mood},
+            #{memoryDate}, 
+            #{imageUrl}, 
+            NOW()
+        )
+    </insert>
+    
+    <!-- 根据 ID 查询记忆 -->
+    <select id="selectById" resultType="com.zjkl.user.domain.ConversationMemory">
+        SELECT id, user_id, title, content, mood, memory_date, image_url, created_at
+        FROM conversation_memories WHERE id = #{id}
+    </select>
+
+    <!-- 根据用户 ID 和日期查询记忆 -->
+    <select id="selectByUserIdAndDate" resultType="com.zjkl.user.domain.ConversationMemory">
+        SELECT id, user_id, title, content, mood, memory_date, image_url, created_at
+        FROM conversation_memories
+        WHERE user_id = #{userId} AND memory_date = #{memoryDate}
+    </select>
+
+    <!-- 根据用户 ID 查询记忆列表（分页，支持可选日期范围过滤） -->
+    <select id="selectByUserId" resultType="com.zjkl.user.domain.ConversationMemory">
+        SELECT id, user_id, title, content, mood, memory_date, image_url, created_at
+        FROM conversation_memories
+        WHERE user_id = #{userId}
+        <if test="beginDate != null">
+            AND memory_date &gt;= #{beginDate}
+        </if>
+        <if test="endDate != null">
+            AND memory_date &lt; #{endDate}
+        </if>
+        <if test="excludeToday">
+            AND memory_date &lt; CURDATE()
+        </if>
+        ORDER BY memory_date DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <!-- 更新图片 URL -->
+    <update id="updateImageUrl">
+        UPDATE conversation_memories 
+        SET image_url = #{imageUrl}
+        WHERE id = #{id}
+    </update>
+    
+    <!-- 根据用户 ID 统计记忆数量 -->
+    <select id="countByUserId" resultType="int">
+        SELECT COUNT(*) FROM conversation_memories 
+        WHERE user_id = #{userId}
+    </select>
+
+</mapper>

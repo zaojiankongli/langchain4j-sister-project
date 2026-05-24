@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zjkl.user.mapper.UserProfileMapper">
+
+    <!-- ========== 基础用户信息 ========== -->
+    
+    <select id="findUserById" resultType="com.zjkl.user.domain.User">
+        SELECT * FROM users WHERE id = #{userId}
+    </select>
+    
+    <update id="updateUserProfile">
+        UPDATE users 
+        SET username = #{username}, 
+            birthday = #{birthday}, 
+            hobbies = #{hobbies}, 
+            updated_at = NOW() 
+        WHERE id = #{userId}
+    </update>
+    
+    <update id="updateUserAvatar">
+        UPDATE users 
+        SET avatar_url = #{avatarUrl}, 
+            updated_at = NOW() 
+        WHERE id = #{userId}
+    </update>
+    
+    <update id="updateUserBasic">
+        UPDATE users 
+        SET username = #{username}, 
+            gender = #{gender}, 
+            updated_at = NOW() 
+        WHERE id = #{userId}
+    </update>
+    
+    <update id="updateUserHobbies">
+        UPDATE users 
+        SET hobbies = #{hobbies}, 
+            updated_at = NOW() 
+        WHERE id = #{userId}
+    </update>
+    
+    <update id="updateUserAiType">
+        UPDATE users 
+        SET ai_type = #{aiType}, 
+            updated_at = NOW() 
+        WHERE id = #{userId}
+    </update>
+    
+    <!-- ========== 等级经验 ========== -->
+    
+    <select id="findLevelInfo" resultType="com.zjkl.user.domain.vo.UserProfileVO$LevelInfo">
+        SELECT current_level AS currentLevel, 
+               current_exp AS currentExp, 
+               level_up_exp AS levelUpExp, 
+               total_exp AS totalExp 
+        FROM user_levels 
+        WHERE user_id = #{userId}
+    </select>
+    
+    <!-- ========== 情绪 PAD ========== -->
+    
+    <select id="findLatestEmotion" resultType="com.zjkl.user.domain.vo.UserProfileVO$EmotionInfo">
+        SELECT pleasure, 
+               arousal, 
+               dominance, 
+               mood_description AS moodDescription 
+        FROM user_emotions 
+        WHERE user_id = #{userId} 
+        ORDER BY created_at DESC 
+        LIMIT 1
+    </select>
+    
+    <!-- ========== 兴趣标签 ========== -->
+
+    <select id="findInterestTags" resultType="java.lang.String">
+        SELECT tag_name AS tagName
+        FROM user_interest_tags
+        WHERE user_id = #{userId}
+          AND is_deleted = 0
+    </select>
+
+    <!-- 新增兴趣标签（如果已存在则先恢复再更新） -->
+    <insert id="insertInterestTag">
+        INSERT INTO user_interest_tags (user_id, tag_name, is_deleted, created_at, updated_at)
+        VALUES (#{userId}, #{tagName}, 0, NOW(), NOW())
+        ON DUPLICATE KEY UPDATE is_deleted = 0, updated_at = NOW()
+    </insert>
+
+    <!-- 软删除单个兴趣标签 -->
+    <update id="softDeleteInterestTag">
+        UPDATE user_interest_tags
+        SET is_deleted = 1, updated_at = NOW()
+        WHERE user_id = #{userId} AND tag_name = #{tagName} AND is_deleted = 0
+    </update>
+
+    <!-- 批量软删除兴趣标签 -->
+    <update id="batchSoftDeleteInterestTags">
+        UPDATE user_interest_tags
+        SET is_deleted = 1, updated_at = NOW()
+        WHERE user_id = #{userId} AND tag_name IN
+        <foreach collection="tagNames" item="tagName" open="(" separator="," close=")">
+            #{tagName}
+        </foreach>
+        AND is_deleted = 0
+    </update>
+    
+    <!-- ========== 聊天统计 ========== -->
+    
+    <select id="countMessages" resultType="java.lang.Integer">
+        SELECT COUNT(*) AS count 
+        FROM conver_messages 
+        WHERE user_id = #{userId} 
+          AND is_deleted = 0
+    </select>
+    
+    <select id="findFirstChatDate" resultType="java.time.LocalDate">
+        SELECT DATE(MIN(created_at)) AS firstDate 
+        FROM conver_messages 
+        WHERE user_id = #{userId} 
+          AND is_deleted = 0
+    </select>
+
+</mapper>

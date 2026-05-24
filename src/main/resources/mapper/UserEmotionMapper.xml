@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zjkl.emotion.mapper.UserEmotionMapper">
+
+    <insert id="insert" parameterType="com.zjkl.emotion.model.UserEmotionRecord"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO user_emotions (user_id, pleasure, arousal, dominance, mood_description, ai_type)
+        VALUES (#{userId}, #{pleasure}, #{arousal}, #{dominance}, #{moodDescription}, #{aiType})
+    </insert>
+
+    <select id="selectByUserId" resultType="com.zjkl.emotion.model.UserEmotionRecord">
+        SELECT id, user_id AS userId, pleasure, arousal, dominance,
+               mood_description AS moodDescription, ai_type AS aiType, created_at AS createdAt
+        FROM user_emotions
+        WHERE user_id = #{userId}
+        ORDER BY created_at DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="selectByUserIdNoLimit" resultType="com.zjkl.emotion.model.UserEmotionRecord">
+        SELECT id, user_id AS userId, pleasure, arousal, dominance,
+               mood_description AS moodDescription, ai_type AS aiType, created_at AS createdAt
+        FROM user_emotions
+        WHERE user_id = #{userId}
+        ORDER BY created_at DESC
+    </select>
+
+    <select id="countByUserId" resultType="long">
+        SELECT COUNT(*) FROM user_emotions WHERE user_id = #{userId}
+    </select>
+
+</mapper>

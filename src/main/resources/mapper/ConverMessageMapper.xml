@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zjkl.ai.chat.mapper.ConverMessageMapper">
+
+    <resultMap id="BaseResultMap" type="com.zjkl.ai.chat.entity.ConverMessage">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="role" property="role"/>
+        <result column="contents" property="contents" typeHandler="com.zjkl.ai.chat.mapper.ConverMessageContentTypeHandler"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.zjkl.ai.chat.entity.ConverMessage">
+        INSERT INTO conver_messages (id, user_id, role, contents, created_at)
+        VALUES (#{id}, #{userId}, #{role}, #{contents,typeHandler=com.zjkl.ai.chat.mapper.ConverMessageContentTypeHandler}, #{createdAt})
+    </insert>
+
+    <insert id="batchInsert" parameterType="java.util.List">
+        INSERT INTO conver_messages (id, user_id, role, contents, created_at)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.id}, #{item.userId}, #{item.role}, #{item.contents,typeHandler=com.zjkl.ai.chat.mapper.ConverMessageContentTypeHandler}, #{item.createdAt})
+        </foreach>
+    </insert>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT * FROM conver_messages WHERE id = #{id}
+    </select>
+
+    <select id="selectByUserId" resultMap="BaseResultMap">
+        SELECT * FROM conver_messages
+        WHERE user_id = #{userId}
+        ORDER BY created_at DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="selectByUserIdAndTimeRange" resultMap="BaseResultMap">
+        SELECT * FROM conver_messages
+        WHERE user_id = #{userId}
+        AND created_at BETWEEN #{startTime} AND #{endTime}
+        ORDER BY created_at ASC
+    </select>
+
+    <select id="selectLatestByUserId" resultMap="BaseResultMap">
+        SELECT * FROM conver_messages
+        WHERE user_id = #{userId}
+        ORDER BY created_at DESC
+        LIMIT #{limit}
+    </select>
+
+    <delete id="deleteByUserId">
+        DELETE FROM conver_messages WHERE user_id = #{userId}
+    </delete>
+
+    <select id="selectSessionPreviews" resultType="java.util.Map">
+        SELECT dates.date_val AS date, SUBSTRING(dates.preview_text, 1, 50) AS preview_text
+        FROM (
+            SELECT DATE(memory_date) AS date_val, content AS preview_text, 1 AS priority
+            FROM conversation_memories
+            WHERE user_id = #{userId}
+            UNION ALL
+            SELECT DATE(created_at) AS date_val,
+                JSON_UNQUOTE(JSON_EXTRACT(contents, '$[0].text')) AS preview_text,
+                2 AS priority
+            FROM conver_messages
+            WHERE user_id = #{userId}
+              AND role = 'assistant'
+              AND is_deleted = 0
+        ) dates
+        GROUP BY dates.date_val
+        ORDER BY MAX(dates.priority), dates.date_val DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>

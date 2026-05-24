@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zjkl.emotion.mapper.EmotionAnchorMapper">
+
+    <resultMap id="BaseResultMap" type="com.zjkl.emotion.model.EmotionAnchorEvent">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="start_time" property="startTime"/>
+        <result column="end_time" property="endTime"/>
+        <result column="duration_seconds" property="durationSeconds"/>
+        <!-- Pleasure -->
+        <result column="start_pleasure" property="startPleasure"/>
+        <result column="peak_pleasure" property="peakPleasure"/>
+        <result column="end_pleasure" property="endPleasure"/>
+        <result column="delta_pleasure" property="deltaPleasure"/>
+        <!-- Arousal -->
+        <result column="start_arousal" property="startArousal"/>
+        <result column="peak_arousal" property="peakArousal"/>
+        <result column="end_arousal" property="endArousal"/>
+        <result column="delta_arousal" property="deltaArousal"/>
+        <!-- 事件描述 -->
+        <result column="event_title" property="eventTitle"/>
+        <result column="trigger_reason" property="triggerReason"/>
+        <result column="highlight_traits" property="highlightTraits"/>
+        <result column="summary" property="summary"/>
+        <!-- 结束 & 反思 -->
+        <result column="end_type" property="endType"/>
+        <result column="end_reason" property="endReason"/>
+        <result column="ai_reflection" property="aiReflection"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.zjkl.emotion.model.EmotionAnchorEvent"
+            useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO emotion_anchor_events (
+            user_id, start_time, end_time, duration_seconds,
+            start_pleasure, peak_pleasure, end_pleasure, delta_pleasure,
+            start_arousal, peak_arousal, end_arousal, delta_arousal,
+            event_title, trigger_reason, highlight_traits, summary,
+            end_type, end_reason, ai_reflection, created_at
+        ) VALUES (
+            #{userId}, #{startTime}, #{endTime}, #{durationSeconds},
+            #{startPleasure}, #{peakPleasure}, #{endPleasure}, #{deltaPleasure},
+            #{startArousal}, #{peakArousal}, #{endArousal}, #{deltaArousal},
+            #{eventTitle}, #{triggerReason}, #{highlightTraits}, #{summary},
+            #{endType}, #{endReason}, #{aiReflection}, #{createdAt}
+        )
+    </insert>
+
+    <update id="updateEndFields" parameterType="com.zjkl.emotion.model.EmotionAnchorEvent">
+        UPDATE emotion_anchor_events
+        SET end_time = #{endTime},
+            duration_seconds = #{durationSeconds},
+            end_pleasure = #{endPleasure},
+            delta_pleasure = #{deltaPleasure},
+            end_arousal = #{endArousal},
+            delta_arousal = #{deltaArousal},
+            event_title = #{eventTitle},
+            trigger_reason = #{triggerReason},
+            highlight_traits = #{highlightTraits},
+            summary = #{summary},
+            end_type = #{endType},
+            end_reason = #{endReason},
+            ai_reflection = #{aiReflection}
+        WHERE id = #{id} AND end_time IS NULL
+    </update>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT * FROM emotion_anchor_events WHERE id = #{id}
+    </select>
+
+    <select id="selectRecentByUserId" resultMap="BaseResultMap">
+        SELECT * FROM emotion_anchor_events
+        WHERE user_id = #{userId}
+        ORDER BY start_time DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectByUserIdPaged" resultMap="BaseResultMap">
+        SELECT * FROM emotion_anchor_events
+        WHERE user_id = #{userId}
+        <if test="beginDate != null">
+            AND DATE(start_time) &gt;= #{beginDate}
+        </if>
+        <if test="endDate != null">
+            AND DATE(start_time) &lt; #{endDate}
+        </if>
+        ORDER BY start_time DESC
+        LIMIT #{offset}, #{limit}
+    </select>
+
+    <select id="selectRecentEndTypes" resultType="string">
+        SELECT end_type FROM emotion_anchor_events
+        WHERE user_id = #{userId} AND end_type IS NOT NULL
+        ORDER BY start_time DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectRecentNegativeTopics" resultType="string">
+        SELECT COALESCE(trigger_reason, CONCAT('情绪波动事件(变化', delta_pleasure, ')'))
+        FROM emotion_anchor_events
+        WHERE user_id = #{userId} AND (end_type != 'POSITIVE' OR end_type IS NULL)
+          AND trigger_reason IS NOT NULL
+        ORDER BY start_time DESC
+        LIMIT #{limit}
+    </select>
+
+    <select id="selectEvolutionByUserId" resultType="java.util.Map">
+        SELECT trigger_reason, highlight_traits, ai_reflection, start_time
+        FROM emotion_anchor_events
+        WHERE user_id = #{userId}
+        ORDER BY start_time DESC
+        LIMIT #{limit}
+    </select>
+
+</mapper>
