@@ -13,6 +13,7 @@ import dev.langchain4j.agentic.UntypedAgent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -38,6 +39,7 @@ public class InterestTagGenerateServiceImpl implements InterestTagGenerateServic
     private final Gson gson = new Gson();
 
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public List<String> generateTags(String userId) {
         log.info("为用户 {} 启动兴趣标签生成工作流", userId);
 

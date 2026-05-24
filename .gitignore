@@ -45,6 +45,10 @@ package-lock.json
 .env.local
 .env.*.local
 
+### OpenCode ###
+.agents/
+skills-lock.json
+
 ### Logs ###
 *.log
 

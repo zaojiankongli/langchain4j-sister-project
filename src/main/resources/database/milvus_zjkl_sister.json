@@ -383,7 +383,7 @@
             "100"
           ],
           "leaderID": "100",
-          "leader_addr": "172.18.0.7:21123",
+          "leader_addr": "MILVUS_HOST:MILVUS_PORT",
           "dm_channel_name": "by-dev-rootcoord-dml_12_465909467999327615v0"
         }
       ],

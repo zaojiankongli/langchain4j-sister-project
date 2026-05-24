@@ -4,6 +4,7 @@ import com.zjkl.ai.image.domain.ImageElements;
 import com.zjkl.ai.oss.service.OssService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -27,8 +28,8 @@ public class MemoryImageGenerator {
     /**
      * 默认图片 URL（生成失败时使用）
      */
-    private static final String DEFAULT_IMAGE_URL =
-            "https://zjkl-langchain4j-ai.oss-cn-beijing.aliyuncs.com/live2d/zk.jpg";
+    @Value("${app.default-image-url}")
+    private String defaultImageUrl;
 
     /**
      * 异步生成记忆图片（使用 JDK 21 虚拟线程）
@@ -79,6 +80,6 @@ public class MemoryImageGenerator {
         }
 
         log.warn("图片生成重试耗尽，降级为默认图，userId={}, reason={}", userId, lastException.getMessage());
-        return CompletableFuture.completedFuture(DEFAULT_IMAGE_URL);
+        return CompletableFuture.completedFuture(defaultImageUrl);
     }
 }

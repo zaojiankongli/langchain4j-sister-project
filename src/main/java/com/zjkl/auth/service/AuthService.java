@@ -14,6 +14,7 @@ import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -94,6 +95,7 @@ public class AuthService {
      * 登录/注册（统一入口）
      *
      */
+    @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> login(LoginRequest request) {
         String email = request.email();
         String code = request.code();
@@ -206,6 +208,7 @@ public class AuthService {
      * @param userId 用户 ID
      * @param request 完善资料请求
      */
+    @Transactional(rollbackFor = Exception.class)
     public void completeProfile(String userId, CompleteProfileRequest request) {
         User user = userMapper.findById(userId);
         if (user == null) {

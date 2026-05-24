@@ -1,4 +1,8 @@
 
+# ==================== 应用默认配置 ====================
+app:
+  default-image-url: ${APP_DEFAULT_IMAGE_URL}
+
 jwt:
   secret: ${JWT_SECRET}
   access-token-expiration: 7200000        # 2 小时
