@@ -2,6 +2,7 @@ package com.zjkl.memory.controller;
 
 import com.zjkl.auth.util.UserContext;
 import com.zjkl.memory.service.SummaryMemoryService;
+import com.zjkl.user.domain.Result;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -24,24 +25,24 @@ public class MemorySearchController {
     }
 
     @GetMapping
-    public Map<String, Object> search(
+    public Result<Map<String, Object>> search(
             @RequestParam String query,
             @RequestParam(defaultValue = "5") int limit) {
         String userId = Objects.requireNonNull(userContext.getUserId(), "用户未登录");
         List<String> results = summaryMemoryService.searchRelevantMemories(userId, query, limit);
-        return Map.of("userId", userId, "query", query, "results", results, "count", results.size());
+        return Result.success(Map.of("userId", userId, "query", query, "results", results, "count", results.size()));
     }
 
     @GetMapping("/by-date")
-    public Map<String, Object> searchByDate(
+    public Result<Map<String, Object>> searchByDate(
             @RequestParam String query,
             @RequestParam String startDate,
             @RequestParam String endDate,
             @RequestParam(defaultValue = "5") int limit) {
         String userId = Objects.requireNonNull(userContext.getUserId(), "用户未登录");
         List<String> results = summaryMemoryService.searchMemoriesByDateRange(userId, query, startDate, endDate, limit);
-        return Map.of("userId", userId, "query", query,
+        return Result.success(Map.of("userId", userId, "query", query,
                 "startDate", startDate, "endDate", endDate,
-                "results", results, "count", results.size());
+                "results", results, "count", results.size()));
     }
 }
