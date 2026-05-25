@@ -20,10 +20,9 @@ CREATE TABLE `conversation_memories` (
                                          `memory_date` date NOT NULL COMMENT '记忆日期（只有年月日）',
                                          `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
                                          `image_url` varchar(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL COMMENT '关联的图片 URL',
-                                         PRIMARY KEY (`id`),
-                                         UNIQUE KEY `uniq_user_date` (`user_id`,`memory_date`),
-                                         UNIQUE KEY `uk_user_date` (`user_id`,`memory_date`),
-                                         KEY `idx_user_date` (`user_id`,`memory_date`)
+                                          PRIMARY KEY (`id`),
+                                          UNIQUE KEY `uniq_user_date` (`user_id`,`memory_date`),
+                                          KEY `idx_user_date` (`user_id`,`memory_date`)
 ) ENGINE=InnoDB AUTO_INCREMENT=58 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='对话记忆表（日记本）'
 
 CREATE TABLE `emotion_anchor_events` (

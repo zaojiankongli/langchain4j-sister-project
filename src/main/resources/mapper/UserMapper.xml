@@ -14,8 +14,8 @@
     
     <!-- 插入新用户 -->
     <insert id="insert">
-        INSERT INTO users (id, email, username, ai_type, gender, hobbies, birthday, created_at, updated_at) 
-        VALUES (#{id}, #{email}, #{username}, #{aiType}, #{gender}, #{hobbies}, #{birthday}, NOW(), NOW())
+        INSERT INTO users (id, email, username, ai_type, gender, hobbies, birthday, avatar_url, last_active_at, created_at, updated_at) 
+        VALUES (#{id}, #{email}, #{username}, #{aiType}, #{gender}, #{hobbies}, #{birthday}, #{avatarUrl}, #{lastActiveAt}, NOW(), NOW())
     </insert>
     
     <!-- 更新用户信息 -->
