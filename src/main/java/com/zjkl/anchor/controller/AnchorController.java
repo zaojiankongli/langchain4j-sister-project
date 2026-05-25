@@ -1,10 +1,10 @@
 package com.zjkl.anchor.controller;
 
 import com.zjkl.anchor.service.AnchorService;
-import com.zjkl.auth.util.UserContext;
+import com.zjkl.common.context.UserContext;
 import com.zjkl.common.util.DateFilterParser;
 import com.zjkl.memory.domain.vo.MemoryVO;
-import com.zjkl.user.domain.Result;
+import com.zjkl.common.Result;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 

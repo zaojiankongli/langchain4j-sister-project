@@ -1,6 +1,6 @@
 package com.zjkl.user.controller;
 
-import com.zjkl.user.domain.Result;
+import com.zjkl.common.Result;
 import com.zjkl.user.service.InterestTagGenerateService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;

@@ -1,7 +1,7 @@
 package com.zjkl.ai.oss.controller;
 
 import com.zjkl.ai.oss.service.OssService;
-import com.zjkl.user.domain.Result;
+import com.zjkl.common.Result;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;

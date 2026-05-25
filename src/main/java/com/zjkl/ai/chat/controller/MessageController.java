@@ -5,7 +5,7 @@ import com.zjkl.ai.chat.dto.SessionPreviewVO;
 import com.zjkl.ai.chat.entity.ConverMessage;
 import com.zjkl.ai.chat.mapper.ConverMessageMapper;
 import com.zjkl.ai.chat.service.ConverMessageService;
-import com.zjkl.user.domain.Result;
+import com.zjkl.common.Result;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;

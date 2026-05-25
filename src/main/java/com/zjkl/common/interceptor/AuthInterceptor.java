@@ -1,6 +1,6 @@
 package com.zjkl.common.interceptor;
 
-import com.zjkl.auth.util.UserContext;
+import com.zjkl.common.context.UserContext;
 import com.zjkl.common.util.JwtUtil;
 import com.zjkl.user.domain.User;
 import com.zjkl.user.mapper.UserMapper;

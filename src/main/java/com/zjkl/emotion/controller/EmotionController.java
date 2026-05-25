@@ -7,7 +7,7 @@ import com.zjkl.emotion.model.UserEmotionRecord;
 import com.zjkl.emotion.model.vo.EmotionHistoryVO;
 import com.zjkl.emotion.model.vo.EvolutionEventVO;
 import com.zjkl.emotion.service.EmotionService;
-import com.zjkl.user.domain.Result;
+import com.zjkl.common.Result;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 

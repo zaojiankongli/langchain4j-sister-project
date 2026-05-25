@@ -3,7 +3,7 @@ package com.zjkl.ai.summary.controller.admin;
 
 import com.zjkl.ai.prompt.service.PromptTemplateService;
 import com.zjkl.memory.service.PromptCacheService;
-import com.zjkl.user.domain.Result;
+import com.zjkl.common.Result;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;

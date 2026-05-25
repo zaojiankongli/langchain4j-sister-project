@@ -1,8 +1,8 @@
 package com.zjkl.memory.controller;
 
-import com.zjkl.auth.util.UserContext;
+import com.zjkl.common.context.UserContext;
 import com.zjkl.memory.service.SummaryMemoryService;
-import com.zjkl.user.domain.Result;
+import com.zjkl.common.Result;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;

@@ -1,4 +1,4 @@
-package com.zjkl.user.domain;
+package com.zjkl.common;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;

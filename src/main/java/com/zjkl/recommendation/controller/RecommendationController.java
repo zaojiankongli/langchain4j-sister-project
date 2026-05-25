@@ -1,7 +1,7 @@
 package com.zjkl.recommendation.controller;
 
-import com.zjkl.auth.util.UserContext;
-import com.zjkl.user.domain.Result;
+import com.zjkl.common.context.UserContext;
+import com.zjkl.common.Result;
 import com.zjkl.recommendation.entity.UserRecommendation;
 import com.zjkl.recommendation.service.RecommendationService;
 import lombok.RequiredArgsConstructor;

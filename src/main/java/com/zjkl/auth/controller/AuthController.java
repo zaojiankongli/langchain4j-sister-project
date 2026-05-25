@@ -5,9 +5,9 @@ import com.zjkl.auth.dto.LoginRequest;
 import com.zjkl.auth.dto.RefreshTokenRequest;
 import com.zjkl.auth.dto.SendCodeRequest;
 import com.zjkl.auth.service.AuthService;
-import com.zjkl.auth.util.UserContext;
+import com.zjkl.common.context.UserContext;
 import com.zjkl.common.util.RateLimiter;
-import com.zjkl.user.domain.Result;
+import com.zjkl.common.Result;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 

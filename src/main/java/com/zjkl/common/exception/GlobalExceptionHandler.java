@@ -1,7 +1,7 @@
 package com.zjkl.common.exception;
 
 import com.zjkl.auth.exception.UnauthorizedException;
-import com.zjkl.user.domain.Result;
+import com.zjkl.common.Result;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;

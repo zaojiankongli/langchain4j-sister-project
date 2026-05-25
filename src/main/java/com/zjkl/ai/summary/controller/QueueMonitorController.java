@@ -1,7 +1,7 @@
 package com.zjkl.ai.summary.controller;
 
 import com.zjkl.ai.summary.scheduler.DailySummaryScheduler;
-import com.zjkl.user.domain.Result;
+import com.zjkl.common.Result;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;

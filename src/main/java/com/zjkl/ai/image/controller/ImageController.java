@@ -4,7 +4,7 @@ import com.zjkl.ai.image.domain.ImageElements;
 import com.zjkl.ai.image.service.ImageDescriptionService;
 import com.zjkl.ai.image.service.ImageElementExtractor;
 import com.zjkl.ai.image.service.WanxImageService;
-import com.zjkl.user.domain.Result;
+import com.zjkl.common.Result;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 

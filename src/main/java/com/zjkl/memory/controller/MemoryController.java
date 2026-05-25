@@ -3,9 +3,9 @@ package com.zjkl.memory.controller;
 import com.zjkl.common.util.DateFilterParser;
 import com.zjkl.memory.domain.vo.MemoryVO;
 import com.zjkl.memory.mapper.ConversationMemoryMapper;
-import com.zjkl.auth.util.UserContext;
+import com.zjkl.common.context.UserContext;
 import com.zjkl.user.domain.ConversationMemory;
-import com.zjkl.user.domain.Result;
+import com.zjkl.common.Result;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
