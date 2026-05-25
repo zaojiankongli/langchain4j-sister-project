@@ -1,6 +1,7 @@
 package com.zjkl.ai.summary.controller;
 
 import com.zjkl.ai.summary.scheduler.DailySummaryScheduler;
+import com.zjkl.user.domain.Result;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -33,7 +34,7 @@ public class QueueMonitorController {
      * @return 队列状态 Map
      */
     @GetMapping("/stats")
-    public Map<String, Object> getQueueStats() {
+    public Result<Map<String, Object>> getQueueStats() {
         Map<String, Object> stats = new HashMap<>();
         
         // 获取摘要流长度
@@ -63,7 +64,7 @@ public class QueueMonitorController {
             stats.put("imagePendingCount", 0);
         }
         
-        return stats;
+        return Result.success(stats);
     }
     
     /**
@@ -72,7 +73,7 @@ public class QueueMonitorController {
      * @return 健康状态
      */
     @GetMapping("/health")
-    public Map<String, Object> healthCheck() {
+    public Result<Map<String, Object>> healthCheck() {
         Map<String, Object> health = new HashMap<>();
         
         try {
@@ -88,14 +89,13 @@ public class QueueMonitorController {
             health.put("error", e.getMessage());
         }
         
-        return health;
+        return Result.success(health);
     }
 
     @GetMapping("/h")
-    public void h() {
-
+    public Result<Void> h() {
         dailySummaryScheduler.generateDailySummary();
-
+        return Result.success();
     }
 
 
