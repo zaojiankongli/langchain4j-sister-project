@@ -38,10 +38,7 @@ const fetchUserData = async () => {
     console.error('Failed to fetch user data', error)
   } finally {
     loading.value = false
-  }
-}
-  } catch {
-    // 静默失败
+    }
   }
 }
 

@@ -66,7 +66,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, provide } from 'vue'
+import { ref, computed, onMounted, onUnmounted, provide, defineAsyncComponent } from 'vue'
 import { useRouter } from 'vue-router'
 import { clearToken } from '@/utils/auth'
 import { disconnect } from '@/utils/chatWebSocket'
@@ -78,13 +78,14 @@ import ChatWindow from "@/components/chat/ChatWindow.vue"
 import NavigationMenu from "@/components/NavigationMenu.vue"
 import HistoryPanel from "@/components/HistoryPanel.vue"
 
-import UserProfile from "@/components/dashboard/UserProfile.vue"
-import MemoryFragment from '@/components/dashboard/MemoryFragment.vue'
-import PersonalityCloud from '@/components/dashboard/PersonalityCloud.vue'
-import EmotionPulse from "@/components/dashboard/EmotionPulse.vue"
-import ActionCenter from '@/components/dashboard/ActionCenter.vue'
-import MailBox from "@/components/Panel/MailBox.vue"
-import StatusPanel from "@/components/Panel/StatusPanel.vue"
+// 面板组件懒加载 — 每次只渲染一个，按需加载减小首屏包体积
+const UserProfile = defineAsyncComponent(() => import("@/components/dashboard/UserProfile.vue"))
+const MemoryFragment = defineAsyncComponent(() => import('@/components/dashboard/MemoryFragment.vue'))
+const PersonalityCloud = defineAsyncComponent(() => import('@/components/dashboard/PersonalityCloud.vue'))
+const EmotionPulse = defineAsyncComponent(() => import("@/components/dashboard/EmotionPulse.vue"))
+const ActionCenter = defineAsyncComponent(() => import('@/components/dashboard/ActionCenter.vue'))
+const MailBox = defineAsyncComponent(() => import("@/components/Panel/MailBox.vue"))
+const StatusPanel = defineAsyncComponent(() => import("@/components/Panel/StatusPanel.vue"))
 
 const router = useRouter()
 const activeLayer = ref('idle')

@@ -213,9 +213,20 @@ export function disconnect() {
 
 /**
  * 设置消息回调（绑定实例，防止多组件覆盖）
+ * 使用实例校验：只有当前设置回调的组件未被卸载时，回调才有效
  */
+const callbackInstanceId = { current: null }
+
 export function setCallbacks(newCallbacks) {
   const instanceId = Symbol('ws-instance')
-  let currentInstanceId = instanceId
+  callbackInstanceId.current = instanceId
   callbacks = { ...newCallbacks, _instanceId: instanceId }
+
+  // 返回取消函数，组件卸载时调用
+  return function dispose() {
+    if (callbackInstanceId.current === instanceId) {
+      callbacks = { onTextMessage: null, onAudioChunk: null, onError: null, onStatusChange: null, _instanceId: null }
+      callbackInstanceId.current = null
+    }
+  }
 }

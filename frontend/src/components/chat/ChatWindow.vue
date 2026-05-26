@@ -97,13 +97,8 @@ async function fetchTodayMessages() {
 
 defineExpose({ activateFromBubble, collapse })
 
-// --- WebSocket 回调 ---
-setCallbacks({
-  onTextMessage: handleTextMessage,
-  onAudioChunk: handleAudioChunk,
-  onError: handleError,
-  onStatusChange: handleStatusChange
-})
+// --- WebSocket 回调 (在 onMounted 中注册，避免模块级副作用) ---
+let disposeCallbacks = null
 
 function handleTextMessage(message) {
   const { content, isComplete } = message.payload
@@ -284,10 +279,20 @@ watch(() => props.isActive, (newVal) => {
 onMounted(() => {
   fetchTodayMessages()
   const userId = getUserId() || 'unknown'
+
+  // 注册 WebSocket 回调 (组件级，避免模块级副作用)
+  disposeCallbacks = setCallbacks({
+    onTextMessage: handleTextMessage,
+    onAudioChunk: handleAudioChunk,
+    onError: handleError,
+    onStatusChange: handleStatusChange,
+  })
+
   connect(userId)
 })
 
 onBeforeUnmount(() => {
+  if (disposeCallbacks) disposeCallbacks()
   disconnect()
   stopAudio()
 })

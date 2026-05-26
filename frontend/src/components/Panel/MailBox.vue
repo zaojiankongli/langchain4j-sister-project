@@ -83,17 +83,14 @@ const fetchMails = async () => {
   try {
     const userId = useAuthStore().userId
     if (!userId) return
-    const res = await request.get(`/mails?userId=${userId}`)
+    const res = await request.get(API.MAIL_LIST(userId))
     if (res.code === 200 && Array.isArray(res.data)) {
       mailList.value = res.data
     }
   } catch (error) {
     console.error("邮件加载失败", error)
   }
-}
-  } catch {
-    // 静默失败
-  }
+    }
 }
 
 // 2. 单条标记已读
