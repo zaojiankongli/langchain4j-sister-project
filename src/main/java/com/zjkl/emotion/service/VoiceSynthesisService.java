@@ -3,11 +3,13 @@ package com.zjkl.emotion.service;
 import com.alibaba.dashscope.audio.ttsv2.SpeechSynthesisAudioFormat;
 import com.alibaba.dashscope.audio.ttsv2.SpeechSynthesisParam;
 import com.alibaba.dashscope.audio.ttsv2.SpeechSynthesizer;
+import com.zjkl.common.config.properties.AiProperties;
+import com.zjkl.common.config.properties.TtsProperties;
 import com.zjkl.emotion.model.EmotionalState;
 import com.zjkl.emotion.model.VoiceParams;
 import com.zjkl.emotion.model.VoiceSynthesisParam;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.nio.ByteBuffer;
@@ -18,16 +20,11 @@ import java.nio.ByteBuffer;
  */
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class VoiceSynthesisService {
 
-    @Value("${langchain4j.community.dashscope.chat-model.api-key}")
-    private String apiKey;
-
-    @Value("${tts.model:cosyvoice-v3.5-flash}")
-    private String ttsModel;
-
-    @Value("${tts.voice}")
-    private String ttsVoice;
+    private final AiProperties aiProperties;
+    private final TtsProperties ttsProperties;
 
     /**
      * 非流式语音合成
@@ -39,9 +36,9 @@ public class VoiceSynthesisService {
     public ByteBuffer synthesize(String text, EmotionalState emotion) {
         VoiceParams vp = VoiceParams.fromEmotion(emotion);
         SpeechSynthesisParam param = SpeechSynthesisParam.builder()
-                .apiKey(apiKey)
-                .model(ttsModel)
-                .voice(ttsVoice)
+                .apiKey(aiProperties.getChatApiKey())
+                .model(ttsProperties.getModel())
+                .voice(ttsProperties.getVoice())
                 .format(SpeechSynthesisAudioFormat.PCM_44100HZ_MONO_16BIT)
                 .volume(vp.getVolume())
                 .speechRate(vp.getSpeechRate())
@@ -76,7 +73,7 @@ public class VoiceSynthesisService {
      * @return 音频数据 ByteBuffer
      */
     public ByteBuffer synthesize(String text, VoiceSynthesisParam voiceParam) {
-        SpeechSynthesisParam param = voiceParam.toDashScopeParam(apiKey);
+        SpeechSynthesisParam param = voiceParam.toDashScopeParam(aiProperties.getChatApiKey());
         SpeechSynthesizer synthesizer = new SpeechSynthesizer(param, null);
 
         try {

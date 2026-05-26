@@ -1,7 +1,8 @@
 package com.zjkl.memory.config;
 
+import com.zjkl.common.config.properties.MilvusProperties;
 import dev.langchain4j.store.embedding.milvus.MilvusEmbeddingStore;
-import org.springframework.beans.factory.annotation.Value;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -9,27 +10,18 @@ import org.springframework.context.annotation.Configuration;
  * Milvus 向量数据库配置
  */
 @Configuration
+@RequiredArgsConstructor
 public class MilvusEmbeddingStoreConfig {
-    
-    @Value("${milvus.host:localhost}")
-    private String host;
-    
-    @Value("${milvus.port:19530}")
-    private Integer port;
-    
-    @Value("${milvus.database:default}")
-    private String database;
-    
-    @Value("${milvus.collection-name:zjkl_sister}")
-    private String collectionName;
+
+    private final MilvusProperties milvusProperties;
     
     @Bean
     public MilvusEmbeddingStore milvusEmbeddingStore() {
         return MilvusEmbeddingStore.builder()
-                .host(host)
-                .port(port)
-                .databaseName(database)
-                .collectionName(collectionName)
+                .host(milvusProperties.getHost())
+                .port(milvusProperties.getPort())
+                .databaseName(milvusProperties.getDatabase())
+                .collectionName(milvusProperties.getCollectionName())
                 .dimension(1024)
                 .build();
     }

@@ -11,8 +11,9 @@ import com.alibaba.dashscope.common.MultiModalMessage;
 import com.alibaba.dashscope.exception.ApiException;
 import com.alibaba.dashscope.exception.NoApiKeyException;
 import com.alibaba.dashscope.exception.UploadFileException;
+import com.zjkl.common.config.properties.AiProperties;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
@@ -25,13 +26,10 @@ import java.util.Map;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class ImageDescriptionService {
 
-    @Value("${langchain4j.community.dashscope.vision-model.api-key}")
-    private String apiKey;
-
-    @Value("${langchain4j.community.dashscope.vision-model.model-name}")
-    private String modelName;
+    private final AiProperties aiProperties;
 
     private MultiModalConversation conversation;
 
@@ -76,9 +74,9 @@ public class ImageDescriptionService {
                     .build();
 
             MultiModalConversationParam param = MultiModalConversationParam.builder()
-                    .model(modelName)
+                    .model(aiProperties.getVisionModelName())
                     .messages(List.of(userMessage))
-                    .apiKey(apiKey)
+                    .apiKey(aiProperties.getVisionApiKey())
                     .build();
 
             MultiModalConversationResult result = conversation.call(param);

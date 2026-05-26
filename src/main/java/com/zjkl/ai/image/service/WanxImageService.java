@@ -4,10 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zjkl.ai.image.domain.ImageElements;
 import com.zjkl.ai.prompt.service.PromptTemplateService;
+import com.zjkl.common.config.properties.AiProperties;
 import com.zjkl.user.util.HttpClientUtil;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -30,12 +30,7 @@ public class WanxImageService {
     private final HttpClientUtil httpClientUtil;
     private final PromptTemplateService promptTemplateService;
     private final ObjectMapper objectMapper;
-
-    @Value("${langchain4j.community.dashscope.chat-model.api-key}")
-    private String dashscopeApiKey;
-
-    @Value("${wanx.reference-image-url}")
-    private String referenceImageUrl;
+    private final AiProperties aiProperties;
 
     /** 异步提交任务端点 */
     private static final String ASYNC_API_URL =
@@ -96,7 +91,7 @@ public class WanxImageService {
 
             Map<String, String> headers = of(
                 "Content-Type", "application/json",
-                "Authorization", "Bearer " + dashscopeApiKey,
+                "Authorization", "Bearer " + aiProperties.getChatApiKey(),
                 "X-DashScope-Async", "enable"
             );
 
@@ -128,7 +123,7 @@ public class WanxImageService {
      */
     private String pollTaskResult(String taskId) {
         Map<String, String> headers = of(
-            "Authorization", "Bearer " + dashscopeApiKey
+            "Authorization", "Bearer " + aiProperties.getChatApiKey()
         );
 
         String queryUrl = TASK_QUERY_URL + taskId;
@@ -220,7 +215,7 @@ public class WanxImageService {
         content.add(textItem);
 
         Map<String, String> imageItem = new HashMap<>();
-        imageItem.put("image", referenceImageUrl);
+            imageItem.put("image", aiProperties.getWanxReferenceImageUrl());
         content.add(imageItem);
 
         message.put("content", content);

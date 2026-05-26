@@ -1,13 +1,13 @@
 package com.zjkl.wakeup.tool;
 
 import com.zjkl.ai.component.UserActivityTracker;
+import com.zjkl.common.config.properties.WakeUpProperties;
 import com.zjkl.emotion.model.EmotionalState;
 import com.zjkl.emotion.monitor.EmotionAnchorMonitor;
 import com.zjkl.emotion.service.EmotionAnchorService;
 import com.zjkl.emotion.service.EmotionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -26,15 +26,7 @@ public class UserStateTool {
     private final EmotionAnchorService anchorService;
     private final UserActivityTracker userActivityTracker;
     private final StringRedisTemplate redisTemplate;
-
-    @Value("${wake-up.probability.midpoint:2.5}")
-    private double probabilityMidpoint;
-
-    @Value("${wake-up.probability.steepness:1.0}")
-    private double probabilitySteepness;
-
-    @Value("${wake-up.probability.max:0.75}")
-    private double probabilityMax;
+    private final WakeUpProperties wakeUpProperties;
 
     // Redis Key
     private static final String DND_KEY_PREFIX = "user:dnd:";
@@ -110,7 +102,7 @@ public class UserStateTool {
     public double calculateWakeProbability(String userId, Double silentHours,
                                            TimeContextTool.TimeContext timeContext) {
         // 基础概率
-        double base = 1.0 / (1.0 + Math.exp(-probabilitySteepness * (silentHours - probabilityMidpoint)));
+        double base = 1.0 / (1.0 + Math.exp(-wakeUpProperties.getProbabilitySteepness() * (silentHours - wakeUpProperties.getProbabilityMidpoint())));
 
         // 上下文修正
         double modifier = 1.0;
@@ -142,7 +134,7 @@ public class UserStateTool {
             modifier *= 1.15;
         }
 
-        double result = Math.min(base * modifier, probabilityMax);
+        double result = Math.min(base * modifier, wakeUpProperties.getProbabilityMax());
         log.debug("唤醒概率：userId={}, silentHours={}, base={}, modifier={}, result={}",
                 userId, String.format("%.1f", silentHours), String.format("%.3f", base),
                 String.format("%.2f", modifier), String.format("%.3f", result));

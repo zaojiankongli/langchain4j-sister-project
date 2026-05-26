@@ -1,9 +1,10 @@
 package com.zjkl.emotion.monitor;
 
+import com.zjkl.common.config.properties.EmotionProperties;
 import com.zjkl.emotion.model.EmotionalState;
 import com.zjkl.emotion.model.EmotionAnchorEvent;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -18,14 +19,14 @@ import java.util.function.Consumer;
  */
 @Slf4j
 @Component
+@RequiredArgsConstructor
 public class EmotionAnchorMonitor {
 
     public static final double TRIGGER_THRESHOLD = 0.15;
     public static final double RETURN_THRESHOLD = 0.05;
     public static final int SILENCE_HOURS = 2;
 
-    @Value("${emotion.anchor.max-duration-minutes:60}")
-    private int maxDurationMinutes;
+    private final EmotionProperties emotionProperties;
 
     private static final int CLEANUP_HOURS = 2;
 
@@ -91,7 +92,7 @@ public class EmotionAnchorMonitor {
                         endEvent(userId, state, newP, newA, "情绪平稳回归基准");
                     }
                     else if (isTimeout(state)) {
-                        endEvent(userId, state, newP, newA, "情绪持续偏移" + maxDurationMinutes + "分钟且愉悦度低于正常值");
+                        endEvent(userId, state, newP, newA, "情绪持续偏移" + emotionProperties.getAnchorMaxDurationMinutes() + "分钟且愉悦度低于正常值");
                     }
                     else if (newP > state.peakPleasure) {
                         state.peakPleasure = newP;
@@ -215,7 +216,7 @@ public class EmotionAnchorMonitor {
         if (state.startTime == null) {
             return false;
         }
-        return Duration.between(state.startTime, LocalDateTime.now()).toMinutes() >= maxDurationMinutes;
+        return Duration.between(state.startTime, LocalDateTime.now()).toMinutes() >= emotionProperties.getAnchorMaxDurationMinutes();
     }
 
     /**

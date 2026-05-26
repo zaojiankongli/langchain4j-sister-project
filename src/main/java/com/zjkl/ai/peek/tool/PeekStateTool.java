@@ -1,11 +1,11 @@
 package com.zjkl.ai.peek.tool;
 
 import com.zjkl.ai.component.UserActivityTracker;
+import com.zjkl.common.config.properties.PeekProperties;
 import com.zjkl.wakeup.tool.TimeContextTool;
 import com.zjkl.wakeup.tool.UserStateTool;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
@@ -32,20 +32,7 @@ public class PeekStateTool {
     private static final Long PEEK_EXPIRE_DAYS = 7L;
 
     // 概率参数
-    @Value("${peek.base-probability:0.08}")
-    private double baseProbability;
-
-    @Value("${peek.max-probability:0.25}")
-    private double maxProbability;
-
-    @Value("${peek.cooldown-minutes:90}")
-    private int cooldownMinutes;
-
-    @Value("${peek.active-threshold-minutes:5}")
-    private int activeThresholdMinutes;
-
-    @Value("${peek.wakeup-mutex-minutes:10}")
-    private int wakeupMutexMinutes;
+    private final PeekProperties peekProperties;
 
     private static final int NEVER_PEEKED_MINUTES = Integer.MAX_VALUE;
 
@@ -59,7 +46,7 @@ public class PeekStateTool {
      * @return peek 概率 0.0 ~ maxProbability
      */
     public double calculatePeekProbability(String userId, TimeContextTool.TimeContext timeContext) {
-        double probability = baseProbability;
+        double probability = peekProperties.getBaseProbability();
         double modifier = 1.0;
 
         // 饭点：提醒吃饭很自然
@@ -98,7 +85,7 @@ public class PeekStateTool {
             modifier *= 1.3;
         }
 
-        double result = Math.min(probability * modifier, maxProbability);
+        double result = Math.min(probability * modifier, peekProperties.getMaxProbability());
 
         log.debug("peek 概率：userId={}, activeMinutes={}, base={}, modifier={}, result={}",
                 userId, continuousMinutes, String.format("%.3f", probability),
@@ -128,7 +115,7 @@ public class PeekStateTool {
         if (lastActive == null) {
             return false;
         }
-        return (System.currentTimeMillis() - lastActive) < activeThresholdMinutes * 60 * 1000L;
+        return (System.currentTimeMillis() - lastActive) < peekProperties.getActiveThresholdMinutes() * 60 * 1000L;
     }
 
     /**
@@ -136,7 +123,7 @@ public class PeekStateTool {
      */
     public boolean isWakeupMutex(String userId) {
         Integer minutesSinceLastWakeup = userStateTool.getMinutesSinceLastWakeup(userId);
-        return minutesSinceLastWakeup < wakeupMutexMinutes;
+        return minutesSinceLastWakeup < peekProperties.getWakeupMutexMinutes();
     }
 
     /**
@@ -144,7 +131,7 @@ public class PeekStateTool {
      */
     public boolean isCooldownPassed(String userId) {
         Integer minutesSinceLastPeek = getMinutesSinceLastPeek(userId);
-        return minutesSinceLastPeek >= cooldownMinutes;
+        return minutesSinceLastPeek >= peekProperties.getCooldownMinutes();
     }
 
     // ========== 活跃时长计算 ==========

@@ -1,12 +1,12 @@
 package com.zjkl.recommendation.controller;
 
+import com.zjkl.common.config.properties.AppProperties;
 import com.zjkl.common.context.UserContext;
 import com.zjkl.common.Result;
 import com.zjkl.recommendation.entity.UserRecommendation;
 import com.zjkl.recommendation.service.RecommendationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -23,9 +23,7 @@ public class RecommendationController {
 
     private final RecommendationService recommendationService;
     private final UserContext userContext;
-
-    @Value("${recommendation.demo-user:demo_user}")
-    private String demoUser;
+    private final AppProperties appProperties;
 
     /**
      * 获取当前用户的今日推荐
@@ -65,7 +63,7 @@ public class RecommendationController {
     @PostMapping("/generate")
     public Result<String> generateRecommendations(@RequestParam(required = false) String userId) {
         if (userId == null) {
-            userId = demoUser;
+            userId = appProperties.getRecommendationDemoUser();
         }
 
         List<UserRecommendation> recommendations = recommendationService.generateRecommendations(userId);

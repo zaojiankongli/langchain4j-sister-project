@@ -1,39 +1,34 @@
 package com.zjkl.common.util;
 
+import com.zjkl.common.config.properties.AuthProperties;
 import com.zjkl.user.domain.User;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
-import org.springframework.beans.factory.annotation.Value;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.util.Date;
 
 @Component
+@RequiredArgsConstructor
 public class JwtUtil {
 
-    @Value("${jwt.secret}")
-    private String secretKey;
-
-    @Value("${jwt.access-token-expiration}")
-    private Long accessTokenExpiration;
-
-    @Value("${jwt.refresh-token-expiration}")
-    private Long refreshTokenExpiration;
+    private final AuthProperties authProperties;
 
     private volatile SecretKey cachedSigningKey;
 
     public Long getAccessTokenExpiration() {
-        return accessTokenExpiration;
+        return authProperties.getAccessTokenExpiration();
     }
 
     public String generateAccessToken(User user) {
-        return createToken(user.getId(), user.getEmail(), user.getUsername(), accessTokenExpiration);
+        return createToken(user.getId(), user.getEmail(), user.getUsername(), authProperties.getAccessTokenExpiration());
     }
 
     public String generateRefreshToken(User user) {
-        return createToken(user.getId(), user.getEmail(), user.getUsername(), refreshTokenExpiration);
+        return createToken(user.getId(), user.getEmail(), user.getUsername(), authProperties.getRefreshTokenExpiration());
     }
 
     public String parseAccessToken(String token) {
@@ -113,7 +108,7 @@ public class JwtUtil {
             if (cachedSigningKey != null) {
                 return cachedSigningKey;
             }
-            byte[] keyBytes = secretKey.getBytes();
+            byte[] keyBytes = authProperties.getSecret().getBytes();
             if (keyBytes.length < 32) {
                 byte[] padded = new byte[32];
                 System.arraycopy(keyBytes, 0, padded, 0, Math.min(keyBytes.length, 32));

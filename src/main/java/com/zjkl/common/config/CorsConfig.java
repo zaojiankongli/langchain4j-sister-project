@@ -1,7 +1,8 @@
 package com.zjkl.common.config;
 
+import com.zjkl.common.config.properties.CorsProperties;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
@@ -11,14 +12,14 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
  */
 @Slf4j
 @Configuration
+@RequiredArgsConstructor
 public class CorsConfig implements WebMvcConfigurer {
 
-    @Value("${cors.allowed-origins:http://localhost:5173,http://127.0.0.1:5173}")
-    private String allowedOrigins;
+    private final CorsProperties corsProperties;
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        String[] origins = allowedOrigins.split(",");
+        String[] origins = corsProperties.getAllowedOrigins().split(",");
         registry.addMapping("/**")
                 .allowedOrigins(origins)
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
@@ -27,6 +28,6 @@ public class CorsConfig implements WebMvcConfigurer {
                 .allowCredentials(true)
                 .maxAge(3600);
 
-        log.info("CORS 配置已加载，允许来自 {} 的跨域请求", allowedOrigins);
+        log.info("CORS 配置已加载，允许来自 {} 的跨域请求", corsProperties.getAllowedOrigins());
     }
 }

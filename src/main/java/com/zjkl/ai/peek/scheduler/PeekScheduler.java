@@ -3,11 +3,11 @@ package com.zjkl.ai.peek.scheduler;
 import com.zjkl.ai.chat.stomp.ChatPushService;
 import com.zjkl.ai.component.UserActivityTracker;
 import com.zjkl.ai.peek.tool.PeekStateTool;
+import com.zjkl.common.config.properties.PeekProperties;
 import com.zjkl.wakeup.tool.TimeContextTool;
 import com.zjkl.wakeup.tool.UserStateTool;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -34,15 +34,7 @@ public class PeekScheduler {
     private final PeekStateTool peekStateTool;
     private final ChatPushService chatPushService;
     private final StringRedisTemplate redisTemplate;
-
-    @Value("${peek.enabled:true}")
-    private boolean peekEnabled;
-
-    @Value("${peek.peek-request-ttl-seconds:120}")
-    private int peekRequestTtlSeconds;
-
-    @Value("${peek.max-concurrent-requests:5}")
-    private int maxConcurrentRequests;
+    private final PeekProperties peekProperties;
 
     private static final String PEEK_PENDING_KEY_PREFIX = "peek:pending:";
     private static final String PEEK_RATE_LIMIT_KEY = "peek:rate_limit:current";
@@ -51,7 +43,7 @@ public class PeekScheduler {
 
     @Scheduled(cron = "0 0/20 8-22 * * ?")
     public void checkUsersForPeek() {
-        if (!peekEnabled) {
+        if (!peekProperties.isEnabled()) {
             log.debug("peek 功能已禁用");
             return;
         }
@@ -132,7 +124,7 @@ public class PeekScheduler {
         if (current == 1) {
             redisTemplate.expire(PEEK_RATE_LIMIT_KEY, RATE_LIMIT_WINDOW);
         }
-        if (current > maxConcurrentRequests) {
+        if (current > peekProperties.getMaxConcurrentRequests()) {
             log.warn("peek 全局速率限制，跳过：userId={}", userId);
             return 1;
         }
@@ -140,7 +132,7 @@ public class PeekScheduler {
         String peekId = UUID.randomUUID().toString();
 
         String redisKey = PEEK_PENDING_KEY_PREFIX + peekId;
-        redisTemplate.opsForValue().set(redisKey, userId, Duration.ofSeconds(peekRequestTtlSeconds));
+        redisTemplate.opsForValue().set(redisKey, userId, Duration.ofSeconds(peekProperties.getPeekRequestTtlSeconds()));
         chatPushService.pushPeekRequest(userId, peekId);
 
         log.info("peek 请求已发送：userId={}, peekId={}", userId, peekId);

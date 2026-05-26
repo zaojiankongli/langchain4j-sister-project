@@ -1,8 +1,8 @@
 package com.zjkl.ai.chat.stomp;
 
+import com.zjkl.common.config.properties.WebSocketProperties;
 import com.zjkl.common.util.JwtUtil;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.lang.NonNull;
 import org.springframework.messaging.Message;
@@ -28,18 +28,17 @@ import java.util.List;
 public class StompWebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private final JwtUtil jwtUtil;
+    private final WebSocketProperties webSocketProperties;
 
-    @Value("${websocket.allowed-origins:http://localhost:5173}")
-    private List<String> allowedOrigins;
-
-    public StompWebSocketConfig(JwtUtil jwtUtil) {
+    public StompWebSocketConfig(JwtUtil jwtUtil, WebSocketProperties webSocketProperties) {
         this.jwtUtil = jwtUtil;
+        this.webSocketProperties = webSocketProperties;
     }
 
     @Override
     public void registerStompEndpoints(@NonNull StompEndpointRegistry registry) {
         registry.addEndpoint("/ws/chat")
-                .setAllowedOriginPatterns(allowedOrigins.toArray(new String[0]))
+                .setAllowedOriginPatterns(webSocketProperties.getAllowedOrigins().toArray(new String[0]))
                 .withSockJS();
     }
 

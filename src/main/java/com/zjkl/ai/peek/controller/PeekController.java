@@ -2,9 +2,9 @@ package com.zjkl.ai.peek.controller;
 
 import com.zjkl.ai.oss.service.OssService;
 import com.zjkl.ai.peek.service.PeekCallbackService;
+import com.zjkl.common.config.properties.PeekProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -29,9 +29,7 @@ public class PeekController {
     private final StringRedisTemplate redisTemplate;
     private final OssService ossService;
     private final PeekCallbackService peekCallbackService;
-
-    @Value("${peek.screenshot-folder:peek}")
-    private String screenshotFolder;
+    private final PeekProperties peekProperties;
 
     private static final String PEEK_PENDING_KEY_PREFIX = "peek:pending:";
 
@@ -72,7 +70,7 @@ public class PeekController {
         String imageUrl = null;
         try {
             // 3. 上传截图到 OSS
-            imageUrl = ossService.uploadFile(screenshotFolder, screenshot);
+            imageUrl = ossService.uploadFile(peekProperties.getScreenshotFolder(), screenshot);
             log.info("peek 截图已上传至 OSS：userId={}, imageUrl={}", userId, imageUrl);
 
             // 4. 异步处理（VLM → Agent → TTS → 推送）

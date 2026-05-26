@@ -2,9 +2,9 @@ package com.zjkl.memory.service;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import com.zjkl.common.config.properties.AppProperties;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -26,14 +26,9 @@ import java.util.concurrent.TimeUnit;
 public class PromptCacheService {
     
     private final StringRedisTemplate stringRedisTemplate;
-    
+    private final AppProperties appProperties;
+
     private static final String REDIS_KEY_PREFIX = "prompt:template:";
-    
-    /**
-     * 缓存过期时间（秒）
-     */
-    @Value("${prompt.cache.ttl:300}")
-    private int cacheTtl;
     
     private static final String RESOURCE_PATH = "classpath:prompts/**/*.txt";
     
@@ -41,13 +36,15 @@ public class PromptCacheService {
     
     private Cache<String, String> localCache;
     
-    public PromptCacheService(StringRedisTemplate stringRedisTemplate) {
+    public PromptCacheService(StringRedisTemplate stringRedisTemplate, AppProperties appProperties) {
         this.stringRedisTemplate = stringRedisTemplate;
+        this.appProperties = appProperties;
     }
     
     @PostConstruct
     public void init() {
-        // 延迟初始化 Caffeine 缓存（此时 @Value 已注入 cacheTtl）
+        int cacheTtl = appProperties.getPromptCacheTtl();
+        // 延迟初始化 Caffeine 缓存
         this.localCache = Caffeine.newBuilder()
                 .maximumSize(100)
                 .expireAfterWrite(cacheTtl, TimeUnit.SECONDS)
@@ -78,7 +75,7 @@ public class PromptCacheService {
                 
                 // 存入 Redis
                 String redisKey = REDIS_KEY_PREFIX + key;
-                stringRedisTemplate.opsForValue().set(redisKey, content, Duration.ofSeconds(cacheTtl));
+        stringRedisTemplate.opsForValue().set(redisKey, content, Duration.ofSeconds(appProperties.getPromptCacheTtl()));
                 
                 // 存入本地缓存
                 localCache.put(key, content);
@@ -120,7 +117,7 @@ public class PromptCacheService {
         content = loadFromFile(key);
         if (content != null) {
             // 回填 Redis 和本地缓存
-            stringRedisTemplate.opsForValue().set(redisKey, content, Duration.ofSeconds(cacheTtl));
+            stringRedisTemplate.opsForValue().set(redisKey, content, Duration.ofSeconds(appProperties.getPromptCacheTtl()));
             localCache.put(key, content);
             loadedTemplateKeys.add(key);
             return content;
@@ -181,7 +178,7 @@ public class PromptCacheService {
         
         // 更新 Redis
         String redisKey = REDIS_KEY_PREFIX + key;
-        stringRedisTemplate.opsForValue().set(redisKey, content, Duration.ofSeconds(cacheTtl));
+        stringRedisTemplate.opsForValue().set(redisKey, content, Duration.ofSeconds(appProperties.getPromptCacheTtl()));
         
         // 更新本地缓存
         localCache.put(key, content);
