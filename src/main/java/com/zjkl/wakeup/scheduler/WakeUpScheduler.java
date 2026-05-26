@@ -1,23 +1,26 @@
 package com.zjkl.wakeup.scheduler;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zjkl.ai.chat.entity.MessageContent;
 import com.zjkl.ai.chat.service.ConverMessageService;
 import com.zjkl.ai.chat.stomp.ChatPushService;
 import com.zjkl.ai.component.UserActivityTracker;
+import com.zjkl.common.config.properties.WakeUpProperties;
 import com.zjkl.emotion.model.VoiceSynthesisParam;
 import com.zjkl.emotion.service.EmotionService;
 import com.zjkl.emotion.service.VoiceSynthesisService;
 import com.zjkl.wakeup.agent.*;
+import com.zjkl.wakeup.arbiter.WakeUpArbiter;
+import com.zjkl.wakeup.arbiter.WakeUpArbiter.ArbiterDecision;
+import com.zjkl.wakeup.generator.WakeUpContentGenerator;
+import com.zjkl.wakeup.generator.WakeUpContentGenerator.GeneratorOutput;
+import com.zjkl.wakeup.scorer.WakeUpScorer;
+import com.zjkl.wakeup.template.WakeUpPromptBuilder;
 import com.zjkl.wakeup.tool.TimeContextTool;
 import com.zjkl.wakeup.tool.UserStateTool;
 import com.zjkl.wakeup.tracker.WakeUpTracker;
 import jakarta.annotation.PostConstruct;
-import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -28,8 +31,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -58,17 +59,14 @@ public class WakeUpScheduler {
     private final WakeUpArbiterAgent arbiterAgent;
     private final WakeUpTracker wakeUpTracker;
 
-    @Value("${wake-up.enabled:true}")
-    private boolean wakeUpEnabled;
+    private final WakeUpPromptBuilder promptBuilder;
+    private final WakeUpContentGenerator contentGenerator;
+    private final WakeUpScorer scorer;
+    private final WakeUpArbiter arbiter;
 
-    @Value("${wake-up.silent-threshold-minutes:90}")
-    private int silentThresholdMinutes;
-
-    @Value("${wake-up.cooldown-minutes:30}")
-    private int cooldownMinutes;
+    private final WakeUpProperties wakeUpProperties;
 
     private final Executor wakeupExecutor = Thread::startVirtualThread;
-    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @PostConstruct
     public void init() {
@@ -81,7 +79,7 @@ public class WakeUpScheduler {
 
     @Scheduled(cron = "0 0/30 * * * ?")
     public void checkUsersForWakeUp() {
-        if (!wakeUpEnabled) {
+        if (!wakeUpProperties.isEnabled()) {
             log.debug("主动唤醒功能已禁用");
             return;
         }
@@ -143,9 +141,9 @@ public class WakeUpScheduler {
                 return 0;
             }
             Integer minutesSinceLastWakeup = userStateTool.getMinutesSinceLastWakeup(userId);
-            if (minutesSinceLastWakeup < cooldownMinutes) {
+            if (minutesSinceLastWakeup < wakeUpProperties.getCooldownMinutes()) {
                 log.debug("冷却期内，跳过唤醒：userId={}, minutesSinceLastWakeup={}min, cooldown={}min",
-                        userId, minutesSinceLastWakeup, cooldownMinutes);
+                        userId, minutesSinceLastWakeup, wakeUpProperties.getCooldownMinutes());
                 return 0;
             }
             Double silentHours = userStateTool.getSilentHours(userId);
@@ -163,7 +161,7 @@ public class WakeUpScheduler {
         // === 2. 构建上下文 ===
         UserStateTool.UserStateSnapshot state = userStateTool.buildStateSnapshot(
                 userId, timeContext, isDnd, silentHours, minutesSinceLastWakeup);
-        String anchorHint = buildAnchorHint(state);
+        String anchorHint = promptBuilder.buildAnchorHint(state);
 
         // === 3. 并行调用 3 个 Generator Agent ===
         log.info("开始并行生成问候：userId={}", userId);
@@ -189,19 +187,19 @@ public class WakeUpScheduler {
         log.info("生成结果：userId={}, 候选1={}, 候选2={}, 候选3={}", userId, raw1, raw2, raw3);
 
         // === 4. 解析 JSON 提取 message，过滤无效候选 ===
-        GeneratorOutput out1 = parseGeneratorOutput(raw1);
-        GeneratorOutput out2 = parseGeneratorOutput(raw2);
-        GeneratorOutput out3 = parseGeneratorOutput(raw3);
+        GeneratorOutput out1 = contentGenerator.parseGeneratorOutput(raw1);
+        GeneratorOutput out2 = contentGenerator.parseGeneratorOutput(raw2);
+        GeneratorOutput out3 = contentGenerator.parseGeneratorOutput(raw3);
 
         List<GeneratorOutput> candidates = new ArrayList<>();
-        candidates.add(isValidCandidate(out1) ? out1 : null);
-        candidates.add(isValidCandidate(out2) ? out2 : null);
-        candidates.add(isValidCandidate(out3) ? out3 : null);
+        candidates.add(contentGenerator.isValidCandidate(out1) ? out1 : null);
+        candidates.add(contentGenerator.isValidCandidate(out2) ? out2 : null);
+        candidates.add(contentGenerator.isValidCandidate(out3) ? out3 : null);
 
         long validCount = candidates.stream().filter(c -> c != null).count();
 
         if (validCount == 0) {
-            String fallbackMsg = timeContext.greeting() + "～今天过得怎么样呀";
+            String fallbackMsg = promptBuilder.buildFallbackMessage(timeContext);
             log.info("无有效候选，使用 fallback：userId={}, msg={}", userId, fallbackMsg);
             saveWakeUpMessageAsync(userId, fallbackMsg);
             sendWakeUpWithVoice(userId, fallbackMsg, null);
@@ -210,16 +208,16 @@ public class WakeUpScheduler {
 
         if (validCount == 1) {
             GeneratorOutput chosen = candidates.stream().filter(c -> c != null).findFirst().get();
-            String msg = chosen.message;
+            String msg = chosen.getMessage();
             log.info("仅有一条有效候选，直接使用：userId={}, msg={}", userId, msg);
             WakeUpTracker.SwapResult swapResult = wakeUpTracker.maybeSwap(
-                    candidates.stream().map(c -> c != null ? c.message : null).toList(),
+                    candidates.stream().map(c -> c != null ? c.getMessage() : null).toList(),
                     new int[]{0, 0, 0}, candidates.indexOf(chosen));
             msg = swapResult.getMessage();
             saveWakeUpMessageAsync(userId, msg);
-            sendWakeUpWithVoice(userId, msg, chosen.voiceParams);
+            sendWakeUpWithVoice(userId, msg, chosen.getVoiceParams());
             wakeUpTracker.recordSent(userId,
-                    candidates.stream().map(c -> c != null ? c.message : null).toList(),
+                    candidates.stream().map(c -> c != null ? c.getMessage() : null).toList(),
                     new int[]{0, 0, 0},
                     candidates.indexOf(chosen), swapResult.getOriginalBestIndex(), msg);
             return 3;
@@ -227,9 +225,9 @@ public class WakeUpScheduler {
 
         // === 5. 并行评分（>= 2 条有效）===
         log.info("开始并行评分：userId={}", userId);
-        String candidateMsg1 = candidates.get(0) != null ? candidates.get(0).message : null;
-        String candidateMsg2 = candidates.get(1) != null ? candidates.get(1).message : null;
-        String candidateMsg3 = candidates.get(2) != null ? candidates.get(2).message : null;
+        String candidateMsg1 = candidates.get(0) != null ? candidates.get(0).getMessage() : null;
+        String candidateMsg2 = candidates.get(1) != null ? candidates.get(1).getMessage() : null;
+        String candidateMsg3 = candidates.get(2) != null ? candidates.get(2).getMessage() : null;
 
         CompletableFuture<String> scoreFuture1 = CompletableFuture.supplyAsync(() ->
                 scorer1Agent.score(candidateMsg1, timeContext.timeOfDay(), timeContext.specialMoment(),
@@ -250,9 +248,9 @@ public class WakeUpScheduler {
         String scoreJson2 = scoreFuture2.join();
         String scoreJson3 = scoreFuture3.join();
 
-        WakeUpScoreResult sr1 = parseScoreResult(scoreJson1);
-        WakeUpScoreResult sr2 = parseScoreResult(scoreJson2);
-        WakeUpScoreResult sr3 = parseScoreResult(scoreJson3);
+        WakeUpScoreResult sr1 = scorer.parseScoreResult(scoreJson1);
+        WakeUpScoreResult sr2 = scorer.parseScoreResult(scoreJson2);
+        WakeUpScoreResult sr3 = scorer.parseScoreResult(scoreJson3);
 
         log.info("评分结果：userId={}, 评分1={}({}), 评分2={}({}), 评分3={}({})",
                 userId, sr1.getScore(), sr1.getReason(), sr2.getScore(), sr2.getReason(),
@@ -269,8 +267,8 @@ public class WakeUpScheduler {
         log.info("仲裁结果：userId={}, result={}", userId, arbiterResult);
 
         List<String> candidateMessages = List.of(candidateMsg1, candidateMsg2, candidateMsg3);
-        ArbiterDecision decision = parseArbiterResult(arbiterResult, candidateMessages, timeContext);
-        int bestIndex = decision.bestIndex;
+        ArbiterDecision decision = arbiter.parseArbiterResult(arbiterResult, candidateMessages, timeContext);
+        int bestIndex = decision.getBestIndex();
 
         // === 7. A/B 测试 ===
         WakeUpTracker.SwapResult swapResult = wakeUpTracker.maybeSwap(candidateMessages,
@@ -278,26 +276,16 @@ public class WakeUpScheduler {
 
         // === 8. 发送 ===
         String finalMessage = swapResult.getMessage();
-        VoiceSynthesisParam finalVoiceParams = null;
-        int finalBestIndex = bestIndex;
-        if (bestIndex >= 0 && bestIndex < candidates.size() && candidates.get(bestIndex) != null) {
-            finalVoiceParams = candidates.get(bestIndex).voiceParams;
-        } else {
-            for (GeneratorOutput c : candidates) {
-                if (c != null) {
-                    finalBestIndex = candidates.indexOf(c);
-                    finalVoiceParams = c.voiceParams;
-                    break;
-                }
-            }
-        }
+        int validatedBestIndex = swapResult.getOriginalBestIndex();
+        GeneratorOutput selectedOutput = contentGenerator.selectOutput(candidates, validatedBestIndex);
+        VoiceSynthesisParam finalVoiceParams = selectedOutput != null ? selectedOutput.getVoiceParams() : null;
 
         saveWakeUpMessageAsync(userId, finalMessage);
         sendWakeUpWithVoice(userId, finalMessage, finalVoiceParams);
 
         wakeUpTracker.recordSent(userId, candidateMessages,
                 new int[]{sr1.getScore(), sr2.getScore(), sr3.getScore()},
-                finalBestIndex, swapResult.getOriginalBestIndex(), finalMessage);
+                validatedBestIndex, swapResult.getOriginalBestIndex(), finalMessage);
 
         return 3;
         } finally {
@@ -314,146 +302,7 @@ public class WakeUpScheduler {
         processUserWakeUp(userId, timeContext);
     }
 
-    // ========== 辅助方法 ==========
-
-    private String buildAnchorHint(UserStateTool.UserStateSnapshot state) {
-        StringBuilder sb = new StringBuilder();
-        if (state.activeAnchorContext() != null) {
-            sb.append(state.activeAnchorContext());
-        }
-        if (!"无历史锚点事件".equals(state.recentAnchorSummary())
-                && !"无已结束的锚点事件".equals(state.recentAnchorSummary())) {
-            if (!sb.isEmpty()) sb.append("；");
-            sb.append(state.recentAnchorSummary());
-        }
-        return sb.isEmpty() ? "无特殊事件" : sb.toString();
-    }
-
-    private GeneratorOutput parseGeneratorOutput(String raw) {
-        if (raw == null || raw.isBlank()) return null;
-        String trimmed = raw.trim();
-        if (!trimmed.startsWith("{")) {
-            String msg = trimmed.replaceAll("^[\"']+|[\"']+$", "").trim();
-            if (msg.length() < 4) return null;
-            msg = truncateMessage(msg);
-            return new GeneratorOutput(msg, null);
-        }
-        try {
-            JsonNode node = objectMapper.readTree(trimmed);
-            String message = node.path("message").asText(null);
-            if (message == null || message.isBlank()) return null;
-            message = message.trim().replaceAll("^[\"']+|[\"']+$", "");
-            message = truncateMessage(message);
-            VoiceSynthesisParam vp = parseVoiceParams(node.path("voiceParams"));
-            return new GeneratorOutput(message, vp);
-        } catch (Exception e) {
-            log.warn("解析 Generator JSON 失败: {}", raw, e);
-            return null;
-        }
-    }
-
-    private String truncateMessage(String msg) {
-        if (msg != null && msg.length() > 20) {
-            return msg.substring(0, 20);
-        }
-        return msg;
-    }
-
-    private VoiceSynthesisParam parseVoiceParams(JsonNode vpNode) {
-        if (vpNode == null || vpNode.isNull() || vpNode.isMissingNode()) return null;
-        VoiceSynthesisParam vp = new VoiceSynthesisParam();
-        if (vpNode.has("volume")) vp.setVolume(vpNode.path("volume").asInt(50));
-        if (vpNode.has("speechRate")) vp.setSpeechRate((float) vpNode.path("speechRate").asDouble(1.0));
-        if (vpNode.has("pitchRate")) vp.setPitchRate((float) vpNode.path("pitchRate").asDouble(1.0));
-        if (vpNode.has("instruction")) vp.setInstruction(vpNode.path("instruction").asText(null));
-        return vp;
-    }
-
-    private boolean isValidCandidate(GeneratorOutput output) {
-        if (output == null || output.message == null || output.message.isBlank()) return false;
-        String msg = output.message;
-        return !msg.contains("无可用") && !msg.contains("无相关");
-    }
-
-    private WakeUpScoreResult parseScoreResult(String json) {
-        try {
-            JsonNode node = objectMapper.readTree(json);
-            int score = node.path("score").asInt(5);
-            String reason = node.path("reason").asText("无理由");
-            return new WakeUpScoreResult(score, reason);
-        } catch (Exception e) {
-            log.warn("解析评分 JSON 失败: {}", json, e);
-            return new WakeUpScoreResult(5, "解析失败");
-        }
-    }
-
-    private ArbiterDecision parseArbiterResult(String json, List<String> candidates,
-                                                TimeContextTool.TimeContext timeContext) {
-        try {
-            JsonNode node = objectMapper.readTree(json);
-            String decision = node.path("decision").asText("direct");
-            int selectedIndex = node.path("selectedIndex").asInt(0);
-            String mergedMessage = node.path("mergedMessage").asText(null);
-
-            switch (decision) {
-                case "merge":
-                    if (mergedMessage != null && !mergedMessage.isBlank()) {
-                        return new ArbiterDecision(0, mergedMessage);
-                    }
-                    return pickCandidate(candidates, selectedIndex, timeContext);
-                case "fallback":
-                    String fallback = timeContext.greeting() + "～今天过得怎么样呀";
-                    return new ArbiterDecision(0, fallback);
-                default:
-                    return pickCandidate(candidates, selectedIndex, timeContext);
-            }
-        } catch (Exception e) {
-            log.warn("解析仲裁 JSON 失败，使用第一条候选: {}", json, e);
-            String firstValid = null;
-            for (String c : candidates) {
-                if (c != null) {
-                    firstValid = c;
-                    break;
-                }
-            }
-            return new ArbiterDecision(0, firstValid != null ? firstValid : timeContext.greeting() + "～今天过得怎么样呀");
-        }
-    }
-
-    private ArbiterDecision pickCandidate(List<String> candidates, int preferredIndex,
-                                           TimeContextTool.TimeContext timeContext) {
-        int idx = Math.min(preferredIndex, candidates.size() - 1);
-        String msg = candidates.get(idx);
-        if (msg != null) {
-            return new ArbiterDecision(idx, msg);
-        }
-        for (int i = 0; i < candidates.size(); i++) {
-            if (candidates.get(i) != null) {
-                return new ArbiterDecision(i, candidates.get(i));
-            }
-        }
-        return new ArbiterDecision(0, timeContext.greeting() + "～今天过得怎么样呀");
-    }
-
-    private static class GeneratorOutput {
-        final String message;
-        final VoiceSynthesisParam voiceParams;
-
-        GeneratorOutput(String message, VoiceSynthesisParam voiceParams) {
-            this.message = message;
-            this.voiceParams = voiceParams;
-        }
-    }
-
-    private static class ArbiterDecision {
-        final int bestIndex;
-        final String message;
-
-        ArbiterDecision(int bestIndex, String message) {
-            this.bestIndex = bestIndex;
-            this.message = message;
-        }
-    }
+    // ========== 发送方法 ==========
 
     private void saveWakeUpMessageAsync(String userId, String content) {
         try {
