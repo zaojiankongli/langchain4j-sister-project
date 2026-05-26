@@ -167,3 +167,57 @@ spring:
 server:
   shutdown: graceful
   port: 8080
+
+# ==================== 结构化配置属性前缀映射（@ConfigurationProperties 绑定） ====================
+app:
+  ai:
+    chat-api-key: ${DASHSCOPE_API_KEY}
+    chat-model-name: qwen3.5-flash
+    vision-api-key: ${DASHSCOPE_API_KEY}
+    vision-model-name: qwen3-vl-flash
+    wanx-reference-image-url: ${WANX_REFERENCE_IMAGE_URL}
+  wake-up:
+    enabled: true
+    silent-threshold-minutes: 90
+    cooldown-minutes: 30
+    probability-midpoint: 2.5
+    probability-steepness: 1.0
+    probability-max: 0.75
+  peek:
+    enabled: true
+    base-probability: 0.08
+    max-probability: 0.25
+    cooldown-minutes: 90
+    active-threshold-minutes: 5
+    wakeup-mutex-minutes: 10
+    peek-request-ttl-seconds: 120
+    max-concurrent-requests: 5
+    screenshot-folder: peek
+  auth:
+    secret: ${JWT_SECRET}
+    access-token-expiration: 7200000
+    refresh-token-expiration: 604800000
+  milvus:
+    host: ${MILVUS_HOST}
+    port: ${MILVUS_PORT}
+    database: zjkl
+    collection-name: zjkl_sister
+  websocket:
+    allowed-origins: ${WEBSOCKET_ALLOWED_ORIGINS}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS}
+  tts:
+    model: ${TTS_MODEL}
+    voice: ${TTS_VOICE}
+  mcp:
+    firecrawl-api-key: ${FIRECRAWL_API_KEY}
+    context7-api-key: ${CONTEXT7_API_KEY}
+  redis:
+    host: ${REDIS_HOST}
+    port: ${REDIS_PORT}
+    password: ${REDIS_PASSWORD}
+    database: ${REDIS_DATABASE}
+  emotion:
+    anchor-max-duration-minutes: 60
+  recommendation-demo-user: demo_user
+  prompt-cache-ttl: 300
