@@ -8,7 +8,6 @@ import org.springframework.context.annotation.Configuration;
  * 情感引擎配置类
  */
 @Data
-@Configuration
 @ConfigurationProperties(prefix = "emotion.engine")
 public class EmotionEngineConfig {
     

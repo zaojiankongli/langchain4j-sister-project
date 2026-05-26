@@ -1,5 +1,7 @@
 package com.zjkl.ai.chat.stomp;
 
+import com.zjkl.ai.chat.stomp.dto.MessageType;
+import com.zjkl.ai.chat.stomp.dto.WebSocketMessage;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +19,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 连接状态管理器
@@ -29,7 +32,7 @@ public class ConnectionStateManager {
     private final SimpMessagingTemplate messagingTemplate;
 
     private final ConcurrentHashMap<String, BlockingQueue<WebSocketMessage>> userQueues = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, Object> userLocks = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, ReentrantLock> userLocks = new ConcurrentHashMap<>();
     private static final int QUEUE_CAPACITY = 100;
     private static final long SEND_TIMEOUT_SECONDS = 30;
     private static final String CONTROL_SUFFIX = "_control";
@@ -243,9 +246,10 @@ public class ConnectionStateManager {
 
                 log.info("senderLoop 获取到消息: queueKey={}, type={}", queueKey, message.getType());
 
-                Object lock = userLocks.computeIfAbsent(userId, k -> new Object());
+                ReentrantLock lock = userLocks.computeIfAbsent(userId, k -> new ReentrantLock());
                 boolean sendSuccess = false;
-                synchronized (lock) {
+                lock.lock();
+                try {
                     ConnectionState state = connectionStates.get(userId);
                     if (state == ConnectionState.DISCONNECTED) {
                         log.info("用户已断开，丢弃消息: userId={}", userId);
@@ -259,6 +263,8 @@ public class ConnectionStateManager {
                     } catch (Exception e) {
                         log.error("发送消息失败：userId={}, type={}", userId, message.getType(), e);
                     }
+                } finally {
+                    lock.unlock();
                 }
 
                 if (!sendSuccess) {
@@ -291,7 +297,7 @@ public class ConnectionStateManager {
             int size = queue.size();
             log.debug("清空未发送消息：queueKey={}, count={}", queueKey, size);
         }
-        userLocks.remove(queueKey.replace(CONTROL_SUFFIX, ""));
+        // ReentrantLock 不主动移除，GC 会处理无引用的锁对象
         Thread thread = senderThreads.remove(queueKey);
         if (thread != null && thread.isAlive()) {
             thread.interrupt();

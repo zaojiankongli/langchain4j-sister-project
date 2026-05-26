@@ -1,6 +1,6 @@
 HELP.md
 target/
-.mvn/wrapper/maven-wrapper.jar
+# .mvn/wrapper/maven-wrapper.jar  # 保留 wrapper JAR 以确保构建可重现
 !**/src/main/**/target/
 !**/src/test/**/target/
 

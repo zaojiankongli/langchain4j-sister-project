@@ -20,8 +20,8 @@ import java.util.function.Consumer;
 @Component
 public class EmotionAnchorMonitor {
 
-    public static final double TRIGGER_THRESHOLD = 0.3;
-    public static final double RETURN_THRESHOLD = 0.1;
+    public static final double TRIGGER_THRESHOLD = 0.15;
+    public static final double RETURN_THRESHOLD = 0.05;
     public static final int SILENCE_HOURS = 2;
 
     @Value("${emotion.anchor.max-duration-minutes:60}")

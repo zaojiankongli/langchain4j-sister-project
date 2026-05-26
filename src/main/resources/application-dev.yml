@@ -1,0 +1,17 @@
+# ==================== 开发环境配置 ====================
+# 开发环境下覆盖默认配置，降低日志级别、放宽限制
+
+logging:
+  level:
+    dev.langchain4j: debug
+    com.zjkl: debug
+
+spring:
+  threads:
+    virtual:
+      enabled: true
+
+peek:
+  enabled: true
+  base-probability: 0.15              # 开发环境提高概率便于测试
+  cooldown-minutes: 15

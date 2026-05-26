@@ -1,0 +1,158 @@
+version: "3.8"
+
+services:
+  # ==================== MySQL 8.0 ====================
+  mysql:
+    image: mysql:8.0
+    container_name: sister-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: zjkl_sister
+      MYSQL_USER: zjkl
+      MYSQL_PASSWORD: zjkl123
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - sister-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==================== Redis 7 ====================
+  redis:
+    image: redis:7-alpine
+    container_name: sister-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - sister-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ==================== Milvus dependencies ====================
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.17
+    container_name: sister-etcd
+    restart: unless-stopped
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_SNAPSHOT_COUNT=50000
+    volumes:
+      - etcd_data:/etcd
+    networks:
+      - sister-network
+    command: etcd -advertise-client-urls=http://0.0.0.0:2379 -listen-client-urls=http://0.0.0.0:2379 -data-dir /etcd
+
+  minio:
+    image: minio/minio:RELEASE.2024-01-13T07-53-07Z
+    container_name: sister-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/minio_data
+    networks:
+      - sister-network
+    command: minio server /minio_data --console-address :9001
+
+  # ==================== Milvus Vector Database ====================
+  milvus:
+    image: milvusdb/milvus:v2.4.16
+    container_name: sister-milvus
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    depends_on:
+      - etcd
+      - minio
+    ports:
+      - "19530:19530"
+    volumes:
+      - milvus_data:/var/lib/milvus
+    networks:
+      - sister-network
+
+  # ==================== Application ====================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sister-app
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      # Spring profile
+      SPRING_PROFILES_ACTIVE: prod
+      # MySQL
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USERNAME: zjkl
+      MYSQL_PASSWORD: zjkl123
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DATABASE: 0
+      REDIS_PASSWORD: ""
+      # Milvus
+      MILVUS_HOST: milvus
+      MILVUS_PORT: 19530
+      # JWT
+      JWT_SECRET: change-me-in-production
+      # App
+      APP_DEFAULT_IMAGE_URL: https://placehold.co/512x512
+      # DashScope / LangChain4j
+      DASHSCOPE_API_KEY: change-me-in-production
+      # Mail
+      MAIL_HOST: change-me-in-production
+      MAIL_PORT: 587
+      MAIL_USERNAME: change-me-in-production
+      MAIL_PASSWORD: change-me-in-production
+      # CORS
+      CORS_ALLOWED_ORIGINS: http://localhost:3000
+      WEBSOCKET_ALLOWED_ORIGINS: http://localhost:3000
+      # MCP
+      FIRECRAWL_API_KEY: change-me-in-production
+      CONTEXT7_API_KEY: change-me-in-production
+      # Aliyun OSS
+      OSS_ENDPOINT: https://oss-cn-hangzhou.aliyuncs.com
+      OSS_ACCESS_KEY_ID: change-me-in-production
+      OSS_ACCESS_KEY_SECRET: change-me-in-production
+      OSS_BUCKET_NAME: change-me-in-production
+      OSS_REGION: cn-hangzhou
+      # TTS
+      TTS_MODEL: change-me-in-production
+      TTS_VOICE: change-me-in-production
+    depends_on:
+      - mysql
+      - redis
+      - milvus
+    networks:
+      - sister-network
+
+volumes:
+  mysql_data:
+  redis_data:
+  etcd_data:
+  minio_data:
+  milvus_data:
+
+networks:
+  sister-network:
+    driver: bridge

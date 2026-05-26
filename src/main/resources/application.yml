@@ -10,7 +10,7 @@ jwt:
 
 spring:
   main:
-    allow-bean-definition-overriding: true
+    allow-bean-definition-overriding: false
   application:
     name: zjkl_sister_langchain4j
   datasource:
@@ -27,8 +27,8 @@ spring:
       max-lifetime: 1800000
       connection-test-query: SELECT 1
   profiles:
-    # 默认激活开发环境
-    active: dev
+    # 不设置默认 profile，通过环境变量 SPRING_PROFILES_ACTIVE 指定
+    active:
   data:
     redis:
       host: ${REDIS_HOST}
@@ -142,5 +142,28 @@ tts:
   model: ${TTS_MODEL}
   voice: ${TTS_VOICE}
 
+# ==================== Actuator & Monitoring ====================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+
+info:
+  app:
+    name: Sister Project
+    version: 0.0.1-SNAPSHOT
+    description: LangChain4j AI Companion Backend
+
+spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
 server:
+  shutdown: graceful
   port: 8080

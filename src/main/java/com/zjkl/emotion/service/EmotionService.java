@@ -1,5 +1,6 @@
 package com.zjkl.emotion.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.zjkl.emotion.config.EmotionEngineConfig;
@@ -8,6 +9,9 @@ import com.zjkl.emotion.model.EmotionalState;
 import com.zjkl.emotion.model.Personality;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.RedisOperations;
+import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -36,6 +40,7 @@ public class EmotionService {
     private final EmotionEngineConfig config;
     private final StringRedisTemplate redisTemplate;
     private final org.redisson.api.RedissonClient redissonClient;
+    private final ObjectMapper objectMapper;
 
     private final Cache<String, EmotionalState> localCache = Caffeine.newBuilder()
             .maximumSize(LOCAL_CACHE_MAX_SIZE)
@@ -48,10 +53,11 @@ public class EmotionService {
             .build();
 
     public EmotionService(EmotionEngineConfig config, StringRedisTemplate redisTemplate,
-                          org.redisson.api.RedissonClient redissonClient) {
+                          org.redisson.api.RedissonClient redissonClient, ObjectMapper objectMapper) {
         this.config = config;
         this.redisTemplate = redisTemplate;
         this.redissonClient = redissonClient;
+        this.objectMapper = objectMapper;
     }
 
     @PostConstruct
@@ -77,18 +83,9 @@ public class EmotionService {
         String json = redisTemplate.opsForValue().get(key);
         if (json != null && !json.isEmpty()) {
             try {
-                String[] parts = json.split(",");
-                if (parts.length == 5) {
-                    Personality p = new Personality(
-                            Double.parseDouble(parts[0]),
-                            Double.parseDouble(parts[1]),
-                            Double.parseDouble(parts[2]),
-                            Double.parseDouble(parts[3]),
-                            Double.parseDouble(parts[4])
-                    );
-                    personalityCache.put(userId, p);
-                    return p;
-                }
+                Personality p = objectMapper.readValue(json, Personality.class);
+                personalityCache.put(userId, p);
+                return p;
             } catch (Exception e) {
                 log.warn("解析用户个性配置失败: userId={}, value={}", userId, json);
             }
@@ -140,9 +137,13 @@ public class EmotionService {
         double a = state.getArousal();
         double d = state.getDominance();
 
-        p = p * (1 - decay) + (bp - p) * regression;
-        a = a * (1 - decay) + (ba - a) * regression;
-        d = d * (1 - decay) + (bd - d) * regression;
+        // 先衰减（按比例消散），再回归（向基线靠拢）
+        p = p * (1 - decay);
+        p = p + (bp - p) * regression;
+        a = a * (1 - decay);
+        a = a + (ba - a) * regression;
+        d = d * (1 - decay);
+        d = d + (bd - d) * regression;
 
         return new EmotionalState(p, a, d);
     }
@@ -240,13 +241,20 @@ public class EmotionService {
 
     private void saveUserEmotion(String userId, EmotionalState emotion) {
         String key = EMOTION_KEY_PREFIX + userId;
-        redisTemplate.opsForHash().putAll(key, Map.of(
-                "pleasure", String.valueOf(emotion.getPleasure()),
-                "arousal", String.valueOf(emotion.getArousal()),
-                "dominance", String.valueOf(emotion.getDominance()),
-                "updatedAt", String.valueOf(System.currentTimeMillis())
-        ));
-        redisTemplate.expire(key, Duration.ofDays(EMOTION_EXPIRE_DAYS));
+        SessionCallback<Object> sessionCallback = new SessionCallback<>() {
+            @Override
+            public Object execute(RedisOperations operations) throws DataAccessException {
+                operations.opsForHash().putAll(key, Map.of(
+                        "pleasure", String.valueOf(emotion.getPleasure()),
+                        "arousal", String.valueOf(emotion.getArousal()),
+                        "dominance", String.valueOf(emotion.getDominance()),
+                        "updatedAt", String.valueOf(System.currentTimeMillis())
+                ));
+                operations.expire(key, Duration.ofDays(EMOTION_EXPIRE_DAYS));
+                return null;
+            }
+        };
+        redisTemplate.execute(sessionCallback);
 
         localCache.put(userId, emotion);
     }
@@ -354,13 +362,13 @@ public class EmotionService {
                 personality.getNeuroticism());
 
         String key = PERSONALITY_KEY_PREFIX + userId;
-        String value = String.join(",",
-                String.valueOf(personality.getOpenness()),
-                String.valueOf(personality.getConscientiousness()),
-                String.valueOf(personality.getExtraversion()),
-                String.valueOf(personality.getAgreeableness()),
-                String.valueOf(personality.getNeuroticism()));
-        redisTemplate.opsForValue().set(key, value, PERSONALITY_TTL);
+        try {
+            String value = objectMapper.writeValueAsString(personality);
+            redisTemplate.opsForValue().set(key, value, PERSONALITY_TTL);
+        } catch (Exception e) {
+            log.error("序列化用户个性配置失败: userId={}", userId, e);
+            throw new RuntimeException("Failed to serialize personality", e);
+        }
 
         personalityCache.put(userId, personality);
         localCache.invalidate(userId);
