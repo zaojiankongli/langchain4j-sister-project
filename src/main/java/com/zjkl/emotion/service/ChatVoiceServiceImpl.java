@@ -1,14 +1,11 @@
 package com.zjkl.emotion.service;
 
-import com.alibaba.dashscope.audio.tts.SpeechSynthesisResult;
-import com.alibaba.dashscope.audio.ttsv2.SpeechSynthesisAudioFormat;
-import com.alibaba.dashscope.audio.ttsv2.SpeechSynthesisParam;
 import com.alibaba.dashscope.audio.ttsv2.SpeechSynthesizer;
-import com.alibaba.dashscope.common.ResultCallback;
 import com.zjkl.ai.chat.entity.MessageContent;
 import com.zjkl.ai.chat.service.ConverMessageService;
 import com.zjkl.ai.chat.service.SisterChatService;
 import com.zjkl.emotion.model.EmotionalState;
+
 import com.zjkl.emotion.model.VoiceParams;
 import com.zjkl.emotion.util.AudioBuffer;
 import com.zjkl.emotion.util.LlmResponseStreamParser;
@@ -18,12 +15,10 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.UserMessage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -39,14 +34,7 @@ import java.util.concurrent.atomic.AtomicReference;
 @RequiredArgsConstructor
 public class ChatVoiceServiceImpl implements ChatVoiceService {
 
-    @Value("${langchain4j.community.dashscope.chat-model.api-key}")
-    private String apiKey;
-
-    @Value("${tts.model}")
-    private String ttsModel;
-
-    @Value("${tts.voice}")
-    private String ttsVoice;
+    private final TtsStreamingService ttsStreamingService;
 
     private final EmotionService emotionService;
     private final EmotionAnchorService anchorService;
@@ -123,7 +111,7 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
                                 chatPushService.pushError(userId, "语音合成失败，已跳过音频");
                                 audioBuffer.markSynthesisCompleted();
                             } finally {
-                                closeSynthesizer(synthesizer);
+                                ttsStreamingService.closeSynthesizer(synthesizer);
                             }
                         }).orTimeout(30, TimeUnit.SECONDS).exceptionally(ex -> {
                             log.error("TTS 合成超时或失败：userId={}", userId, ex);
@@ -131,7 +119,7 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
                                     ? new TimeoutException("语音合成超时（30s）") : ex);
                             audioBuffer.markSynthesisCompleted();
                             chatPushService.pushError(userId, "语音合成超时，已跳过音频");
-                            closeSynthesizer(synthesizer);
+                            ttsStreamingService.closeSynthesizer(synthesizer);
                             return null;
                         });
 
@@ -183,7 +171,7 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
                     log.info("voice_params 已解析：userId={}, volume={}", userId, params.getVolume());
 
                     if (Boolean.TRUE.equals(enableAudio)) {
-                        SpeechSynthesizer synthesizer = initTtsSynthesizer(userId, params, audioBuffer);
+                        SpeechSynthesizer synthesizer = ttsStreamingService.initTtsSynthesizer(userId, params, audioBuffer);
                         if (synthesizer != null) {
                             synthesizerRef.set(synthesizer);
                             log.info("TTS 已就绪：userId={}", userId);
@@ -276,84 +264,4 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
         }
     }
 
-    /**
-     * 初始化 TTS
-     */
-    private SpeechSynthesizer initTtsSynthesizer(String userId, VoiceParams params, AudioBuffer audioBuffer) {
-        try {
-            SpeechSynthesisParam synthesisParam = buildDashScopeParam(params);
-
-            log.info("开始创建 SpeechSynthesizer：userId={}", userId);
-
-            SpeechSynthesizer synthesizer = new SpeechSynthesizer(synthesisParam,
-                new ResultCallback<SpeechSynthesisResult>() {
-                    @Override
-                    public void onEvent(SpeechSynthesisResult result) {
-                        log.debug("TTS onEvent 回调触发：userId={}, hasAudio={}", userId, result.getAudioFrame() != null);
-
-                        if (result.getAudioFrame() != null && result.getAudioFrame().hasRemaining()) {
-
-                            ByteBuffer byteBuffer = result.getAudioFrame();
-                            int available = byteBuffer.remaining();
-                            byte[] audioData = new byte[available];
-                            byteBuffer.get(audioData);
-
-                            // 写入音频缓冲区
-                            audioBuffer.addAudio(audioData);
-                            log.debug("音频写入缓冲区：userId={}, size={}, 累计={}ms",
-                                    userId, audioData.length, audioBuffer.estimateDurationMs());
-                        }
-                    }
-
-                    @Override
-                    public void onComplete() {
-                        log.info("TTS 合成完成：userId={}", userId);
-                        audioBuffer.markSynthesisCompleted();
-                    }
-
-                    @Override
-                    public void onError(Exception e) {
-                        log.error("TTS 合成错误：userId={}", userId, e);
-                        chatPushService.pushError(userId, "语音合成失败");
-                    }
-                });
-
-            log.info("SpeechSynthesizer 创建成功：userId={}", userId);
-            return synthesizer;
-
-        } catch (Exception e) {
-            log.error("SpeechSynthesizer 初始化失败：userId={}", userId, e);
-            chatPushService.pushError(userId, "语音服务初始化失败：" + e.getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * 构建 DashScope 参数
-     */
-    private void closeSynthesizer(SpeechSynthesizer synthesizer) {
-        if (synthesizer == null) return;
-        try {
-            var duplexApi = synthesizer.getDuplexApi();
-            if (duplexApi != null) {
-                duplexApi.close(1000, "bye");
-            }
-        } catch (Exception closeEx) {
-            log.warn("关闭 SpeechSynthesizer 失败", closeEx);
-        }
-    }
-
-    private SpeechSynthesisParam buildDashScopeParam(VoiceParams params) {
-
-        return SpeechSynthesisParam.builder()
-            .apiKey(apiKey)
-            .model(ttsModel)
-                .voice(ttsVoice)
-                .format(SpeechSynthesisAudioFormat.PCM_44100HZ_MONO_16BIT)
-            .volume(params.getVolume())
-            .speechRate(params.getSpeechRate())
-            .pitchRate(params.getPitchRate())
-            .instruction(params.getInstruction())
-            .build();
-    }
 }
