@@ -61,13 +61,10 @@ public class WebSocketAuthInterceptor implements HandshakeInterceptor {
         log.debug("提取到 Token: {}...", token.substring(0, Math.min(20, token.length())));
 
         try {
+            // 🔴 安全加固：只接受 accessToken，拒绝 refreshToken 用于 WS 认证
             String userId = jwtUtil.parseAccessToken(token);
             if (userId == null || userId.isEmpty()) {
-                // accessToken 过期，尝试用 refreshToken
-                userId = jwtUtil.parseRefreshToken(token);
-            }
-            if (userId == null || userId.isEmpty()) {
-                log.warn("握手失败：Token 无效或已过期，拒绝连接");
+                log.warn("握手失败：AccessToken 无效或已过期，拒绝连接");
                 return false;
             }
 

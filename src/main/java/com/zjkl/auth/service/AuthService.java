@@ -6,6 +6,7 @@ import com.zjkl.auth.exception.UnauthorizedException;
 import com.zjkl.common.util.JwtUtil;
 import com.zjkl.user.domain.User;
 import com.zjkl.user.mapper.UserMapper;
+import com.zjkl.user.service.UserProfileManageService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
@@ -16,13 +17,9 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.LocalDate;
-import java.time.LocalDateTime;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import static java.util.Map.of;
@@ -54,6 +51,7 @@ public class AuthService {
     private final JwtUtil jwtUtil;
     private final StringRedisTemplate redisTemplate;
     private final JavaMailSender mailSender;
+    private final UserProfileManageService userProfileManageService;
     private final Random random = new Random();
     private final String fromAddress;
     private final DefaultRedisScript<Long> verifyAndDelScript;
@@ -61,13 +59,15 @@ public class AuthService {
     public AuthService(UserMapper userMapper, JwtUtil jwtUtil, 
                        StringRedisTemplate redisTemplate,
                        JavaMailSender mailSender,
-                       Environment env) {
+                       Environment env,
+                       UserProfileManageService userProfileManageService) {
         this.userMapper = userMapper;
         this.jwtUtil = jwtUtil;
         this.redisTemplate = redisTemplate;
         this.mailSender = mailSender;
         this.fromAddress = env.getProperty("spring.mail.username");
         this.verifyAndDelScript = new DefaultRedisScript<>(VERIFY_AND_DEL_SCRIPT, Long.class);
+        this.userProfileManageService = userProfileManageService;
     }
     
     /**
@@ -130,7 +130,7 @@ public class AuthService {
 
             if (user == null) {
                 String tempUsername = (username != null && !username.isBlank()) ? username.trim() : email.substring(0, email.indexOf('@'));
-                user = createUser(email, tempUsername);
+                user = userProfileManageService.createUser(email, tempUsername);
                 isNewUser = true;
                 log.info("新用户注册成功：email={}, userId={}, username={}", email, user.getId(), user.getUsername());
             } else {
@@ -152,7 +152,7 @@ public class AuthService {
             return of(
                 "accessToken", accessToken,
                 "refreshToken", refreshToken,
-                "user", buildUserInfo(user),
+                "user", userProfileManageService.buildUserInfo(user),
                 "requiresProfileComplete", user.requiresProfileComplete(),
                 "isNewUser", isNewUser
             );
@@ -210,90 +210,6 @@ public class AuthService {
      */
     @Transactional(rollbackFor = Exception.class)
     public void completeProfile(String userId, CompleteProfileRequest request) {
-        User user = userMapper.findById(userId);
-        if (user == null) {
-            throw new IllegalArgumentException("用户不存在");
-        }
-
-        log.info("开始完善用户资料 - userId: {}, username: {}, hasAvatar: {}", 
-            userId, request.username(), request.avatarUrl() != null && !request.avatarUrl().isBlank());
-
-        if (request.username() != null && !request.username().isBlank()) {
-            user.setUsername(request.username());
-        }
-        if (request.gender() != null) {
-            user.setGender(request.gender());
-        }
-        if (request.hobbies() != null && !request.hobbies().isEmpty()) {
-            String hobbiesStr = String.join(",", request.hobbies());
-            user.setHobbies(hobbiesStr);
-        }
-        if (request.birthday() != null && !request.birthday().isBlank()) {
-            try {
-                user.setBirthday(LocalDate.parse(request.birthday()));
-            } catch (Exception e) {
-                // ignore invalid values
-            }
-        }
-        if (request.aiType() != null) {
-            user.setAiType(request.aiType());
-            log.info("用户选择 AI 身份：{}", request.aiType());
-        } else {
-            throw new IllegalArgumentException("AI 身份不能为空");
-        }
-
-        if (request.avatarUrl() != null && !request.avatarUrl().isBlank()) {
-            user.setAvatarUrl(request.avatarUrl());
-            log.info("用户设置头像：{}", request.avatarUrl());
-        }
-
-        userMapper.update(user);
-        log.info("用户资料完善成功 - userId: {}, username: {}, avatarUrl: {}", 
-            userId, user.getUsername(), user.getAvatarUrl());
-    }
-    
-    /**
-     * 创建新用户
-     */
-    private User createUser(String email, String username) {
-        User user = new User();
-        user.setId(generateUserId());
-        user.setEmail(email);
-        user.setUsername(username);
-        user.setCreatedAt(LocalDateTime.now());
-        user.setUpdatedAt(LocalDateTime.now());
-        userMapper.insert(user);
-        return user;
-    }
-    
-    /**
-     * 生成 12 位用户 ID
-     */
-    private String generateUserId() {
-        int maxRetries = 3;
-        for (int i = 0; i < maxRetries; i++) {
-            String id = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
-            if (userMapper.findById(id) == null) {
-                return id;
-            }
-        }
-        throw new RuntimeException("无法生成唯一用户 ID，请稍后重试");
-    }
-    
-    /**
-     * 构建用户信息
-     */
-    private Map<String, Object> buildUserInfo(User user) {
-        Map<String, Object> info = new HashMap<>();
-        info.put("id", user.getId());
-        info.put("email", user.getEmail());
-        info.put("username", user.getUsername());
-        info.put("avatarUrl", user.getAvatarUrl());
-        info.put("gender", user.getGender());
-        info.put("hobbies", user.getHobbies());
-        info.put("aiType", user.getAiType());
-        info.put("birthday", user.getBirthday());
-        info.put("createdAt", user.getCreatedAt());
-        return info;
+        userProfileManageService.completeProfile(userId, request);
     }
 }

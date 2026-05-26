@@ -23,6 +23,11 @@ public class AuthController {
     private static final long SEND_CODE_WINDOW_MS = 60_000; // 1 分钟窗口
     private static final int SEND_CODE_MAX = 1;              // 每分钟最多 1 次
 
+    private static final long LOGIN_WINDOW_MS = 60_000;    // 1 分钟窗口
+    private static final int LOGIN_MAX = 5;                 // 每分钟每邮箱最多 5 次
+    private static final long REFRESH_WINDOW_MS = 60_000;   // 1 分钟窗口
+    private static final int REFRESH_MAX = 3;               // 每分钟最多 3 次
+
     private final AuthService authService;
     private final UserContext userContext;
     private final RateLimiter rateLimiter;
@@ -45,12 +50,22 @@ public class AuthController {
 
     @PostMapping("/login")
     public Result<Map<String, Object>> login(@RequestBody @Valid LoginRequest request) {
+        // 限流：每邮箱每分钟最多 5 次登录尝试
+        String rateKey = "rate:login:" + request.email();
+        if (!rateLimiter.tryAcquire(rateKey, LOGIN_MAX, LOGIN_WINDOW_MS)) {
+            return Result.error(429, "登录尝试过于频繁，请 1 分钟后再试");
+        }
         Map<String, Object> result = authService.login(request);
         return Result.success(result);
     }
 
     @PostMapping("/refresh")
     public Result<Map<String, Object>> refresh(@RequestBody @Valid RefreshTokenRequest request) {
+        // 限流：每客户端每分钟最多 3 次刷新
+        String rateKey = "rate:refresh:" + request.refreshToken().hashCode();
+        if (!rateLimiter.tryAcquire(rateKey, REFRESH_MAX, REFRESH_WINDOW_MS)) {
+            return Result.error(429, "刷新过于频繁，请稍后再试");
+        }
         Map<String, Object> result = authService.refreshToken(request.refreshToken());
         return Result.success(result);
     }

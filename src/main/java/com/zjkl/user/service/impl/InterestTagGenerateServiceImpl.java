@@ -10,8 +10,9 @@ import com.zjkl.user.domain.User;
 import com.zjkl.user.mapper.UserProfileMapper;
 import com.zjkl.user.service.InterestTagGenerateService;
 import dev.langchain4j.agentic.UntypedAgent;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -27,7 +28,6 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class InterestTagGenerateServiceImpl implements InterestTagGenerateService {
 
     private static final int WORKFLOW_TIMEOUT_SECONDS = 120;
@@ -38,8 +38,19 @@ public class InterestTagGenerateServiceImpl implements InterestTagGenerateServic
     private final ConversationMemoryMapper conversationMemoryMapper;
     private final Gson gson = new Gson();
 
+    @Autowired
+    @Lazy
+    private InterestTagGenerateServiceImpl self;
+
+    public InterestTagGenerateServiceImpl(UntypedAgent tagWorkflow,
+                                           UserProfileMapper userProfileMapper,
+                                           ConversationMemoryMapper conversationMemoryMapper) {
+        this.tagWorkflow = tagWorkflow;
+        this.userProfileMapper = userProfileMapper;
+        this.conversationMemoryMapper = conversationMemoryMapper;
+    }
+
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public List<String> generateTags(String userId) {
         log.info("为用户 {} 启动兴趣标签生成工作流", userId);
 
@@ -90,8 +101,8 @@ public class InterestTagGenerateServiceImpl implements InterestTagGenerateServic
                 return new ArrayList<>();
             }
 
-            // 7. 保存新标签到数据库
-            saveGeneratedTags(userId, generatedTags, existingTags);
+            // 7. 保存新标签到数据库（通过 self 代理触发 @Transactional）
+            self.saveGeneratedTags(userId, generatedTags, existingTags);
 
             log.info("用户 {} 成功生成 {} 个标签: {}", userId, generatedTags.size(), generatedTags);
             return generatedTags;
@@ -157,7 +168,8 @@ public class InterestTagGenerateServiceImpl implements InterestTagGenerateServic
     /**
      * 保存生成的标签到数据库，超过上限时软删除最旧的标签
      */
-    private void saveGeneratedTags(String userId, List<String> newTags, List<String> existingTags) {
+    @Transactional(rollbackFor = Exception.class)
+    public void saveGeneratedTags(String userId, List<String> newTags, List<String> existingTags) {
         int existingCount = existingTags != null ? existingTags.size() : 0;
         int newCount = 0;
 
