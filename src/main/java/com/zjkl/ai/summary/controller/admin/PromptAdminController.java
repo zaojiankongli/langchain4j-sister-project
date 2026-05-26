@@ -15,7 +15,7 @@ import java.util.Map;
  * 提供简单的刷新接口（方案 C - 折中版）
  */
 @RestController
-@RequestMapping("/admin/prompts")
+@RequestMapping("/api/admin/prompts")
 public class PromptAdminController {
     
     private final PromptTemplateService promptTemplateService;

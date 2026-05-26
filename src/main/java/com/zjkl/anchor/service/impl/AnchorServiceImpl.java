@@ -1,8 +1,8 @@
 package com.zjkl.anchor.service.impl;
 
 import com.zjkl.anchor.service.AnchorService;
-import com.zjkl.emotion.mapper.EmotionAnchorMapper;
 import com.zjkl.emotion.model.EmotionAnchorEvent;
+import com.zjkl.emotion.service.EmotionAnchorService;
 import com.zjkl.memory.domain.vo.MemoryVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -14,13 +14,13 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AnchorServiceImpl implements AnchorService {
 
-    private final EmotionAnchorMapper emotionAnchorMapper;
+    private final EmotionAnchorService emotionAnchorService;
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy.MM.dd");
     private static final DateTimeFormatter DATETIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     @Override
     public List<MemoryVO> getMilestones(String userId, int offset, int limit, String beginDate, String endDate) {
-        List<EmotionAnchorEvent> events = emotionAnchorMapper.selectByUserIdPaged(userId, offset, limit, beginDate, endDate);
+        List<EmotionAnchorEvent> events = emotionAnchorService.getEventsPaged(userId, offset, limit, beginDate, endDate);
         return events.stream().map(this::toMemoryVO).toList();
     }
 

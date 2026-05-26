@@ -8,6 +8,7 @@ import com.aliyun.oss.model.ObjectMetadata;
 import com.aliyun.oss.model.PutObjectRequest;
 import com.aliyun.oss.model.PutObjectResult;
 import com.zjkl.ai.oss.config.OssConfig;
+import com.zjkl.ai.oss.util.OssObjectKeyGenerator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -16,12 +17,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
-import java.util.UUID;
 
 /**
  * 阿里云 OSS 文件服务（基于官方最佳实践）
@@ -37,6 +35,7 @@ public class OssService {
     private final OSS ossClient;
     private final String bucketName;
     private final String endpoint;
+    private final OssObjectKeyGenerator objectKeyGenerator = new OssObjectKeyGenerator();
     
     // 允许的头像文件扩展名
     private static final List<String> ALLOWED_IMAGE_EXTENSIONS = Arrays.asList(
@@ -72,7 +71,7 @@ public class OssService {
         validateAvatarFile(file);
         
         // 生成 ObjectKey：avatars/{userId}/{uuid}.{ext}
-        String objectKey = generateAvatarObjectKey(userId, file.getOriginalFilename());
+        String objectKey = objectKeyGenerator.generateAvatarObjectKey(userId, file.getOriginalFilename());
         
         log.info("开始上传头像 - userId: {}, filename: {}, size: {} bytes", 
             userId, file.getOriginalFilename(), file.getSize());
@@ -82,26 +81,11 @@ public class OssService {
             ObjectMetadata metadata = createMetadata(file.getContentType(), file.getSize());
             
             // 上传到 OSS
-            PutObjectRequest putObjectRequest = new PutObjectRequest(
-                bucketName, 
-                objectKey, 
-                inputStream,
-                metadata
-            );
-            
-            PutObjectResult result = ossClient.putObject(putObjectRequest);
+            PutObjectResult result = putObject(objectKey, inputStream, metadata, "头像上传失败：");
             log.info("头像上传成功 - bucket: {}, objectKey: {}, ETag: {}", 
                 bucketName, objectKey, result.getETag());
             
             return generateFileUrl(objectKey);
-            
-        } catch (OSSException e) {
-            log.error("OSS 错误 - Code: {}, Message: {}, RequestId: {}", 
-                e.getErrorCode(), e.getErrorMessage(), e.getRequestId());
-            throw new IOException("头像上传失败：" + e.getErrorMessage(), e);
-        } catch (ClientException e) {
-            log.error("客户端错误 - Message: {}", e.getMessage());
-            throw new IOException("头像上传失败：" + e.getMessage(), e);
         }
     }
     
@@ -129,7 +113,7 @@ public class OssService {
         }
         
         // 生成 ObjectKey：{folder}/{yyyy/MM/dd}/{uuid}.{ext}
-        String objectKey = generateObjectKey(folder, file.getOriginalFilename());
+        String objectKey = objectKeyGenerator.generateObjectKey(folder, file.getOriginalFilename());
         
         log.info("开始上传文件 - folder: {}, filename: {}, size: {} bytes", 
             folder, file.getOriginalFilename(), file.getSize());
@@ -137,26 +121,11 @@ public class OssService {
         try (InputStream inputStream = file.getInputStream()) {
             ObjectMetadata metadata = createMetadata(file.getContentType(), file.getSize());
             
-            PutObjectRequest putObjectRequest = new PutObjectRequest(
-                bucketName, 
-                objectKey, 
-                inputStream,
-                metadata
-            );
-            
-            PutObjectResult result = ossClient.putObject(putObjectRequest);
+            PutObjectResult result = putObject(objectKey, inputStream, metadata, "文件上传失败：");
             log.info("文件上传成功 - bucket: {}, objectKey: {}, ETag: {}", 
                 bucketName, objectKey, result.getETag());
             
             return generateFileUrl(objectKey);
-            
-        } catch (OSSException e) {
-            log.error("OSS 错误 - Code: {}, Message: {}, RequestId: {}", 
-                e.getErrorCode(), e.getErrorMessage(), e.getRequestId());
-            throw new IOException("文件上传失败：" + e.getErrorMessage(), e);
-        } catch (ClientException e) {
-            log.error("客户端错误 - Message: {}", e.getMessage());
-            throw new IOException("文件上传失败：" + e.getMessage(), e);
         }
     }
     
@@ -182,7 +151,7 @@ public class OssService {
             throw new IllegalArgumentException("只支持图片文件（JPG/PNG/GIF/WebP）");
         }
 
-        String objectKey = generateMessageImageObjectKey(userId, file.getOriginalFilename());
+        String objectKey = objectKeyGenerator.generateMessageImageObjectKey(userId, file.getOriginalFilename());
 
         log.info("开始上传聊天图片 - userId: {}, filename: {}, size: {} bytes",
             userId, file.getOriginalFilename(), file.getSize());
@@ -190,25 +159,11 @@ public class OssService {
         try (InputStream inputStream = file.getInputStream()) {
             ObjectMetadata metadata = createMetadata(file.getContentType(), file.getSize());
 
-            PutObjectRequest putObjectRequest = new PutObjectRequest(
-                bucketName,
-                objectKey,
-                inputStream,
-                metadata
-            );
-
-            PutObjectResult result = ossClient.putObject(putObjectRequest);
+            PutObjectResult result = putObject(objectKey, inputStream, metadata, "聊天图片上传失败：");
             log.info("聊天图片上传成功 - bucket: {}, objectKey: {}, ETag: {}",
                 bucketName, objectKey, result.getETag());
 
             return generateFileUrl(objectKey);
-
-        } catch (OSSException e) {
-            log.error("OSS 错误 - Code: {}, Message: {}", e.getErrorCode(), e.getErrorMessage());
-            throw new IOException("聊天图片上传失败：" + e.getErrorMessage(), e);
-        } catch (ClientException e) {
-            log.error("客户端错误 - Message: {}", e.getMessage());
-            throw new IOException("聊天图片上传失败：" + e.getMessage(), e);
         }
     }
 
@@ -242,7 +197,7 @@ public class OssService {
             }
             
             // 获取文件名
-            String filename = extractFilenameFromUrl(fileUrl, connection);
+            String filename = objectKeyGenerator.extractFilenameFromUrl(fileUrl, connection);
             
             // 获取文件大小
             long contentLength = connection.getContentLengthLong();
@@ -253,32 +208,18 @@ public class OssService {
             try (InputStream inputStream = connection.getInputStream()) {
                 // 生成 ObjectKey
                 String targetFolder = (folder != null && !folder.isBlank()) ? folder : "downloads";
-                String objectKey = generateObjectKey(targetFolder, filename);
+                String objectKey = objectKeyGenerator.generateObjectKey(targetFolder, filename);
                 
                 ObjectMetadata metadata = createMetadata(
                     connection.getContentType(), 
                     contentLength > 0 ? contentLength : null
                 );
                 
-                PutObjectRequest putObjectRequest = new PutObjectRequest(
-                    bucketName, 
-                    objectKey, 
-                    inputStream,
-                    metadata
-                );
-                
-                PutObjectResult result = ossClient.putObject(putObjectRequest);
+                PutObjectResult result = putObject(objectKey, inputStream, metadata, "文件上传失败：");
                 log.info("从 URL 上传文件成功 - bucket: {}, objectKey: {}, ETag: {}", 
                     bucketName, objectKey, result.getETag());
                 
                 return generateFileUrl(objectKey);
-                
-            } catch (OSSException e) {
-                log.error("OSS 错误 - Code: {}, Message: {}", e.getErrorCode(), e.getErrorMessage());
-                throw new IOException("文件上传失败：" + e.getErrorMessage(), e);
-            } catch (ClientException e) {
-                log.error("客户端错误 - Message: {}", e.getMessage());
-                throw new IOException("文件上传失败：" + e.getMessage(), e);
             }
             
         } finally {
@@ -393,77 +334,33 @@ public class OssService {
     }
     
     /**
-     * 生成头像文件的 OSS 对象键
-     * 格式：avatars/{userId}/{uuid}.{ext}
+     * 上传文件到 OSS 并统一处理异常
+     *
+     * @param objectKey 对象键
+     * @param inputStream 文件输入流
+     * @param metadata 对象元数据
+     * @param errorMessagePrefix 异常消息前缀
+     * @return PutObjectResult
+     * @throws IOException 上传失败时抛出
      */
-    private String generateAvatarObjectKey(String userId, String originalFilename) {
-        String extension = getFileExtension(originalFilename);
-        String uniqueFilename = "avatar_" + UUID.randomUUID().toString().replace("-", "");
-        return "avatars/" + userId + "/" + uniqueFilename + "." + extension;
-    }
+    private PutObjectResult putObject(String objectKey, InputStream inputStream, ObjectMetadata metadata, String errorMessagePrefix) throws IOException {
+        PutObjectRequest putObjectRequest = new PutObjectRequest(
+            bucketName,
+            objectKey,
+            inputStream,
+            metadata
+        );
 
-    /**
-     * 生成聊天图片的 OSS 对象键
-     * 格式：MessageImage/{年}/{月}/{日}/{userId}/{uuid}.{ext}
-     */
-    private String generateMessageImageObjectKey(String userId, String originalFilename) {
-        String extension = getFileExtension(originalFilename);
-        LocalDate now = LocalDate.now();
-        String uniqueFilename = UUID.randomUUID().toString().replace("-", "");
-        return String.format("MessageImage/%d/%02d/%02d/%s/%s.%s",
-            now.getYear(), now.getMonthValue(), now.getDayOfMonth(), userId, uniqueFilename, extension);
-    }
-    
-    /**
-     * 生成通用对象键
-     * 格式：{folder}/{yyyy/MM/dd}/{uuid}.{ext}
-     */
-    private String generateObjectKey(String folder, String originalFilename) {
-        String extension = getFileExtension(originalFilename);
-        String date = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"));
-        String uniqueFilename = UUID.randomUUID().toString().replace("-", "");
-        return folder + "/" + date + "/" + uniqueFilename + "." + extension;
-    }
-    
-    /**
-     * 从 URL 或 Content-Disposition 提取文件名
-     */
-    private String extractFilenameFromUrl(String fileUrl, HttpURLConnection connection) {
-        // 尝试从 Content-Disposition 头获取文件名
-        String disposition = connection.getHeaderField("Content-Disposition");
-        if (disposition != null && !disposition.isEmpty()) {
-            int filenameIndex = disposition.indexOf("filename=");
-            if (filenameIndex > 0) {
-                String filename = disposition.substring(filenameIndex + 9);
-                filename = filename.replace("\"", "").trim();
-                return filename;
-            }
+        try {
+            return ossClient.putObject(putObjectRequest);
+        } catch (OSSException e) {
+            log.error("OSS 错误 - Code: {}, Message: {}, RequestId: {}",
+                e.getErrorCode(), e.getErrorMessage(), e.getRequestId());
+            throw new IOException(errorMessagePrefix + e.getErrorMessage(), e);
+        } catch (ClientException e) {
+            log.error("客户端错误 - Message: {}", e.getMessage());
+            throw new IOException(errorMessagePrefix + e.getMessage(), e);
         }
-        
-        // 从 URL 路径提取文件名
-        int queryIndex = fileUrl.indexOf('?');
-        String urlWithoutQuery = queryIndex > 0 ? fileUrl.substring(0, queryIndex) : fileUrl;
-        int lastSlash = urlWithoutQuery.lastIndexOf('/');
-        if (lastSlash > 0 && lastSlash < urlWithoutQuery.length() - 1) {
-            return urlWithoutQuery.substring(lastSlash + 1);
-        }
-        
-        // 默认文件名
-        return "file_" + UUID.randomUUID().toString().replace("-", "");
-    }
-    
-    /**
-     * 获取文件扩展名
-     */
-    private String getFileExtension(String filename) {
-        if (filename == null || filename.isEmpty()) {
-            return "jpg";
-        }
-        int lastDot = filename.lastIndexOf(".");
-        if (lastDot < 0) {
-            return "jpg";
-        }
-        return filename.substring(lastDot + 1).toLowerCase();
     }
     
     /**
@@ -489,7 +386,7 @@ public class OssService {
             throw new IllegalArgumentException("文件名不能为空");
         }
         
-        String extension = getFileExtension(originalFilename);
+        String extension = objectKeyGenerator.getFileExtension(originalFilename);
         if (!ALLOWED_IMAGE_EXTENSIONS.contains(extension.toLowerCase())) {
             throw new IllegalArgumentException("只支持 JPG/PNG/GIF/WebP 格式");
         }

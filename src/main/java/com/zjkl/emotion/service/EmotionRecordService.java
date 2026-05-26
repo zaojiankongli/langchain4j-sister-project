@@ -1,7 +1,7 @@
 package com.zjkl.emotion.service;
 
 import com.zjkl.ai.chat.entity.ConverMessage;
-import com.zjkl.ai.chat.mapper.ConverMessageMapper;
+import com.zjkl.ai.chat.service.ConverMessageService;
 import com.zjkl.emotion.assistant.EmotionReasonAgent;
 import com.zjkl.emotion.mapper.UserEmotionMapper;
 import com.zjkl.emotion.model.EmotionalState;
@@ -31,7 +31,7 @@ public class EmotionRecordService {
 
     private final EmotionService emotionService;
     private final EmotionReasonAgent emotionReasonAgent;
-    private final ConverMessageMapper converMessageMapper;
+    private final ConverMessageService converMessageService;
     private final UserEmotionMapper userEmotionMapper;
 
     /**
@@ -84,7 +84,7 @@ public class EmotionRecordService {
      */
     private String queryChatHistory(String userId) {
         LocalDateTime startTime = LocalDateTime.now().minusHours(CHAT_HISTORY_HOURS);
-        List<ConverMessage> messages = converMessageMapper.selectByUserIdAndTimeRange(
+        List<ConverMessage> messages = converMessageService.getByTimeRange(
                 userId, startTime, LocalDateTime.now());
 
         if (messages.isEmpty()) {

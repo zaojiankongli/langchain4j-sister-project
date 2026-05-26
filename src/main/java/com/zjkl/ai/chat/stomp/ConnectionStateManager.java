@@ -9,17 +9,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
 import java.util.Base64;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 连接状态管理器
@@ -30,19 +26,9 @@ import java.util.concurrent.locks.ReentrantLock;
 public class ConnectionStateManager {
 
     private final SimpMessagingTemplate messagingTemplate;
+    private final MessageQueueManager queueManager;
+    private final ConnectionStateRegistry stateRegistry;
 
-    private final ConcurrentHashMap<String, BlockingQueue<WebSocketMessage>> userQueues = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, ReentrantLock> userLocks = new ConcurrentHashMap<>();
-    private static final int QUEUE_CAPACITY = 100;
-    private static final long SEND_TIMEOUT_SECONDS = 30;
-    private static final String CONTROL_SUFFIX = "_control";
-
-    public enum ConnectionState {
-        CONNECTED,
-        DISCONNECTED
-    }
-
-    private final ConcurrentHashMap<String, ConnectionState> connectionStates = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Thread> senderThreads = new ConcurrentHashMap<>();
 
     private volatile boolean shuttingDown = false;
@@ -56,9 +42,9 @@ public class ConnectionStateManager {
             }
     );
 
-
     private static final String CHAT_DESTINATION = "/queue/chat";
     private static final String CONTROL_DESTINATION = "/queue/control";
+    private static final long SEND_TIMEOUT_SECONDS = 30;
 
     @PostConstruct
     public void init() {
@@ -81,8 +67,8 @@ public class ConnectionStateManager {
         }
 
         senderThreads.values().forEach(Thread::interrupt);
-        userQueues.clear();
-        connectionStates.clear();
+        queueManager.clearAllQueues();
+        stateRegistry.clearAll();
         senderThreads.clear();
 
         log.info("ConnectionStateManager 已关闭");
@@ -91,7 +77,7 @@ public class ConnectionStateManager {
     // ==================== 公开接口 ====================
 
     public boolean isUserConnected(String userId) {
-        return connectionStates.get(userId) == ConnectionState.CONNECTED;
+        return stateRegistry.isConnected(userId);
     }
 
     public void pushPeekRequest(String userId, String peekId) {
@@ -139,18 +125,21 @@ public class ConnectionStateManager {
 
     public void onUserConnected(String userId) {
         log.info("用户连接：userId={}", userId);
-        connectionStates.put(userId, ConnectionState.CONNECTED);
-        ensureQueueExists(userId);
+        stateRegistry.setConnected(userId);
+        queueManager.ensureQueuesExist(userId);
         ensureSenderStarted(userId);
     }
 
     public void onUserDisconnected(String userId) {
         log.info("用户断开连接：userId={}", userId);
-        connectionStates.put(userId, ConnectionState.DISCONNECTED);
+        stateRegistry.setDisconnected(userId);
         senderExecutor.schedule(() -> {
-            ConnectionState state = connectionStates.get(userId);
-            if (state == ConnectionState.DISCONNECTED) {
-                clearQueue(userId);
+            if (!stateRegistry.isConnected(userId)) {
+                queueManager.clearAndRemoveQueue(userId);
+                Thread thread = senderThreads.remove(userId);
+                if (thread != null && thread.isAlive()) {
+                    thread.interrupt();
+                }
                 log.debug("队列已清理：userId={}", userId);
             } else {
                 log.debug("用户已重新连接，跳过清理：userId={}", userId);
@@ -163,11 +152,7 @@ public class ConnectionStateManager {
         // The actual lastActiveTime management is moved to HeartbeatChecker
     }
 
-
-    private void ensureQueueExists(String userId) {
-        userQueues.computeIfAbsent(userId, k -> new LinkedBlockingQueue<>(QUEUE_CAPACITY));
-        userQueues.computeIfAbsent(userId + CONTROL_SUFFIX, k -> new LinkedBlockingQueue<>(QUEUE_CAPACITY));
-    }
+    // ==================== 内部方法 ====================
 
     private void ensureSenderStarted(String queueKey) {
         senderThreads.computeIfAbsent(queueKey, k -> {
@@ -186,49 +171,30 @@ public class ConnectionStateManager {
             return;
         }
 
-        BlockingQueue<WebSocketMessage> queue = userQueues.get(userId);
-        if (queue == null) {
-            ensureQueueExists(userId);
-            queue = userQueues.get(userId);
-        }
-
-        if (queue.remainingCapacity() == 0) {
-            log.warn("消息队列已满，丢弃最老消息：userId={}", userId);
-            queue.poll();
-        }
-
-        boolean success = queue.offer(message);
-        if (!success) {
-            log.error("消息入队失败：userId={}", userId);
-        } else {
-            log.debug("消息已入队：userId={}, type={}, queueSize={}", userId, message.getType(), queue.size());
-        }
-
+        queueManager.offerToChatQueue(userId, message);
         ensureSenderStarted(userId);
     }
 
     private void enqueueControlMessage(String userId, WebSocketMessage message) {
-        BlockingQueue<WebSocketMessage> queue = userQueues.computeIfAbsent(userId + CONTROL_SUFFIX,
-                k -> new LinkedBlockingQueue<>(QUEUE_CAPACITY));
-
-        if (queue.remainingCapacity() == 0) {
-            queue.poll();
+        if (shuttingDown) {
+            log.warn("服务关闭中，丢弃消息：userId={}", userId);
+            return;
         }
 
-        queue.offer(message);
-        ensureSenderStarted(userId + CONTROL_SUFFIX);
+        queueManager.offerToControlQueue(userId, message);
+        ensureSenderStarted(userId + MessageQueueManager.CONTROL_SUFFIX);
     }
 
     private void senderLoop(String queueKey) {
-        String userId = queueKey.replace(CONTROL_SUFFIX, "");
-        boolean isControlQueue = queueKey.endsWith(CONTROL_SUFFIX);
+        String userId = queueKey.replace(MessageQueueManager.CONTROL_SUFFIX, "");
+        boolean isControlQueue = queueKey.endsWith(MessageQueueManager.CONTROL_SUFFIX);
         String destination = isControlQueue ? CONTROL_DESTINATION : CHAT_DESTINATION;
 
         log.info("senderLoop 开始运行：queueKey={}", queueKey);
 
         try {
             while (!shuttingDown) {
-                BlockingQueue<WebSocketMessage> queue = userQueues.get(queueKey);
+                BlockingQueue<WebSocketMessage> queue = queueManager.getQueue(queueKey);
                 if (queue == null) {
                     break;
                 }
@@ -246,12 +212,11 @@ public class ConnectionStateManager {
 
                 log.info("senderLoop 获取到消息: queueKey={}, type={}", queueKey, message.getType());
 
-                ReentrantLock lock = userLocks.computeIfAbsent(userId, k -> new ReentrantLock());
+                var lock = queueManager.getLock(userId);
                 boolean sendSuccess = false;
                 lock.lock();
                 try {
-                    ConnectionState state = connectionStates.get(userId);
-                    if (state == ConnectionState.DISCONNECTED) {
+                    if (!stateRegistry.isConnected(userId)) {
                         log.info("用户已断开，丢弃消息: userId={}", userId);
                         sendSuccess = true;
                         continue;
@@ -289,18 +254,5 @@ public class ConnectionStateManager {
         log.info("发送消息: userId={}, destination={}, type={}", userId, destination, message.getType());
         messagingTemplate.convertAndSendToUser(userId, destination, message);
         log.info("消息已发送: userId={}, destination={}, type={}", userId, destination, message.getType());
-    }
-
-    private void clearQueue(String queueKey) {
-        BlockingQueue<WebSocketMessage> queue = userQueues.remove(queueKey);
-        if (queue != null) {
-            int size = queue.size();
-            log.debug("清空未发送消息：queueKey={}, count={}", queueKey, size);
-        }
-        // ReentrantLock 不主动移除，GC 会处理无引用的锁对象
-        Thread thread = senderThreads.remove(queueKey);
-        if (thread != null && thread.isAlive()) {
-            thread.interrupt();
-        }
     }
 }

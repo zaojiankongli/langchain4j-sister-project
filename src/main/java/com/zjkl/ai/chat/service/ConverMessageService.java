@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 对话消息
@@ -61,6 +62,7 @@ public class ConverMessageService {
     /**
      * 查询用户消息历史
      */
+    @Transactional(readOnly = true)
     public List<ConverMessage> getHistory(String userId, int offset, int limit) {
         return converMessageMapper.selectByUserId(userId, offset, limit);
     }
@@ -68,6 +70,7 @@ public class ConverMessageService {
     /**
      * 查询用户最近的 N 条消息
      */
+    @Transactional(readOnly = true)
     public List<ConverMessage> getLatestMessages(String userId, int limit) {
         return converMessageMapper.selectLatestByUserId(userId, limit);
     }
@@ -75,9 +78,18 @@ public class ConverMessageService {
     /**
      * 查询指定日期的消息
      */
+    @Transactional(readOnly = true)
     public List<ConverMessage> getByDate(String userId, String date) {
         LocalDateTime startTime = LocalDate.parse(date).atStartOfDay();
         LocalDateTime endTime = startTime.plusDays(1);
+        return converMessageMapper.selectByUserIdAndTimeRange(userId, startTime, endTime);
+    }
+
+    /**
+     * 按时间范围查询消息（用于情绪模块，避免跨模块 mapper 访问）
+     */
+    @Transactional(readOnly = true)
+    public List<ConverMessage> getByTimeRange(String userId, LocalDateTime startTime, LocalDateTime endTime) {
         return converMessageMapper.selectByUserIdAndTimeRange(userId, startTime, endTime);
     }
 
