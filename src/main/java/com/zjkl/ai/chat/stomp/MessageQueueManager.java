@@ -9,7 +9,6 @@ import org.springframework.stereotype.Component;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * 消息队列管理器
@@ -22,7 +21,6 @@ public class MessageQueueManager {
 
     private final ThreadPoolProperties threadPoolProperties;
     private final ConcurrentHashMap<String, BlockingQueue<WebSocketMessage>> userQueues = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, ReentrantLock> userLocks = new ConcurrentHashMap<>();
     public static final String CONTROL_SUFFIX = "_control";
 
     /**
@@ -77,13 +75,6 @@ public class MessageQueueManager {
     }
 
     /**
-     * 获取用户锁
-     */
-    public ReentrantLock getLock(String userId) {
-        return userLocks.computeIfAbsent(userId, k -> new ReentrantLock());
-    }
-
-    /**
      * 移除并返回队列大小
      */
     public int clearAndRemoveQueue(String queueKey) {
@@ -94,13 +85,6 @@ public class MessageQueueManager {
             return size;
         }
         return 0;
-    }
-
-    /**
-     * 移除用户锁（断开连接清理时调用，防止内存泄漏）
-     */
-    public void removeLock(String userId) {
-        userLocks.remove(userId);
     }
 
     /**

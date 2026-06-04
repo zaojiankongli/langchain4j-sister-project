@@ -34,6 +34,7 @@ public class GraphBuilder {
     // deduplication
     private final Map<String, String> entityNameToId = new HashMap<>();
     private final Map<String, String> relationTextToId = new HashMap<>();
+    private final Set<String> passageIdSet = new LinkedHashSet<>();
 
     // triplet storage
     @Getter
@@ -66,6 +67,7 @@ public class GraphBuilder {
         passageIds.clear();
         entityNameToId.clear();
         relationTextToId.clear();
+        passageIdSet.clear();
         relationIdToTriplet.clear();
         entityToRelationIds.clear();
         entityToPassageIds.clear();
@@ -81,8 +83,10 @@ public class GraphBuilder {
 
         for (Document doc : documents) {
             String passageId = doc.getId() != null ? doc.getId() : UUID.randomUUID().toString();
-            passages.put(passageId, doc.getText());
-            passageIds.add(passageId);
+            if (passageIdSet.add(passageId)) {
+                passages.put(passageId, doc.getText());
+                passageIds.add(passageId);
+            }
             if (doc.getId() == null) doc.setId(passageId);
 
             // Process triplets

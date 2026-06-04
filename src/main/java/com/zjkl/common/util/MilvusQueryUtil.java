@@ -105,6 +105,7 @@ public final class MilvusQueryUtil {
      * 转义 Milvus filter 表达式中的特殊字符（引号、反斜杠、换行、控制字符）
      */
     public static String escape(String value) {
+        if (value == null) return "";
         return value
                 .replace("\\", "\\\\")
                 .replace("\"", "\\\"")

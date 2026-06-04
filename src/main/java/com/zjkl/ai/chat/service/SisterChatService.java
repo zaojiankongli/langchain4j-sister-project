@@ -182,8 +182,15 @@ public class SisterChatService {
                     graphFuture = CompletableFuture.completedFuture(GraphResult.empty());
                 }
 
-                // 等待所有结果
-                CompletableFuture.allOf(memoryFuture, snapshotFuture, graphFuture).join();
+                // 等待所有结果（带超时保护）
+                try {
+                    CompletableFuture.allOf(memoryFuture, snapshotFuture, graphFuture)
+                            .get(15, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (java.util.concurrent.TimeoutException te) {
+                    log.warn("RAG pipeline 超时（15s），使用已完成的结果继续", te);
+                } catch (Exception e) {
+                    log.warn("RAG pipeline 异常，使用已完成的结果继续", e);
+                }
 
                 MemoryBlockResult memResult = memoryFuture.get();
                 String graphSnapshot = snapshotFuture.get();

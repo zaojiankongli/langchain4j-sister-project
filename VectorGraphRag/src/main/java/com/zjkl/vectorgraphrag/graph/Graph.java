@@ -7,6 +7,7 @@ import com.zjkl.vectorgraphrag.storage.MilvusStore;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import static com.zjkl.vectorgraphrag.graph.GraphBuilder.normalizePhrase;
@@ -22,8 +23,8 @@ public class Graph {
     private final EmbeddingClient embeddingClient;
     private final MilvusStore store;
 
-    private final Map<String, String> entityNameToId = new HashMap<>();
-    private final Map<String, String> relationTextToId = new HashMap<>();
+    private final Map<String, String> entityNameToId = new ConcurrentHashMap<>();
+    private final Map<String, String> relationTextToId = new ConcurrentHashMap<>();
 
     public Graph(VectorGraphRagSettings settings, MilvusStore store, EmbeddingClient embeddingClient) {
         this.settings = settings;

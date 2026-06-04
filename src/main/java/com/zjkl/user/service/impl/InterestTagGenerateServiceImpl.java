@@ -31,6 +31,8 @@ public class InterestTagGenerateServiceImpl implements InterestTagGenerateServic
     private static final int WORKFLOW_TIMEOUT_SECONDS = 120;
     private static final int MAX_TAGS_PER_USER = 10;
 
+    private final java.util.concurrent.ExecutorService virtualExecutor =
+            java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor();
     private final UntypedAgent tagWorkflow;
     private final UserProfileMapper userProfileMapper;
     private final ConversationMemoryMapper conversationMemoryMapper;
@@ -90,7 +92,7 @@ public class InterestTagGenerateServiceImpl implements InterestTagGenerateServic
                             "hobbies", user.getHobbies() != null ? user.getHobbies() : "暂无爱好",
                             "existingTags", existingTagsStr,
                             "memoryContent", memoryContent
-                    ))
+                    )), virtualExecutor
             ).orTimeout(WORKFLOW_TIMEOUT_SECONDS, TimeUnit.SECONDS).join();
 
             // 6. 解析结果

@@ -85,7 +85,10 @@ public class OssController {
      * OSS key 格式为 {@code folder/userId/filename}，检查第 2 个段（index 1）是否为 userId。
      */
     private boolean isOwnedBy(String objectKey, String userId) {
-        String[] segments = objectKey.split("/");
-        return segments.length >= 2 && segments[1].equals(userId);
+        if (objectKey == null || userId == null) return false;
+        for (String segment : objectKey.split("/")) {
+            if (userId.equals(segment)) return true;
+        }
+        return false;
     }
 }

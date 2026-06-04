@@ -1,6 +1,8 @@
 package com.zjkl.auth.dto;
 
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -15,12 +17,16 @@ public record CompleteProfileRequest(
     @Size(min = 2, max = 20, message = "用户名长度必须在 2-20 之间")
     String username,
 
+    @Min(value = 0, message = "性别值无效")
+    @Max(value = 2, message = "性别值无效")
     Integer gender,
     
     /**
      * AI 身份（必填）
      * 1-哥哥，2-妹妹，3-姐姐，4-弟弟，5-青梅，6-竹马
      */
+    @Min(value = 1, message = "AI 身份值无效")
+    @Max(value = 6, message = "AI 身份值无效")
     Integer aiType,
     
     /**

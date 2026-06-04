@@ -11,6 +11,7 @@ import com.zjkl.emotion.util.AudioBuffer;
 import com.zjkl.settings.service.SettingsService;
 import com.zjkl.emotion.util.LlmResponseStreamParser;
 import com.zjkl.ai.chat.stomp.ChatPushService;
+import com.zjkl.ai.chat.stomp.SemanticPetEventAdapter;
 import dev.langchain4j.memory.chat.ChatMemoryProvider;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -36,10 +37,6 @@ import java.util.concurrent.atomic.AtomicReference;
 @RequiredArgsConstructor
 public class ChatVoiceServiceImpl implements ChatVoiceService {
 
-    private static final String PET_PRIORITY_NORMAL = "normal";
-    private static final String PET_MOTION_THINKING = "thinking";
-    private static final String PET_MOTION_SPEAKING = "speaking";
-
     private final TtsStreamingService ttsStreamingService;
     private final SettingsService settingsService;
 
@@ -47,6 +44,7 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
     private final EmotionAnchorService anchorService;
     private final SisterChatService sisterChatService;
     private final ChatPushService chatPushService;
+    private final SemanticPetEventAdapter semanticPetEventAdapter;
     private final ChatMemoryProvider redisChatMemoryProvider;
     private final ConverMessageService converMessageService;
     private final LlmResponseStreamParser parser;
@@ -62,7 +60,7 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
         log.info("开始 WebSocket 语音聊天：userId={}, userInput=***, enableAudio={}", userId, enableAudio);
 
         try {
-            chatPushService.pushPetMotion(userId, PET_MOTION_THINKING, PET_PRIORITY_NORMAL);
+            semanticPetEventAdapter.pushChatPhase(userId, SemanticPetEventAdapter.ChatPhase.THINKING);
 
             // 并行处理图片
             SisterChatService.ChatResult chatResult = sisterChatService.chatWithVoice(userInput, userId, imageUrl);
@@ -86,7 +84,7 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
                 .concatMap(chunk -> {
                     if (!firstChunkSent.get()) {
                         firstChunkSent.set(true);
-                        chatPushService.pushPetMotion(userId, PET_MOTION_SPEAKING, PET_PRIORITY_NORMAL);
+                        semanticPetEventAdapter.pushChatPhase(userId, SemanticPetEventAdapter.ChatPhase.SPEAKING);
                     }
                     chatPushService.pushText(userId, chunk, false);
                     replyChunks.add(chunk);
@@ -242,7 +240,7 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
                         newEmotion.getFormattedArousal(),
                         newEmotion.getFormattedDominance(),
                         moodLabel, moodDesc);
-                    chatPushService.pushPetExpression(userId, mapMoodToPetExpression(moodLabel), 0.8, 3000);
+                    semanticPetEventAdapter.pushMoodExpression(userId, moodLabel);
                 })
                 .doOnError(error -> {
                     log.warn("情绪更新失败：userId={}", userId, error);
@@ -256,30 +254,6 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
         }
 
         return future;
-    }
-
-    private String mapMoodToPetExpression(String moodLabel) {
-        if (moodLabel == null || moodLabel.isBlank()) {
-            return "neutral";
-        }
-
-        String normalized = moodLabel.toLowerCase();
-        if (normalized.contains("怒") || normalized.contains("烦") || normalized.contains("error")) {
-            return "error";
-        }
-        if (normalized.contains("惊") || normalized.contains("surprised")) {
-            return "surprised";
-        }
-        if (normalized.contains("想") || normalized.contains("思") || normalized.contains("thinking")) {
-            return "thinking";
-        }
-        if (normalized.contains("伤") || normalized.contains("sad") || normalized.contains("难过")) {
-            return "sad";
-        }
-        if (normalized.contains("开") || normalized.contains("喜") || normalized.contains("happy")) {
-            return "happy";
-        }
-        return "neutral";
     }
 
     /**

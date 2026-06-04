@@ -6,13 +6,12 @@ import com.zjkl.auth.dto.RefreshTokenRequest;
 import com.zjkl.auth.dto.SendCodeRequest;
 import com.zjkl.auth.service.AuthService;
 import com.zjkl.common.context.UserContext;
+import com.zjkl.common.util.HashUtil;
 import com.zjkl.common.util.RateLimiter;
 import com.zjkl.common.Result;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
-import java.security.MessageDigest;
-import java.util.HexFormat;
 import java.util.Map;
 
 /**
@@ -104,13 +103,6 @@ public class AuthController {
      * 对 token 做 SHA-256 摘要，取前 16 位十六进制作为限流 key
      */
     private static String hashToken(String token) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] digest = md.digest(token.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(digest, 0, 8);
-        } catch (Exception e) {
-            // fallback: 取前 20 字符
-            return token.substring(0, Math.min(token.length(), 20));
-        }
+        return HashUtil.sha256Hex(token).substring(0, 16);
     }
 }

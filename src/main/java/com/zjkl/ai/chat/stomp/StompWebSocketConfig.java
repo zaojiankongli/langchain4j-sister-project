@@ -29,6 +29,8 @@ public class StompWebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private static final String STOMP_AUTH_FAILED_MESSAGE = "认证失败";
     private static final String STOMP_ACCESS_DENIED_MESSAGE = "无权访问";
+    private static final java.util.regex.Pattern USER_DEST_PATTERN =
+        java.util.regex.Pattern.compile("^/queue/(?:chat|control)-user(.+)$");
 
     private final JwtUtil jwtUtil;
     private final WebSocketProperties webSocketProperties;
@@ -124,8 +126,7 @@ public class StompWebSocketConfig implements WebSocketMessageBrokerConfigurer {
                     }
                     if (destination != null) {
                         // 严格匹配已知队列前缀 + "-user" + userId，防止 indexOf 误匹配中间子串
-                        java.util.regex.Pattern userDestPattern = java.util.regex.Pattern.compile("^/queue/(?:chat|control)-user(.+)$");
-                        java.util.regex.Matcher m = userDestPattern.matcher(destination);
+                        java.util.regex.Matcher m = USER_DEST_PATTERN.matcher(destination);
                         if (m.matches()) {
                             String targetUserId = m.group(1);
                             if (!targetUserId.isEmpty() && !targetUserId.equals(user.getName())) {

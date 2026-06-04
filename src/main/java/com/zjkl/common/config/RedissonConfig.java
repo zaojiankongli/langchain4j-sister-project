@@ -30,7 +30,7 @@ public class RedissonConfig {
      */
     @Bean
     public RedissonClient redissonClient() {
-        log.info("初始化 Redisson 客户端 - host={}:{}", redisProperties.getHost(), redisProperties.getPort());
+        log.debug("初始化 Redisson 客户端 - host={}:{}", redisProperties.getHost(), redisProperties.getPort());
         
         Config config = new Config();
         var singleServerConfig = config.useSingleServer();
@@ -44,7 +44,7 @@ public class RedissonConfig {
         int poolSize = threadPoolProperties.getRedissonPoolSize();
         singleServerConfig.setConnectionMinimumIdleSize(minIdle);
         singleServerConfig.setConnectionPoolSize(poolSize);
-        log.info("Redisson 连接池配置：minIdle={}, poolSize={}", minIdle, poolSize);
+        log.debug("Redisson 连接池配置：minIdle={}, poolSize={}", minIdle, poolSize);
         
         RedissonClient redissonClient = Redisson.create(config);
         

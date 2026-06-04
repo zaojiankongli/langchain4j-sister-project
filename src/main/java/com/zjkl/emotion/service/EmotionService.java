@@ -381,9 +381,8 @@ public class EmotionService {
         }
 
         personalityCache.put(userId, personality);
-        localCache.invalidate(userId);
 
-        // 删除 Redis 中的当前情感 hash key，使下次 getUserEmotion 基于新 personality 重新计算
+        // 删除 Redis 情感缓存，再刷新本地缓存，防止并发线程读到旧数据
         try {
             redisTemplate.delete(EMOTION_KEY_PREFIX + userId);
             log.debug("已清除用户情感缓存，将基于新人格重新计算: userId={}", userId);
@@ -391,7 +390,10 @@ public class EmotionService {
             log.warn("清除用户情感缓存失败: userId={}", userId, e);
         }
 
+        // Pre-populate local cache with base emotion from new personality to prevent stale reads
         EmotionalState basePAD = personality.toBasePAD();
+        localCache.put(userId, basePAD);
+
         log.info("用户新的基础 PAD - P: {}, A: {}, D: {}",
                 basePAD.getPleasure(), basePAD.getArousal(), basePAD.getDominance());
     }

@@ -59,11 +59,11 @@ public class JwtUtil {
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
-            return Map.of(
-                "userId", claims.getSubject(),
-                "email", claims.get("email", String.class),
-                "username", claims.get("username", String.class)
-            );
+            Map<String, String> result = new java.util.HashMap<>();
+            result.put("userId", claims.getSubject());
+            result.put("email", claims.get("email", String.class));
+            result.put("username", claims.get("username", String.class));
+            return result;
         } catch (Exception e) {
             return null;
         }

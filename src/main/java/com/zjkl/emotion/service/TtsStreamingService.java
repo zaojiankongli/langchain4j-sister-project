@@ -69,6 +69,7 @@ public class TtsStreamingService {
                     @Override
                     public void onError(Exception e) {
                         log.error("TTS 合成错误：userId={}", userId, e);
+                        audioBuffer.markSynthesisCompleted();
                         chatPushService.pushError(userId, "语音合成失败");
                     }
                 });

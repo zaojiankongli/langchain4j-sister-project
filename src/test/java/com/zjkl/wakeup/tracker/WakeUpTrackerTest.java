@@ -1,5 +1,6 @@
 package com.zjkl.wakeup.tracker;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -12,7 +13,7 @@ class WakeUpTrackerTest {
 
     @Test
     void maybeSwap_shouldKeepOriginalBestIndexAndTrackActualSentIndex() {
-        WakeUpTracker tracker = new WakeUpTracker(null, null);
+        WakeUpTracker tracker = new WakeUpTracker(null, null, new ObjectMapper());
 
         WakeUpTracker.SwapResult result = tracker.maybeSwap(
                 List.of("A", "B", "C"),
@@ -30,7 +31,7 @@ class WakeUpTrackerTest {
 
     @Test
     void maybeSwap_shouldUseBestIndexAsActualSentIndexWhenNotSwapped() {
-        WakeUpTracker tracker = new WakeUpTracker(null, null);
+        WakeUpTracker tracker = new WakeUpTracker(null, null, new ObjectMapper());
 
         WakeUpTracker.SwapResult result = tracker.maybeSwap(
                 List.of("A", "B", "C"),

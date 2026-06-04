@@ -17,7 +17,7 @@ public class RateLimiter {
         "redis.call('zremrangebyscore', key, 0, now - window) " +
         "local count = redis.call('zcard', key) " +
         "if count < max then " +
-        "    redis.call('zadd', key, now, now .. '-' .. math.random(1000000)) " +
+        "    redis.call('zadd', key, now, now .. '-' .. (count + 1)) " +
         "    redis.call('pexpire', key, window) " +
         "    return 1 " +
         "end " +

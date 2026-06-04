@@ -92,7 +92,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalArgumentException.class)
     public Result<?> handleIllegalArgument(IllegalArgumentException e, HttpServletRequest request) {
         log.warn("业务参数错误 [{} {}]: {}", request.getMethod(), request.getRequestURI(), e.getMessage());
-        return Result.badRequest(e.getMessage());
+        return Result.badRequest("请求参数不合法，请检查输入");
     }
 
     /**

@@ -527,12 +527,18 @@ public class GraphEntityService {
 
     private boolean isRapidFireBlocked(String userId) {
         String key = GraphRedisKeys.RAPID_FIRE_KEY + userId;
+        // Check if currently in block window
+        String value = stringRedisTemplate.opsForValue().get(key);
+        if ("blocked".equals(value)) {
+            return true;
+        }
         Long count = stringRedisTemplate.opsForValue().increment(key);
         if (Long.valueOf(1L).equals(count)) {
             stringRedisTemplate.expire(key, GraphRedisKeys.RAPID_FIRE_WINDOW);
         }
         if (count != null && count >= 3L) {
-            stringRedisTemplate.opsForValue().set(key, String.valueOf(count), GraphRedisKeys.RAPID_FIRE_BLOCK);
+            // Set block marker with block TTL; counter resets when TTL expires
+            stringRedisTemplate.opsForValue().set(key, "blocked", GraphRedisKeys.RAPID_FIRE_BLOCK);
             return true;
         }
         return false;

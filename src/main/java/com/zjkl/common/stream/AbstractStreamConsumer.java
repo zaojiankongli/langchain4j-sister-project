@@ -69,7 +69,9 @@ public abstract class AbstractStreamConsumer {
 
     @PostConstruct
     public void startConsumer() {
-        consumerThread = Thread.startVirtualThread(this::consumeLoop);
+        consumerThread = Thread.ofVirtual()
+                .name(getLogPrefix() + "-consumer-", 0)
+                .start(this::consumeLoop);
         log.info("{}生成消费者已启动（虚拟线程）", getLogPrefix());
     }
 

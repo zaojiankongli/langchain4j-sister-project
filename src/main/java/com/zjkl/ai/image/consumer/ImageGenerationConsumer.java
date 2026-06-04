@@ -76,10 +76,16 @@ public class ImageGenerationConsumer extends AbstractStreamConsumer {
             acquireImagePermit(taskId);
 
             log.info("触发异步图片生成：userId={}, date={}", userId, memoryDate);
-            CompletableFuture<String> imageFuture =
-                memoryImageGenerator.generateImageAsync(userId, title, summary, memoryDate);
-
             String recordId = record.getId().getValue();
+            CompletableFuture<String> imageFuture;
+            try {
+                imageFuture = memoryImageGenerator.generateImageAsync(userId, title, summary, memoryDate);
+            } catch (Exception e) {
+                inFlightImageTasks.release();
+                log.error("图片生成异步调用失败：taskId={}, userId={}", taskId, userId, e);
+                acknowledge(recordId);
+                return;
+            }
 
             imageFuture.whenComplete((imageUrl, throwable) -> {
                 try {

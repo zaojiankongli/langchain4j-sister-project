@@ -1,9 +1,12 @@
 package com.zjkl.common.util;
 
+import lombok.extern.slf4j.Slf4j;
+
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 
+@Slf4j
 public class DateFilterParser {
 
     private DateFilterParser() {}
@@ -29,6 +32,7 @@ public class DateFilterParser {
                 YearMonth ym = YearMonth.parse(normalized, DateTimeFormatter.ofPattern("yyyy.MM"));
                 return new String[]{ym.atDay(1).toString(), ym.plusMonths(1).atDay(1).toString()};
             } catch (Exception e) {
+                log.debug("日期解析失败: {}", filter, e);
                 return new String[]{null, null};
             }
         }

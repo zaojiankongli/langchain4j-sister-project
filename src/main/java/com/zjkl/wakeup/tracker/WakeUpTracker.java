@@ -2,16 +2,14 @@ package com.zjkl.wakeup.tracker;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.zjkl.wakeup.tool.UserStateTool;
-import jakarta.annotation.PostConstruct;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
@@ -25,21 +23,12 @@ public class WakeUpTracker {
 
     private final StringRedisTemplate redisTemplate;
     private final UserStateTool userStateTool;
+    private final ObjectMapper objectMapper;
 
     private static final String RECORD_KEY_PREFIX = "wakeup:record:";
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final double AB_TEST_RATIO = 0.05;
     private static final long REPLY_WINDOW_MINUTES = 30;
-
-    private ObjectMapper objectMapper;
-
-    @PostConstruct
-    public void init() {
-        objectMapper = new ObjectMapper();
-        objectMapper.registerModule(new JavaTimeModule());
-        objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-        log.info("WakeUpTracker 初始化完成, AB_TEST_RATIO={}", AB_TEST_RATIO);
-    }
 
     public SwapResult maybeSwap(List<String> candidates, int[] scores, int bestIndex) {
         return maybeSwap(candidates, scores, bestIndex, ThreadLocalRandom.current().nextDouble(), null);
@@ -101,7 +90,7 @@ public class WakeUpTracker {
                 records = new ArrayList<>();
             }
             records.add(record);
-            redisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(records));
+            redisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(records), Duration.ofDays(7));
         } catch (Exception e) {
             log.warn("记录唤醒发送失败: userId={}", userId, e);
         }
@@ -128,7 +117,7 @@ public class WakeUpTracker {
                 }
             }
             if (updated) {
-                redisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(records));
+                redisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(records), Duration.ofDays(7));
                 log.debug("标记用户已回复唤醒消息: userId={}", userId);
             }
         } catch (Exception e) {

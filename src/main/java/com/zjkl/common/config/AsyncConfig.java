@@ -1,6 +1,5 @@
 package com.zjkl.common.config;
 
-import com.zjkl.common.config.properties.ThreadPoolProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.aop.interceptor.AsyncUncaughtExceptionHandler;
 import org.springframework.context.annotation.Bean;
@@ -25,12 +24,6 @@ public class AsyncConfig implements AsyncConfigurer {
     private static final int IMAGE_TASK_CORE_POOL_SIZE = 1;
     private static final int IMAGE_TASK_MAX_POOL_SIZE = 2;
     private static final int IMAGE_TASK_QUEUE_CAPACITY = 20;
-
-    private final ThreadPoolProperties threadPoolProperties;
-
-    public AsyncConfig(ThreadPoolProperties threadPoolProperties) {
-        this.threadPoolProperties = threadPoolProperties;
-    }
 
     @Override
     @Bean(name = "asyncTaskExecutor")

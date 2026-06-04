@@ -36,6 +36,10 @@ public class ChatStompController {
      */
     @MessageMapping("/chat")
     public void handleChat(ChatRequest request, Principal principal) {
+        if (principal == null) {
+            log.warn("未认证的 STOMP 消息");
+            return;
+        }
         String userId = principal.getName();
         String text = request.getText();
         Boolean enableAudio = request.getEnableAudio();
@@ -82,6 +86,10 @@ public class ChatStompController {
      */
     @MessageMapping("/ping")
     public void handlePing(Principal principal) {
+        if (principal == null) {
+            log.warn("未认证的 STOMP 消息");
+            return;
+        }
         String userId = principal.getName();
         log.debug("收到心跳：userId={}", userId);
         chatPushService.pushPong(userId);

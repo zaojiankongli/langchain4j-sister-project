@@ -183,7 +183,6 @@ public class ConnectionStateManager {
                     controlThread.interrupt();
                 }
                 stateRegistry.removeUser(userId);
-                queueManager.removeLock(userId);
                 log.debug("队列已清理：userId={}", userId);
             } else {
                 log.debug("用户已重新连接，跳过清理：userId={}", userId);

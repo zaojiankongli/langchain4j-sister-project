@@ -566,7 +566,7 @@ public class MilvusStore {
      */
     private static final Pattern SAFE_ID_PATTERN = Pattern.compile("^[\\p{L}0-9._\\-:]+$");
 
-    private static void validateIds(List<String> ids) {
+    public static void validateIds(List<String> ids) {
         for (String id : ids) {
             if (id == null || !SAFE_ID_PATTERN.matcher(id).matches()) {
                 throw new IllegalArgumentException("Invalid ID for Milvus filter: " + id);

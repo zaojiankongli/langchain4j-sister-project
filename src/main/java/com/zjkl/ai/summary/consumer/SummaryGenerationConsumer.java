@@ -134,7 +134,7 @@ public class SummaryGenerationConsumer extends AbstractStreamConsumer {
                 throw e;
             }
         } finally {
-            if (success && locked && lock.isHeldByCurrentThread()) {
+            if (lock.isHeldByCurrentThread()) {
                 lock.unlock();
             }
         }

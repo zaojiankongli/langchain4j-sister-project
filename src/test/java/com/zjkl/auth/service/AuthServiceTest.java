@@ -2,6 +2,8 @@ package com.zjkl.auth.service;
 
 import com.zjkl.auth.dto.LoginRequest;
 import com.zjkl.auth.exception.UnauthorizedException;
+import com.zjkl.common.config.properties.AuthProperties;
+import com.zjkl.common.util.HashUtil;
 import com.zjkl.common.util.JwtUtil;
 import com.zjkl.user.domain.User;
 import com.zjkl.user.mapper.UserMapper;
@@ -19,7 +21,6 @@ import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.core.env.Environment;
 
-import java.security.MessageDigest;
 import java.util.Map;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -50,6 +51,9 @@ class AuthServiceTest {
     private UserProfileManageService userProfileManageService;
 
     @Mock
+    private AuthProperties authProperties;
+
+    @Mock
     private ValueOperations<String, String> valueOperations;
 
     private AuthService authService;
@@ -63,8 +67,9 @@ class AuthServiceTest {
     void setUp() {
         lenient().when(env.getProperty("spring.mail.username")).thenReturn("noreply@example.com");
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        lenient().when(authProperties.getRefreshTokenExpiration()).thenReturn(604800000L); // 7 days in ms
         // Manually construct after env mock is set up (env.getProperty called in constructor)
-        authService = new AuthService(userMapper, jwtUtil, redisTemplate, mailSender, env, userProfileManageService);
+        authService = new AuthService(userMapper, jwtUtil, redisTemplate, mailSender, env, userProfileManageService, authProperties);
     }
 
     @Test
@@ -180,7 +185,8 @@ class AuthServiceTest {
         testUser.setId(userId);
         testUser.setEmail(TEST_EMAIL);
 
-        when(redisTemplate.hasKey("auth:token:blacklist:" + sha256(refreshToken))).thenReturn(false);
+        // Atomic blacklist script returns 1 (not previously blacklisted)
+        when(redisTemplate.execute(any(), anyList(), eq("1"), anyString())).thenReturn(1L);
         when(jwtUtil.parseRefreshToken(refreshToken)).thenReturn(userId);
         when(userMapper.findById(userId)).thenReturn(testUser);
         when(jwtUtil.generateAccessToken(testUser)).thenReturn("new-access-token");
@@ -194,7 +200,6 @@ class AuthServiceTest {
         assertEquals("new-access-token", result.get("accessToken"));
         assertEquals("new-refresh-token", result.get("refreshToken"));
 
-        verify(redisTemplate).hasKey("auth:token:blacklist:" + sha256(refreshToken));
         verify(jwtUtil).parseRefreshToken(refreshToken);
         verify(userMapper).findById(userId);
     }
@@ -206,7 +211,8 @@ class AuthServiceTest {
         testUser.setId(TEST_USER_ID);
         testUser.setEmail(TEST_EMAIL);
 
-        when(redisTemplate.hasKey("auth:token:blacklist:" + sha256(refreshToken))).thenReturn(false);
+        // Atomic blacklist script returns 1
+        when(redisTemplate.execute(any(), anyList(), eq("1"), anyString())).thenReturn(1L);
         when(jwtUtil.parseRefreshToken(refreshToken)).thenReturn(TEST_USER_ID);
         when(userMapper.findById(TEST_USER_ID)).thenReturn(testUser);
         when(jwtUtil.generateAccessToken(testUser)).thenReturn("new-access-token");
@@ -214,12 +220,8 @@ class AuthServiceTest {
 
         authService.refreshToken(refreshToken);
 
-        verify(valueOperations).set(
-                eq("auth:token:blacklist:" + sha256(refreshToken)),
-                eq("1"),
-                eq(7L * 24 * 3600),
-                eq(TimeUnit.SECONDS)
-        );
+        // Verify the atomic script was called (blacklist done atomically)
+        verify(redisTemplate).execute(any(), anyList(), eq("1"), anyString());
     }
 
     @Test
@@ -227,30 +229,18 @@ class AuthServiceTest {
         // Arrange
         String userId = TEST_USER_ID;
         String refreshToken = "valid-refresh-token";
+        long expectedExpireSeconds = 604800000L / 1000 + 60; // 604860
 
         // Act
         authService.logout(userId, refreshToken, null);
 
         // Assert
         verify(valueOperations).set(
-                eq("auth:token:blacklist:" + sha256(refreshToken)),
+                eq("auth:token:blacklist:" + HashUtil.sha256Hex(refreshToken)),
                 eq("1"),
-                eq(7L * 24 * 3600),
+                eq(expectedExpireSeconds),
                 eq(TimeUnit.SECONDS)
         );
     }
 
-    private static String sha256(String input) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] hash = md.digest(input.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder();
-            for (byte b : hash) {
-                sb.append(String.format("%02x", b));
-            }
-            return sb.toString();
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
 }

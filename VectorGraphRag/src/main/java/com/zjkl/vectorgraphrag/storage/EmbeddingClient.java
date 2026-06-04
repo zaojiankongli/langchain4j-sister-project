@@ -16,7 +16,7 @@ public class EmbeddingClient {
 
     private final VectorGraphRagSettings settings;
     private final OpenAiClient openAiClient;
-    private Integer dimension;
+    private volatile Integer dimension;
 
     public EmbeddingClient(VectorGraphRagSettings settings, OpenAiClient openAiClient) {
         this.settings = settings;

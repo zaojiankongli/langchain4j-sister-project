@@ -22,11 +22,9 @@ public class RagRouter {
 
     private static final int MAX_CONTEXT_MESSAGES = 30;
 
-    private final QwenChatModel qwenChatModel;
     private final QueryAnalyzer queryAnalyzer;
 
     public RagRouter(QwenChatModel qwenChatModel) {
-        this.qwenChatModel = qwenChatModel;
         this.queryAnalyzer = AiServices.create(QueryAnalyzer.class, qwenChatModel);
     }
 

@@ -94,8 +94,11 @@ public class MailScheduler {
         Set<String> userIds = userActivityTracker.getActiveMemoryIdsInLastDays(7);
         if (userIds.isEmpty()) return;
 
+        // 限制处理用户数，防止定时任务执行过久
+        List<String> limitedUserIds = userIds.stream().limit(200).toList();
+
         int sent = 0;
-        for (String userId : userIds) {
+        for (String userId : limitedUserIds) {
             String cooldownKey = SILENCE_MAIL_COOLDOWN_KEY_PREFIX + userId;
             boolean acquired = false;
             try {
@@ -124,9 +127,7 @@ public class MailScheduler {
             }
         }
 
-        if (sent > 0) {
-            log.info("沉默关怀完成：发送={} 封", sent);
-        }
+        log.info("沉默关怀完成：活跃用户={}, 处理用户={}, 发送={} 封", userIds.size(), limitedUserIds.size(), sent);
     }
 
     // ==================== 邮件内容生成 ====================

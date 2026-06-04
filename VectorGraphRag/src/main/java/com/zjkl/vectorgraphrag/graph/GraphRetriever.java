@@ -156,6 +156,7 @@ public class GraphRetriever {
                 // Eviction: use vector search to filter
                 log.info("Use Eviction Strategy. ({} -> {})", evictionBefore, threshold);
                 List<Float> qEmbed = embeddingClient.embed(query);
+                MilvusStore.validateIds(filteredExpandedIds);
                 String idsStr = filteredExpandedIds.stream()
                         .map(id -> "\"" + id + "\"")
                         .collect(Collectors.joining(", "));

@@ -16,6 +16,10 @@ import java.net.InetAddress;
 import java.net.URI;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 
 /**
  * 图片服务接口
@@ -31,6 +35,10 @@ public class ImageController {
     private final ImageElementExtractor imageElementExtractor;
     private final WanxImageService wanxImageService;
     private final UserContext userContext;
+
+    @Autowired
+    @Qualifier("imageTaskExecutor")
+    private Executor imageTaskExecutor;
 
     @GetMapping("/describe")
     public Result<Map<String, String>> describe(@RequestParam @Pattern(regexp = "^https?://.+") String imageUrl) {
@@ -69,7 +77,7 @@ public class ImageController {
         return CompletableFuture.supplyAsync(() -> {
             String imageUrl = wanxImageService.generate(elements);
             return Result.success(Map.of("imageUrl", imageUrl));
-        });
+        }, imageTaskExecutor);
     }
 
     /**

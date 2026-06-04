@@ -392,11 +392,11 @@ public class SummaryMemoryService {
             row.add("dense_vector", gson.toJsonTree(denseList));
             row.addProperty("metadata", gson.toJson(metaJson));
 
-            InsertReq insertReq = InsertReq.builder()
+            UpsertReq upsertReq = UpsertReq.builder()
                     .collectionName(milvusCollectionName)
                     .data(Collections.singletonList(row))
                     .build();
-            milvusClientV2.insert(insertReq);
+            milvusClientV2.upsert(upsertReq);
 
             log.debug("用户 {} 的摘要已存入 Milvus：title={}, 情绪={}, 情感分={}",
                     userId, title, emotionLabel, sentimentScore);

@@ -102,7 +102,7 @@ public class GraphQueryService {
         List<Map<String, Object>> matchedEntities = searchEntities(userId, queryEntities);
         // 取 top 实体分数作为图谱检索相关度评分（用于跨路 RAG 融合排序）
         double topScore = matchedEntities.isEmpty() ? 0.0
-                : ((Number) matchedEntities.get(0).get("score")).doubleValue();
+                : (matchedEntities.get(0).get("score") instanceof Number n ? n.doubleValue() : 0.0);
 
         Set<String> entityTexts = matchedEntities.stream()
                 .map(row -> row.get("text"))
@@ -198,7 +198,7 @@ public class GraphQueryService {
         }
 
         return results.stream()
-                .sorted(Comparator.comparingDouble((Map<String, Object> row) -> ((Number) row.get("score")).doubleValue()).reversed())
+                .sorted(Comparator.comparingDouble((Map<String, Object> row) -> row.get("score") instanceof Number n ? n.doubleValue() : 0.0).reversed())
                 .limit(ENTITY_RESULT_LIMIT)
                 .toList();
     }

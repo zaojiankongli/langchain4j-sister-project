@@ -128,6 +128,10 @@ public class PromptCacheService {
     
     /** 从文件加载 */
     private String loadFromFile(String key) {
+        if (key.contains("..") || key.contains("/") || key.contains("\\")) {
+            log.warn("非法的模板 key: {}", key);
+            return null;
+        }
         try {
             PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
             Resource resource = resolver.getResource("classpath:prompts/" + key + ".txt");

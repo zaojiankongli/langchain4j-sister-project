@@ -2,9 +2,8 @@ package com.zjkl.common.interceptor;
 
 import com.zjkl.common.config.properties.AuthProperties;
 import com.zjkl.common.context.UserContext;
+import com.zjkl.common.util.HashUtil;
 import com.zjkl.common.util.JwtUtil;
-import com.zjkl.user.domain.User;
-import com.zjkl.user.mapper.UserMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
@@ -12,7 +11,6 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
-import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Map;
 
@@ -30,15 +28,13 @@ public class AuthInterceptor implements HandlerInterceptor {
 
     private final JwtUtil jwtUtil;
     private final UserContext userContext;
-    private final UserMapper userMapper;
     private final AuthProperties authProperties;
     private final StringRedisTemplate stringRedisTemplate;
 
-    public AuthInterceptor(JwtUtil jwtUtil, UserContext userContext, UserMapper userMapper,
+    public AuthInterceptor(JwtUtil jwtUtil, UserContext userContext,
                            AuthProperties authProperties, StringRedisTemplate stringRedisTemplate) {
         this.jwtUtil = jwtUtil;
         this.userContext = userContext;
-        this.userMapper = userMapper;
         this.authProperties = authProperties;
         this.stringRedisTemplate = stringRedisTemplate;
     }
@@ -46,6 +42,11 @@ public class AuthInterceptor implements HandlerInterceptor {
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception {
         String uri = request.getRequestURI();
+
+        // CORS preflight requests should not require authentication
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            return true;
+        }
 
         // 白名单路径已在 WebMvcConfig.excludePathPatterns 中排除，此处不再重复检查
 
@@ -72,7 +73,7 @@ public class AuthInterceptor implements HandlerInterceptor {
         }
 
         // 检查 token 是否已被吊销（黑名单，使用 SHA-256 哈希值作为 key）
-        if (Boolean.TRUE.equals(stringRedisTemplate.hasKey("auth:token:blacklist:" + sha256(token)))) {
+        if (Boolean.TRUE.equals(stringRedisTemplate.hasKey("auth:token:blacklist:" + HashUtil.sha256Hex(token)))) {
             log.warn("Token 已被吊销：userId={}", parseResult.userId());
             writeUnauthorized(response);
             return false;
@@ -113,7 +114,7 @@ public class AuthInterceptor implements HandlerInterceptor {
      * 从 Authorization 头提取 token
      */
     private String extractToken(String authorization) {
-        if (authorization.startsWith("Bearer ")) {
+        if (authorization.regionMatches(true, 0, "Bearer ", 0, 7)) {
             return authorization.substring(7);
         }
         return null;
@@ -125,17 +126,4 @@ public class AuthInterceptor implements HandlerInterceptor {
         response.getWriter().write(UNAUTHORIZED_BODY);
     }
 
-    private static String sha256(String input) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] hash = md.digest(input.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder();
-            for (byte b : hash) {
-                sb.append(String.format("%02x", b));
-            }
-            return sb.toString();
-        } catch (java.security.NoSuchAlgorithmException e) {
-            throw new RuntimeException("SHA-256 not available", e);
-        }
-    }
 }
