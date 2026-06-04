@@ -25,6 +25,7 @@ import io.milvus.v2.service.vector.response.SearchResp;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.*;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -196,14 +197,14 @@ public class MilvusStore {
                 resultIds.add(ids.get(j));
             }
 
-            InsertReq insertReq = InsertReq.builder()
+            UpsertReq upsertReq = UpsertReq.builder()
                     .collectionName(collectionName)
                     .data(batch)
                     .build();
-            client.insert(insertReq);
+            client.upsert(upsertReq);
 
             if (showProgress) {
-                log.info("Inserted {}/{} into {}", end, ids.size(), collectionName);
+                log.debug("Inserted {}/{} into {}", end, ids.size(), collectionName);
             }
         }
 
@@ -300,6 +301,7 @@ public class MilvusStore {
 
     public List<Map<String, Object>> getEntitiesByIds(List<String> entityIds) {
         if (entityIds == null || entityIds.isEmpty()) return List.of();
+        validateIds(entityIds);
 
         String idsStr = entityIds.stream()
                 .map(id -> "\"" + id + "\"")
@@ -314,6 +316,7 @@ public class MilvusStore {
 
     public List<Map<String, Object>> getRelationsByIds(List<String> relationIds) {
         if (relationIds == null || relationIds.isEmpty()) return List.of();
+        validateIds(relationIds);
 
         String idsStr = relationIds.stream()
                 .map(id -> "\"" + id + "\"")
@@ -332,6 +335,7 @@ public class MilvusStore {
 
     public List<Map<String, Object>> getPassagesByIds(List<String> passageIds, String filter) {
         if (passageIds == null || passageIds.isEmpty()) return List.of();
+        validateIds(passageIds);
 
         String idsStr = passageIds.stream()
                 .map(id -> "\"" + id + "\"")
@@ -374,16 +378,7 @@ public class MilvusStore {
         update.addProperty("id", entityId);
         update.addProperty("text", text != null ? text : (String) data.get("text"));
 
-        if (embedding != null) {
-            JsonArray arr = new JsonArray();
-            for (float v : embedding) arr.add(v);
-            update.add("vector", arr);
-        } else {
-            List<Float> newEmbed = embeddingClient.embed(update.get("text").getAsString());
-            JsonArray arr = new JsonArray();
-            for (float v : newEmbed) arr.add(v);
-            update.add("vector", arr);
-        }
+        setVectorField(update, embedding, update.get("text").getAsString());
 
         if (relationIds != null) {
             JsonArray arr = new JsonArray();
@@ -411,17 +406,7 @@ public class MilvusStore {
         update.addProperty("id", relationId);
         update.addProperty("text", text != null ? text : (String) data.get("text"));
 
-        String finalText = update.get("text").getAsString();
-        if (embedding != null) {
-            JsonArray arr = new JsonArray();
-            for (float v : embedding) arr.add(v);
-            update.add("vector", arr);
-        } else {
-            List<Float> newEmbed = embeddingClient.embed(finalText);
-            JsonArray arr = new JsonArray();
-            for (float v : newEmbed) arr.add(v);
-            update.add("vector", arr);
-        }
+        setVectorField(update, embedding, update.get("text").getAsString());
 
         if (entityIds != null) {
             JsonArray arr = new JsonArray();
@@ -451,17 +436,7 @@ public class MilvusStore {
         update.addProperty("id", passageId);
         update.addProperty("text", text != null ? text : (String) data.get("text"));
 
-        String finalText = update.get("text").getAsString();
-        if (embedding != null) {
-            JsonArray arr = new JsonArray();
-            for (float v : embedding) arr.add(v);
-            update.add("vector", arr);
-        } else {
-            List<Float> newEmbed = embeddingClient.embed(finalText);
-            JsonArray arr = new JsonArray();
-            for (float v : newEmbed) arr.add(v);
-            update.add("vector", arr);
-        }
+        setVectorField(update, embedding, update.get("text").getAsString());
 
         if (entityIds != null) {
             JsonArray arr = new JsonArray();
@@ -519,6 +494,7 @@ public class MilvusStore {
 
     private int deleteByIds(String collection, List<String> ids) {
         if (ids == null || ids.isEmpty()) return 0;
+        validateIds(ids);
         String idsStr = ids.stream().map(id -> "\"" + id + "\"").collect(Collectors.joining(", "));
         client.delete(io.milvus.v2.service.vector.request.DeleteReq.builder()
                 .collectionName(collection)
@@ -528,6 +504,17 @@ public class MilvusStore {
     }
 
     // ==================== Utility ====================
+
+    /** 将 embedding 向量写入 JsonObject：有值则直接转换，无值则自动 embed */
+    private void setVectorField(JsonObject row, List<Float> embedding, String text) {
+        JsonArray arr = new JsonArray();
+        if (embedding != null) {
+            for (float v : embedding) arr.add(v);
+        } else {
+            for (float v : embeddingClient.embed(text)) arr.add(v);
+        }
+        row.add("vector", arr);
+    }
 
     public Map<String, Integer> getCollectionStats() {
         Map<String, Integer> stats = new HashMap<>();
@@ -571,6 +558,20 @@ public class MilvusStore {
     }
 
     // ==================== Result Conversion ====================
+
+    /**
+     * 校验 ID 只包含安全字符（字母、数字、连字符、下划线、点、冒号），
+     * 防止 Milvus filter 表达式注入。
+     */
+    private static final Pattern SAFE_ID_PATTERN = Pattern.compile("^[\\p{L}0-9._\\-:]+$");
+
+    private static void validateIds(List<String> ids) {
+        for (String id : ids) {
+            if (id == null || !SAFE_ID_PATTERN.matcher(id).matches()) {
+                throw new IllegalArgumentException("Invalid ID for Milvus filter: " + id);
+            }
+        }
+    }
 
     private List<Map<String, Object>> convertSearchResults(SearchResp resp) {
         List<Map<String, Object>> results = new ArrayList<>();

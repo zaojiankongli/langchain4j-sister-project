@@ -7,6 +7,8 @@ import com.zjkl.common.constant.PromptConstants;
 import com.zjkl.memory.service.PromptCacheService;
 import com.zjkl.memory.service.GraphSnapshotService;
 import com.zjkl.memory.service.SummaryMemoryService;
+import com.zjkl.memory.service.SummaryMemoryService.MemoryBlockResult;
+import com.zjkl.ai.chat.service.GraphQueryService.GraphResult;
 import com.zjkl.ai.prompt.service.PromptTemplateService;
 import com.zjkl.user.service.UserProfileService;
 import dev.langchain4j.community.model.dashscope.QwenStreamingChatModel;
@@ -28,7 +30,9 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
 
 /**
  * 聊天服务
@@ -79,6 +83,18 @@ public class SisterChatService {
     private static final String SYSTEM_PROMPT_KEY = PromptConstants.CHARACTER_SYSTEM_PROMPT;
     private static final String TEMPLATE_KEY = PromptConstants.VOICE_CHAT_TEMPLATE;
 
+    // ========== RAG 路由/融合参数常量 ==========
+    /** 路由上下文：从历史消息尾部取多少条（≈30 轮对话） */
+    private static final int ROUTE_CONTEXT_WINDOW = 60;
+    /** 路由上下文：最多取多少条最近消息 */
+    private static final int ROUTE_MAX_RECENT = 30;
+    /** 跨路融合：memory topScore 领先 graph 多少才排前面 */
+    private static final double SCORE_LEAD_THRESHOLD = 0.1;
+    /** 句子级去重：两 block 总长度低于此值时跳过去重 */
+    private static final int DEDUP_MIN_CHARS = 500;
+    /** 句子级去重：字符 bigram Jaccard 相似度超过此值视为重复 */
+    private static final double DEDUP_SIMILARITY_THRESHOLD = 0.65;
+
     /**
      * 聊天结果
      */
@@ -104,7 +120,7 @@ public class SisterChatService {
                 userBio = chatProfile[2] != null ? chatProfile[2] : "";
             }
         } catch (Exception e) {
-            log.warn("获取用户画像失败，使用默认值: memoryId={}", memoryId, e);
+            log.debug("获取用户画像失败，使用默认值: memoryId={}", memoryId, e);
         }
 
         // 渲染输入
@@ -130,8 +146,8 @@ public class SisterChatService {
             java.util.List<String> recentMessages = new java.util.ArrayList<>();
             if (chatMemory != null) {
                 var msgs = chatMemory.messages();
-                int startIdx = Math.max(0, msgs.size() - 60); // 最近 60 条（≈30 轮对话）
-                for (int i = startIdx; i < msgs.size() && recentMessages.size() < 30; i++) {
+                int startIdx = Math.max(0, msgs.size() - ROUTE_CONTEXT_WINDOW);
+                for (int i = startIdx; i < msgs.size() && recentMessages.size() < ROUTE_MAX_RECENT; i++) {
                     var m = msgs.get(i);
                     if (m instanceof dev.langchain4j.data.message.UserMessage u) {
                         recentMessages.add("用户：" + u.singleText());
@@ -141,28 +157,46 @@ public class SisterChatService {
                 }
             }
             RouterResult route = ragRouter.analyzeQuery(userInput, recentMessages);
-            if (route.needMemorySearch()) {
-                memoryBlock = summaryMemoryService.buildMemoryBlock(memoryId, userInput, route.toFilters());
-                log.debug("RAG 记忆块注入：userId={}, length={}, dateHint={}, topicHint={}",
-                        memoryId, memoryBlock.length(), route.dateHint(), route.topicHint());
-            }
 
-            // 仅在路由器判断需要图搜索时才获取图快照和图关系块，节省 token 和延迟
-            String graphSnapshot = "";
-            String graphBlock = "";
-            if (route.needGraphSearch()) {
-                graphSnapshot = graphSnapshotService.getSnapshot(memoryId);
-                graphBlock = graphQueryService.buildGraphBlock(memoryId, userInput);
-            }
+            // 双路 RAG 并行执行（虚拟线程），单路时仅执行对应路
+            try (var vThreadExecutor = Executors.newVirtualThreadPerTaskExecutor()) {
+                // Memory RAG 异步执行
+                final CompletableFuture<MemoryBlockResult> memoryFuture = route.needMemorySearch()
+                    ? CompletableFuture.supplyAsync(
+                        () -> summaryMemoryService.buildMemoryBlockWithScore(memoryId, userInput, route.toFilters()),
+                        vThreadExecutor)
+                    : CompletableFuture.completedFuture(MemoryBlockResult.empty());
 
-            memoryBlock = mergeGraphAndMemoryBlocks(route.primarySource(), graphSnapshot, graphBlock, memoryBlock);
-            log.debug("图上下文注入：userId={}, snapshot={}, graphBlock={}, memoryBlock={}",
-                    memoryId,
-                    !graphSnapshot.isBlank(),
-                    !graphBlock.isBlank(),
-                    !memoryBlock.isBlank());
+                // Graph RAG 异步执行（snapshot 从 Redis 取，graphBlock 需要 LLM 调用）
+                final CompletableFuture<String> snapshotFuture;
+                final CompletableFuture<GraphResult> graphFuture;
+                if (route.needGraphSearch()) {
+                    snapshotFuture = CompletableFuture.supplyAsync(
+                        () -> graphSnapshotService.getSnapshot(memoryId), vThreadExecutor);
+                    graphFuture = CompletableFuture.supplyAsync(
+                        () -> graphQueryService.buildGraphBlock(memoryId, userInput), vThreadExecutor);
+                } else {
+                    snapshotFuture = CompletableFuture.completedFuture("");
+                    graphFuture = CompletableFuture.completedFuture(GraphResult.empty());
+                }
+
+                // 等待所有结果
+                CompletableFuture.allOf(memoryFuture, snapshotFuture, graphFuture).join();
+
+                MemoryBlockResult memResult = memoryFuture.get();
+                String graphSnapshot = snapshotFuture.get();
+                GraphResult graphResult = graphFuture.get();
+
+                // 跨路融合排序 + 去重
+                memoryBlock = mergeRagResults(route.primarySource(),
+                        graphSnapshot, graphResult, memResult);
+
+                log.debug("RAG 融合结果：userId={}, memoryScore={}, graphScore={}, snapshot={}, memoryBlock={}",
+                        memoryId, memResult.topScore(), graphResult.topScore(),
+                        !graphSnapshot.isBlank(), !memoryBlock.isBlank());
+            }
         } catch (Exception e) {
-            log.warn("RAG 路由/记忆搜索失败，跳过记忆注入: {}", e.getMessage());
+            log.debug("RAG 路由/记忆搜索失败，跳过记忆注入: {}", e.getMessage());
         }
 
         return chat(promptText, memoryId, imageUrl, moodDesc, current, userName, userHobbies, userBio, memoryBlock);
@@ -299,33 +333,144 @@ public class SisterChatService {
         return messagesToSend;
     }
 
-    private String mergeGraphAndMemoryBlocks(String primarySource, String graphSnapshot, String graphBlock, String memoryBlock) {
-        StringBuilder builder = new StringBuilder();
+    /**
+     * 跨路 RAG 融合：根据检索评分决定排列顺序 + 句子级去重
+     * <p>
+     * 单路执行时直接使用对应结果；双路执行时按 topScore 排序（高分优先），
+     * 并对后排列的 block 做句子级语义去重，避免冗余信息消耗 LLM token。
+     */
+    private String mergeRagResults(String primarySource, String graphSnapshot,
+                                   GraphResult graphResult, MemoryBlockResult memResult) {
+        String memoryBlock = memResult.block();
+        String graphBlock = graphResult.block();
 
-        if ("memory".equalsIgnoreCase(primarySource)) {
-            appendBlock(builder, memoryBlock);
-            appendBlock(builder, graphBlock);
-            appendBlock(builder, wrapSnapshot(graphSnapshot));
-        } else if ("graph".equalsIgnoreCase(primarySource)) {
-            appendBlock(builder, graphBlock);
-            appendBlock(builder, wrapSnapshot(graphSnapshot));
-            appendBlock(builder, memoryBlock);
-        } else {
-            appendBlock(builder, wrapSnapshot(graphSnapshot));
-            appendBlock(builder, graphBlock);
-            appendBlock(builder, memoryBlock);
+        // 单路场景：直接返回，无需融合
+        if (isBlank(graphBlock) && isBlank(memoryBlock)) {
+            return isBlank(graphSnapshot) ? "" : wrapSnapshot(graphSnapshot);
         }
-        return builder.toString();
+        if (isBlank(graphBlock)) {
+            return isBlank(memoryBlock) ? wrapSnapshot(graphSnapshot) : appendTwo(memoryBlock, wrapSnapshot(graphSnapshot));
+        }
+        if (isBlank(memoryBlock)) {
+            return appendTwo(graphBlock, wrapSnapshot(graphSnapshot));
+        }
+
+        // 双路场景：按评分排序 + 句子级去重
+        String first, second;
+        if ("memory".equalsIgnoreCase(primarySource)) {
+            first = memoryBlock;
+            second = graphBlock;
+        } else if ("graph".equalsIgnoreCase(primarySource)) {
+            first = graphBlock;
+            second = memoryBlock;
+        } else {
+            // "both" 或默认：评分高的优先（memory 领先 ≥ SCORE_LEAD_THRESHOLD 时排前面）
+            if (memResult.topScore() >= graphResult.topScore() + SCORE_LEAD_THRESHOLD) {
+                first = memoryBlock;
+                second = graphBlock;
+            } else {
+                first = graphBlock;
+                second = memoryBlock;
+            }
+        }
+
+        // 句子级去重：从 second 中移除与 first 语义重叠的句子
+        second = deduplicateSentences(second, first);
+
+        StringBuilder result = new StringBuilder(first.trim());
+        if (!second.isBlank()) {
+            result.append("\n\n").append(second.trim());
+        }
+        String snapshot = wrapSnapshot(graphSnapshot);
+        if (!snapshot.isBlank()) {
+            result.append("\n\n").append(snapshot);
+        }
+        return result.toString();
     }
 
-    private void appendBlock(StringBuilder builder, String block) {
-        if (block == null || block.isBlank()) {
-            return;
+    /**
+     * 从 candidate 中移除与 reference 语义重叠的句子（基于字符级 Jaccard 相似度）
+     */
+    private String deduplicateSentences(String candidate, String reference) {
+        if (candidate == null || reference == null) return candidate;
+        // 短文本无需去重
+        if (candidate.length() + reference.length() < DEDUP_MIN_CHARS) return candidate;
+
+        List<String> refSentences = splitSentences(reference);
+        List<String> candSentences = splitSentences(candidate);
+
+        List<String> kept = new ArrayList<>();
+        for (String cs : candSentences) {
+            if (cs.trim().length() < 8) {
+                kept.add(cs); // 太短的句子（如标题、标记行）保留
+                continue;
+            }
+            boolean isDuplicate = false;
+            for (String rs : refSentences) {
+                if (rs.trim().length() < 8) continue;
+                if (sentenceSimilarity(cs, rs) > DEDUP_SIMILARITY_THRESHOLD) {
+                    isDuplicate = true;
+                    break;
+                }
+            }
+            if (!isDuplicate) {
+                kept.add(cs);
+            }
         }
-        if (!builder.isEmpty()) {
-            builder.append("\n\n");
+        return String.join("", kept);
+    }
+
+    /** 按中文/英文句号、换行符切分句子，保留标点 */
+    private List<String> splitSentences(String text) {
+        List<String> sentences = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        for (char c : text.toCharArray()) {
+            current.append(c);
+            if (c == '。' || c == '.' || c == '\n' || c == '！' || c == '?' || c == '；') {
+                String s = current.toString().trim();
+                if (!s.isEmpty()) sentences.add(s);
+                current = new StringBuilder();
+            }
         }
-        builder.append(block.trim());
+        if (!current.isEmpty()) {
+            String s = current.toString().trim();
+            if (!s.isEmpty()) sentences.add(s);
+        }
+        return sentences;
+    }
+
+    /** 基于字符集合 Jaccard 相似度判断两个句子的重叠程度 */
+    private double sentenceSimilarity(String a, String b) {
+        String na = a.replaceAll("\\s+", "").toLowerCase();
+        String nb = b.replaceAll("\\s+", "").toLowerCase();
+        if (na.isEmpty() || nb.isEmpty()) return 0.0;
+        // 用字符 bigram 集合计算相似度（比单字符更准确）
+        Set<String> setA = charBigrams(na);
+        Set<String> setB = charBigrams(nb);
+        Set<String> intersection = new java.util.HashSet<>(setA);
+        intersection.retainAll(setB);
+        Set<String> union = new java.util.HashSet<>(setA);
+        union.addAll(setB);
+        return union.isEmpty() ? 0.0 : (double) intersection.size() / union.size();
+    }
+
+    private Set<String> charBigrams(String s) {
+        Set<String> bigrams = new java.util.HashSet<>();
+        for (int i = 0; i < s.length() - 1; i++) {
+            bigrams.add(s.substring(i, i + 2));
+        }
+        if (s.length() == 1) bigrams.add(s);
+        return bigrams;
+    }
+
+    private boolean isBlank(String s) {
+        return s == null || s.isBlank();
+    }
+
+    private String appendTwo(String first, String second) {
+        if (isBlank(first)) return isBlank(second) ? "" : second.trim();
+        if (isBlank(second)) return first.trim();
+        return first.trim() + "\n\n" + second.trim();
     }
 
     private String wrapSnapshot(String graphSnapshot) {

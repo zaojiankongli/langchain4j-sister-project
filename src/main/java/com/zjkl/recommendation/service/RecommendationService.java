@@ -4,10 +4,8 @@ import com.zjkl.recommendation.entity.UserRecommendation;
 import com.zjkl.recommendation.mapper.UserRecommendationMapper;
 import com.zjkl.recommendation.util.RecommendationConstants;
 import com.zjkl.recommendation.util.JsonUtils;
-import com.google.gson.Gson;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agentic.UntypedAgent;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -41,7 +39,7 @@ import java.util.concurrent.TimeoutException;
 @Service
 public class RecommendationService {
 
-    private static final Gson GSON = new Gson();
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final String GENERATION_LOCK_KEY_PREFIX = "recommendation:generate:";
     private final ExecutorService workflowExecutor = Executors.newVirtualThreadPerTaskExecutor();
     private final Semaphore workflowConcurrency = new Semaphore(RecommendationConstants.SCHEDULER_MAX_CONCURRENT);
@@ -187,14 +185,14 @@ public class RecommendationService {
     private List<UserRecommendation> parseRecommendations(String json) {
         List<UserRecommendation> all = new ArrayList<>();
         try {
-            JsonArray arr = GSON.fromJson(json, JsonArray.class);
-            if (arr == null || arr.isEmpty()) {
+            JsonNode arr = OBJECT_MAPPER.readTree(json);
+            if (arr == null || !arr.isArray() || arr.isEmpty()) {
                 return all;
             }
 
-            for (JsonElement el : arr) {
+            for (JsonNode obj : arr) {
                 try {
-                    JsonObject obj = el.getAsJsonObject();
+                    if (!obj.isObject()) continue;
                     UserRecommendation rec = new UserRecommendation();
                     rec.setTitle(getJsonString(obj, "title", "推荐资源"));
                     rec.setUrl(getJsonString(obj, "url", ""));
@@ -217,14 +215,15 @@ public class RecommendationService {
         return all;
     }
 
-    private BigDecimal parseRelevanceScore(JsonObject obj) {
-        if (obj.has("relevanceScore") && !obj.get("relevanceScore").isJsonNull()) {
-            return BigDecimal.valueOf(obj.get("relevanceScore").getAsDouble());
+    private BigDecimal parseRelevanceScore(JsonNode obj) {
+        JsonNode node = obj.get("relevanceScore");
+        if (node != null && !node.isNull()) {
+            return BigDecimal.valueOf(node.asDouble(0.5));
         }
         return BigDecimal.valueOf(0.5);
     }
 
-    private String inferResourceType(JsonObject obj, String url) {
+    private String inferResourceType(JsonNode obj, String url) {
         String type = getJsonString(obj, "resourceType", "");
         if (!type.isEmpty()) {
             return type;
@@ -249,9 +248,10 @@ public class RecommendationService {
         return list.size() > topN ? list.subList(0, topN) : list;
     }
 
-    private String getJsonString(JsonObject obj, String key, String defaultValue) {
-        if (obj.has(key) && !obj.get(key).isJsonNull()) {
-            return obj.get(key).getAsString();
+    private String getJsonString(JsonNode obj, String key, String defaultValue) {
+        JsonNode node = obj.get(key);
+        if (node != null && !node.isNull()) {
+            return node.asText();
         }
         return defaultValue;
     }

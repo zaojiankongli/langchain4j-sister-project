@@ -3,6 +3,7 @@ package com.zjkl.vectorgraphrag.llm;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonSyntaxException;
 import com.zjkl.vectorgraphrag.config.VectorGraphRagSettings;
 import com.zjkl.vectorgraphrag.model.Document;
 import com.zjkl.vectorgraphrag.model.Triplet;
@@ -58,7 +59,7 @@ public class TripletExtractor {
             String response = openAiClient.chat(SYSTEM_PROMPT, examples, "Text: " + text);
             return parseResponse(response);
         } catch (Exception e) {
-            log.warn("Triplet extraction failed: {}", e.getMessage());
+            log.debug("Triplet extraction failed: {}", e.getMessage());
             return List.of();
         }
     }
@@ -82,7 +83,8 @@ public class TripletExtractor {
 
     private List<Triplet> parseResponse(String response) {
         try {
-            JsonObject json = gson.fromJson(response, JsonObject.class);
+            String cleaned = OpenAiClient.cleanMarkdownCodeBlock(response);
+            JsonObject json = gson.fromJson(cleaned, JsonObject.class);
             JsonArray tripletsArray = json.getAsJsonArray("triplets");
             if (tripletsArray == null) return List.of();
 
@@ -99,8 +101,8 @@ public class TripletExtractor {
                 }
             }
             return results;
-        } catch (Exception e) {
-            log.warn("Failed to parse triplet response: {}", e.getMessage());
+        } catch (JsonSyntaxException e) {
+            log.debug("Failed to parse triplet response: {}", e.getMessage());
             return List.of();
         }
     }

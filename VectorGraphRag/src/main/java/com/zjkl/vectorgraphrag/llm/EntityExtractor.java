@@ -3,6 +3,7 @@ package com.zjkl.vectorgraphrag.llm;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonSyntaxException;
 import com.zjkl.vectorgraphrag.config.VectorGraphRagSettings;
 import lombok.extern.slf4j.Slf4j;
 
@@ -52,14 +53,15 @@ public class EntityExtractor {
 
             return parseResponse(response);
         } catch (Exception e) {
-            log.warn("Entity extraction failed, returning empty: {}", e.getMessage());
+            log.debug("Entity extraction failed, returning empty: {}", e.getMessage());
             return List.of();
         }
     }
 
     private List<String> parseResponse(String response) {
         try {
-            JsonObject json = gson.fromJson(response, JsonObject.class);
+            String cleaned = OpenAiClient.cleanMarkdownCodeBlock(response);
+            JsonObject json = gson.fromJson(cleaned, JsonObject.class);
             JsonArray entities = json.getAsJsonArray("named_entities");
             if (entities == null) {
                 entities = json.getAsJsonArray("entities");
@@ -74,8 +76,8 @@ public class EntityExtractor {
                 }
             }
             return results;
-        } catch (Exception e) {
-            log.warn("Failed to parse NER response: {}", e.getMessage());
+        } catch (JsonSyntaxException e) {
+            log.debug("Failed to parse NER response: {}", e.getMessage());
             return List.of();
         }
     }

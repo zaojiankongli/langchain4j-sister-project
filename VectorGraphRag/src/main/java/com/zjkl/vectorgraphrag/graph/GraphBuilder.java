@@ -184,7 +184,7 @@ public class GraphBuilder {
         if (phrase == null) return "";
         // Strip punctuation/special chars but keep Unicode letters (including CJK),
         // digits and spaces; then lowercase and trim.
-        return phrase.replaceAll("[^\\p{L}0-9 ]", " ").toLowerCase().trim();
+        return phrase.replaceAll("[^\\p{L}0-9 ]", " ").replaceAll("\\s+", " ").toLowerCase().trim();
     }
 
     public List<String> getEntityTexts() {

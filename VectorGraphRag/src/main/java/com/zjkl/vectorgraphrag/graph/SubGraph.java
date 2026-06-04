@@ -46,7 +46,7 @@ public class SubGraph {
                 step.put("step", 0);
                 step.put("operation", "init");
                 step.put("addedEntityIds", new ArrayList<>(newIds));
-                step.put("addedRelationIds", List.of());
+                step.put("addedRelationIds", new ArrayList<>());
                 expansionHistory.add(step);
             } else {
                 @SuppressWarnings("unchecked")
@@ -68,7 +68,7 @@ public class SubGraph {
                 Map<String, Object> step = new LinkedHashMap<>();
                 step.put("step", 0);
                 step.put("operation", "init");
-                step.put("addedEntityIds", List.of());
+                step.put("addedEntityIds", new ArrayList<>());
                 step.put("addedRelationIds", new ArrayList<>(newIds));
                 expansionHistory.add(step);
             } else {

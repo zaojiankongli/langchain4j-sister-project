@@ -7,10 +7,10 @@ services:
     container_name: sister-mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: root123
-      MYSQL_DATABASE: zjkl_sister
-      MYSQL_USER: zjkl
-      MYSQL_PASSWORD: zjkl123
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD must be set}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-zjkl_sister}
+      MYSQL_USER: ${MYSQL_USER:-zjkl}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set}
     ports:
       - "3306:3306"
     volumes:
@@ -104,7 +104,7 @@ services:
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
       MYSQL_USERNAME: zjkl
-      MYSQL_PASSWORD: zjkl123
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set}
       # Redis
       REDIS_HOST: redis
       REDIS_PORT: 6379
@@ -114,35 +114,38 @@ services:
       MILVUS_HOST: milvus
       MILVUS_PORT: 19530
       # JWT
-      JWT_SECRET: change-me-in-production
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
       # App
       APP_DEFAULT_IMAGE_URL: https://placehold.co/512x512
       # DashScope / LangChain4j
-      DASHSCOPE_API_KEY: change-me-in-production
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:?DASHSCOPE_API_KEY must be set}
       # Mail
-      MAIL_HOST: change-me-in-production
-      MAIL_PORT: 587
-      MAIL_USERNAME: change-me-in-production
-      MAIL_PASSWORD: change-me-in-production
+      MAIL_HOST: ${MAIL_HOST:?MAIL_HOST must be set}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:?MAIL_USERNAME must be set}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:?MAIL_PASSWORD must be set}
       # CORS
       CORS_ALLOWED_ORIGINS: http://localhost:3000
       WEBSOCKET_ALLOWED_ORIGINS: http://localhost:3000
       # MCP
-      FIRECRAWL_API_KEY: change-me-in-production
-      CONTEXT7_API_KEY: change-me-in-production
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY}
+      CONTEXT7_API_KEY: ${CONTEXT7_API_KEY}
       # Aliyun OSS
-      OSS_ENDPOINT: https://oss-cn-hangzhou.aliyuncs.com
-      OSS_ACCESS_KEY_ID: change-me-in-production
-      OSS_ACCESS_KEY_SECRET: change-me-in-production
-      OSS_BUCKET_NAME: change-me-in-production
-      OSS_REGION: cn-hangzhou
+      OSS_ENDPOINT: ${OSS_ENDPOINT:-https://oss-cn-hangzhou.aliyuncs.com}
+      OSS_ACCESS_KEY_ID: ${OSS_ACCESS_KEY_ID:?OSS_ACCESS_KEY_ID must be set}
+      OSS_ACCESS_KEY_SECRET: ${OSS_ACCESS_KEY_SECRET:?OSS_ACCESS_KEY_SECRET must be set}
+      OSS_BUCKET_NAME: ${OSS_BUCKET_NAME:?OSS_BUCKET_NAME must be set}
+      OSS_REGION: ${OSS_REGION:-cn-hangzhou}
       # TTS
-      TTS_MODEL: change-me-in-production
-      TTS_VOICE: change-me-in-production
+      TTS_MODEL: ${TTS_MODEL:?TTS_MODEL must be set}
+      TTS_VOICE: ${TTS_VOICE:?TTS_VOICE must be set}
     depends_on:
-      - mysql
-      - redis
-      - milvus
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_started
     networks:
       - sister-network
 

@@ -62,15 +62,19 @@ public class GraphRetriever {
             Set<String> seenIds = new LinkedHashSet<>();
 
             for (Map<String, Object> result : searchResults) {
-                double distance = (double) result.get("distance");
+                double distance = ((Number) result.get("distance")).doubleValue();
                 if (distance <= eThreshold) continue;
 
                 @SuppressWarnings("unchecked")
                 Map<String, Object> entity = (Map<String, Object>) result.get("entity");
-                String eid = entity.get("id").toString();
+                if (entity == null) continue;
+                Object eidObj = entity.get("id");
+                Object textObj = entity.get("text");
+                if (eidObj == null || textObj == null) continue;
+                String eid = eidObj.toString();
                 if (seenIds.add(eid)) {
                     entityIds.add(eid);
-                    entityTexts.add(entity.get("text").toString());
+                    entityTexts.add(textObj.toString());
                     entityScores.add((float) distance);
                 }
             }
@@ -89,14 +93,17 @@ public class GraphRetriever {
         List<Float> relationScores = new ArrayList<>();
 
         for (Map<String, Object> result : relationResults) {
-            double distance = (double) result.get("distance");
+            double distance = ((Number) result.get("distance")).doubleValue();
             if (distance <= rThreshold) continue;
 
             @SuppressWarnings("unchecked")
             Map<String, Object> entity = (Map<String, Object>) result.get("entity");
-            String rid = entity.get("id").toString();
-            relationIds.add(rid);
-            relationTexts.add(entity.get("text").toString());
+            if (entity == null) continue;
+            Object ridObj = entity.get("id");
+            Object rtextObj = entity.get("text");
+            if (ridObj == null || rtextObj == null) continue;
+            relationIds.add(ridObj.toString());
+            relationTexts.add(rtextObj.toString());
             relationScores.add((float) distance);
         }
 
@@ -188,7 +195,9 @@ public class GraphRetriever {
                 .map(r -> {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> entity = (Map<String, Object>) r.get("entity");
-                    return entity.get("text").toString();
+                    if (entity == null) return "";
+                    Object textObj = entity.get("text");
+                    return textObj != null ? textObj.toString() : "";
                 })
                 .collect(Collectors.toList());
     }

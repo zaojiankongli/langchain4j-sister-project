@@ -12,6 +12,7 @@ import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import io.milvus.v2.client.MilvusClientV2;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
@@ -51,9 +52,26 @@ public class GraphSnapshotService {
     }
 
     public String getSnapshot(String userId) {
-        String snapshot = stringRedisTemplate.opsForValue().get(GraphRedisKeys.SNAPSHOT_KEY + userId);
-        String currentVersion = stringRedisTemplate.opsForValue().get(GraphRedisKeys.LAST_WRITE_BATCH_KEY + userId);
-        String snapshotVersion = stringRedisTemplate.opsForValue().get(GraphRedisKeys.SNAPSHOT_VERSION_KEY + userId);
+        // 使用 Redis Pipeline 一次性获取 3 个 key，减少 RTT 和竞态窗口
+        String snapshotKey = GraphRedisKeys.SNAPSHOT_KEY + userId;
+        String writeBatchKey = GraphRedisKeys.LAST_WRITE_BATCH_KEY + userId;
+        String versionKey = GraphRedisKeys.SNAPSHOT_VERSION_KEY + userId;
+
+        List<Object> pipelineResults = stringRedisTemplate.executePipelined(
+                (RedisCallback<Object>) connection -> {
+                    byte[] sk = snapshotKey.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    byte[] wbk = writeBatchKey.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    byte[] vk = versionKey.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                    connection.stringCommands().get(sk);
+                    connection.stringCommands().get(wbk);
+                    connection.stringCommands().get(vk);
+                    return null;
+                }
+        );
+
+        String snapshot = pipelineResults.size() > 0 ? (String) pipelineResults.get(0) : null;
+        String currentVersion = pipelineResults.size() > 1 ? (String) pipelineResults.get(1) : null;
+        String snapshotVersion = pipelineResults.size() > 2 ? (String) pipelineResults.get(2) : null;
 
         if ((snapshot == null || snapshot.isBlank()) && currentVersion != null && !currentVersion.isBlank()) {
             maybeRebuildAsync(userId, currentVersion);
@@ -116,7 +134,7 @@ public class GraphSnapshotService {
             // 成功后才写入速率限制时间戳（失败时不写，允许下次重试）
             stringRedisTemplate.opsForValue().set(GraphRedisKeys.LAST_REBUILD_AT_KEY + userId,
                     String.valueOf(System.currentTimeMillis()), GraphRedisKeys.SNAPSHOT_TTL);
-            log.info("图 snapshot 已重建 userId={}, version={}", userId, targetVersion);
+            log.debug("图 snapshot 已重建 userId={}, version={}", userId, targetVersion);
         } catch (Exception e) {
             log.warn("图 snapshot 重建失败 userId={}", userId, e);
         }

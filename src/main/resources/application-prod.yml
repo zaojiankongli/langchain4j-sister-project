@@ -20,10 +20,6 @@ spring:
   lifecycle:
     timeout-per-shutdown-phase: 30s
 
-milvus:
-  host: ${MILVUS_HOST}
-  port: ${MILVUS_PORT:19530}
-
 app:
   milvus:
     host: ${MILVUS_HOST}

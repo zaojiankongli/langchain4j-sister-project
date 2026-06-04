@@ -97,7 +97,8 @@ public final class MilvusQueryUtil {
      * 标准化短语：去除特殊字符，转小写
      */
     public static String normalizePhrase(String phrase) {
-        return phrase == null ? "" : phrase.replaceAll("[^\\p{L}0-9 ]", " ").toLowerCase().trim();
+        return phrase == null ? ""
+                : phrase.replaceAll("[^\\p{L}0-9 ]", " ").replaceAll("\\s+", " ").toLowerCase().trim();
     }
 
     /**

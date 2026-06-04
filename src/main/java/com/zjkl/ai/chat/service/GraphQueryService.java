@@ -34,12 +34,35 @@ import java.util.stream.Collectors;
 @Slf4j
 public class GraphQueryService {
 
+    /**
+     * 图谱查询结果（含格式化文本块和相关度评分，用于跨路 RAG 融合排序）
+     */
+    public record GraphResult(String block, double topScore) {
+        public static GraphResult empty() { return new GraphResult("", 0.0); }
+    }
+
     private final MilvusClientV2 milvusClientV2;
     private final MilvusProperties milvusProperties;
     private final EmbeddingModel embeddingModel;
     private final QwenChatModel qwenChatModel;
     private final PromptTemplateService promptTemplateService;
     private final ObjectMapper objectMapper;
+
+    // ========== 查询参数常量（消除魔法数字） ==========
+    /** 实体提取：LLM 识别后去重截断上限 */
+    private static final int ENTITY_EXTRACT_LIMIT = 5;
+    /** 实体搜索：Milvus 每向量 topK */
+    private static final int ENTITY_SEARCH_TOP_K = 5;
+    /** 实体搜索：排序后截断上限 */
+    private static final int ENTITY_RESULT_LIMIT = 6;
+    /** 关系搜索：Milvus 语义检索 topK */
+    private static final int RELATION_SEARCH_TOP_K = 12;
+    /** 关系重排：LLM 重排后截断上限 */
+    private static final int RERANK_RESULT_LIMIT = 5;
+    /** 格式化输出：实体展示上限 */
+    private static final int ENTITY_DISPLAY_LIMIT = 3;
+    /** 格式化输出：关系展示上限 */
+    private static final int RELATION_DISPLAY_LIMIT = 5;
 
     public GraphQueryService(MilvusClientV2 milvusClientV2,
                              MilvusProperties milvusProperties,
@@ -55,17 +78,21 @@ public class GraphQueryService {
         this.objectMapper = objectMapper;
     }
 
-    public String buildGraphBlock(String userId, String question) {
+    public GraphResult buildGraphBlock(String userId, String question) {
         if (question == null || question.isBlank()) {
-            return "";
+            return GraphResult.empty();
         }
 
         List<String> queryEntities = extractEntities(question);
         if (queryEntities.isEmpty()) {
-            return "";
+            return GraphResult.empty();
         }
 
         List<Map<String, Object>> matchedEntities = searchEntities(userId, queryEntities);
+        // 取 top 实体分数作为图谱检索相关度评分（用于跨路 RAG 融合排序）
+        double topScore = matchedEntities.isEmpty() ? 0.0
+                : ((Number) matchedEntities.get(0).get("score")).doubleValue();
+
         Set<String> entityTexts = matchedEntities.stream()
                 .map(row -> row.get("text"))
                 .filter(java.util.Objects::nonNull)
@@ -73,18 +100,19 @@ public class GraphQueryService {
                 .collect(Collectors.toCollection(LinkedHashSet::new));
         if (entityTexts.isEmpty()) {
             log.debug("图查询未命中实体 userId={}, question={}", userId, question);
-            return "";
+            return GraphResult.empty();
         }
 
         List<Map<String, Object>> candidateRelations = collectCandidateRelations(userId, question, entityTexts);
         if (candidateRelations.isEmpty()) {
-            return formatEntityOnlyBlock(matchedEntities);
+            return new GraphResult(formatEntityOnlyBlock(matchedEntities), topScore);
         }
 
         List<Map<String, Object>> reranked = rerankRelations(question, candidateRelations);
         log.debug("图查询命中 userId={}, entities={}, candidateRelations={}, reranked={}",
                 userId, matchedEntities.size(), candidateRelations.size(), reranked.size());
-        return formatGraphBlock(matchedEntities, reranked.isEmpty() ? candidateRelations : reranked);
+        List<Map<String, Object>> finalRelations = reranked.isEmpty() ? candidateRelations : reranked;
+        return new GraphResult(formatGraphBlock(matchedEntities, finalRelations), topScore);
     }
 
     private List<String> extractEntities(String question) {
@@ -112,7 +140,7 @@ public class GraphQueryService {
                     entities.add(value);
                 }
             }
-            return entities.stream().distinct().limit(5).toList();
+            return entities.stream().distinct().limit(ENTITY_EXTRACT_LIMIT).toList();
         } catch (Exception e) {
             log.warn("图查询实体识别失败", e);
             return List.of();
@@ -129,21 +157,22 @@ public class GraphQueryService {
                 .toList();
         List<Embedding> embeddings = embeddingModel.embedAll(segments).content();
 
-        for (int i = 0; i < entities.size() && i < embeddings.size(); i++) {
-            Embedding embedding = embeddings.get(i);
+        // 单次 Milvus 多向量查询替代 N 次单独查询
+        List<io.milvus.v2.service.vector.request.data.BaseVector> queryVectors = new ArrayList<>();
+        for (Embedding embedding : embeddings) {
             embedding.normalize();
+            queryVectors.add(new FloatVec(toFloatList(embedding.vector())));
+        }
 
-            SearchReq req = SearchReq.builder()
-                    .collectionName(milvusProperties.getGraphEntityCollectionName())
-                    .data(List.of(new FloatVec(toFloatList(embedding.vector()))))
-                    .topK(5)
-                    .filter(MilvusQueryUtil.userFilter(userId))
-                    .outputFields(List.of("id", "text", "type", "mention_count", "last_seen"))
-                    .build();
-            SearchResp resp = milvusClientV2.search(req);
-            if (resp.getSearchResults() == null) {
-                continue;
-            }
+        SearchReq req = SearchReq.builder()
+                .collectionName(milvusProperties.getGraphEntityCollectionName())
+                .data(queryVectors)
+                .topK(ENTITY_SEARCH_TOP_K)
+                .filter(MilvusQueryUtil.userFilter(userId))
+                .outputFields(List.of("id", "text", "type", "mention_count", "last_seen"))
+                .build();
+        SearchResp resp = milvusClientV2.search(req);
+        if (resp.getSearchResults() != null) {
             for (List<SearchResp.SearchResult> list : resp.getSearchResults()) {
                 for (SearchResp.SearchResult item : list) {
                     String id = item.getId().toString();
@@ -156,9 +185,10 @@ public class GraphQueryService {
                 }
             }
         }
+
         return results.stream()
                 .sorted(Comparator.comparingDouble((Map<String, Object> row) -> ((Number) row.get("score")).doubleValue()).reversed())
-                .limit(6)
+                .limit(ENTITY_RESULT_LIMIT)
                 .toList();
     }
 
@@ -181,7 +211,7 @@ public class GraphQueryService {
         SearchReq req = SearchReq.builder()
                 .collectionName(milvusProperties.getGraphRelationCollectionName())
                 .data(List.of(new FloatVec(toFloatList(embedding.vector()))))
-                .topK(12)
+                .topK(RELATION_SEARCH_TOP_K)
                 .filter(MilvusQueryUtil.userFilter(userId))
                 .outputFields(List.of("id", "text", "subject", "predicate", "object", "relation_type", "confidence", "timestamp"))
                 .build();
@@ -238,7 +268,7 @@ public class GraphQueryService {
                     ranked.add(row);
                 }
             }
-            return ranked.stream().limit(5).toList();
+            return ranked.stream().limit(RERANK_RESULT_LIMIT).toList();
         } catch (Exception e) {
             log.warn("图关系 rerank 失败", e);
             return List.of();
@@ -247,7 +277,7 @@ public class GraphQueryService {
 
     private String formatEntityOnlyBlock(List<Map<String, Object>> entities) {
         String joined = entities.stream()
-                .limit(3)
+                .limit(ENTITY_DISPLAY_LIMIT)
                 .map(row -> "- " + row.get("text") + "（" + row.get("type") + "）")
                 .collect(Collectors.joining("\n"));
         return joined.isBlank() ? "" : "【图谱实体上下文】\n" + joined;
@@ -255,11 +285,11 @@ public class GraphQueryService {
 
     private String formatGraphBlock(List<Map<String, Object>> entities, List<Map<String, Object>> relations) {
         String entityLines = entities.stream()
-                .limit(3)
+                .limit(ENTITY_DISPLAY_LIMIT)
                 .map(row -> "- " + row.get("text") + "（" + row.get("type") + "）")
                 .collect(Collectors.joining("\n"));
         String relationLines = relations.stream()
-                .limit(5)
+                .limit(RELATION_DISPLAY_LIMIT)
                 .map(row -> "- " + row.get("text"))
                 .collect(Collectors.joining("\n"));
         return "【图谱关系上下文】\n实体：\n" + entityLines + "\n关系：\n" + relationLines;

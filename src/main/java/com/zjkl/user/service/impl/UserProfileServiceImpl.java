@@ -23,6 +23,9 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * 用户资料服务实现
@@ -74,17 +77,15 @@ public class UserProfileServiceImpl implements UserProfileService {
         
         UserProfileVO vo = new UserProfileVO();
         
-        // 1. 基础用户信息
+        // 1. 基础用户信息（必须先执行，后续查询依赖 userId 存在性）
         User user = userProfileMapper.findUserById(userId);
         if (user == null) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND);
         }
         BeanUtils.copyProperties(user, vo);
-        // 补充 BeanUtils.copyProperties 未覆盖的字段
         vo.setId(user.getId());
         vo.setEmail(user.getEmail());
         vo.setUserProfile(user.getUserProfile());
-        // lastActiveAt：仅从 Redis 获取（实时），无值则返回 null
         Long redisActive = userActivityTracker.getLastActiveTime(userId);
         if (redisActive != null) {
             vo.setLastActiveAt(LocalDateTime.ofInstant(
@@ -93,47 +94,60 @@ public class UserProfileServiceImpl implements UserProfileService {
         vo.setCreatedAt(user.getCreatedAt());
         vo.setUpdatedAt(user.getUpdatedAt());
         
-        // 2. 等级经验
-        UserProfileVO.LevelInfo levelInfo = userProfileMapper.findLevelInfo(userId);
-        if (levelInfo != null) {
-            vo.setCurrentLevel(levelInfo.getCurrentLevel());
-            vo.setCurrentExp(levelInfo.getCurrentExp());
-            vo.setLevelUpExp(levelInfo.getLevelUpExp());
-            vo.setTotalExp(levelInfo.getTotalExp());
-        } else {
-            // 默认等级
-            vo.setCurrentLevel(1);
-            vo.setCurrentExp(0);
-            vo.setLevelUpExp(100);
-            vo.setTotalExp(0);
-        }
-        
-        // 3. 情绪 PAD
-        UserProfileVO.EmotionInfo emotionInfo = userProfileMapper.findLatestEmotion(userId);
-        if (emotionInfo != null) {
-            vo.setPleasure(formatPadValue(emotionInfo.getPleasure()));
-            vo.setArousal(formatPadValue(emotionInfo.getArousal()));
-            vo.setDominance(formatPadValue(emotionInfo.getDominance()));
-            vo.setMoodDescription(emotionInfo.getMoodDescription());
-        }
-        
-        // 4. AI 兴趣标签
-        List<String> tags = userProfileMapper.findInterestTags(userId);
-        vo.setInterestTags(tags);
-        
-        // 5. 聊天统计
-        Integer messageCount = userProfileMapper.countMessages(userId);
-        vo.setMessageCount(messageCount != null ? messageCount : 0);
-        
-        LocalDate firstChatDate = userProfileMapper.findFirstChatDate(userId);
-        if (firstChatDate != null) {
-            vo.setFirstChatTime(firstChatDate.atStartOfDay());
-            // 计算相遇天数
-            long meetDays = ChronoUnit.DAYS.between(firstChatDate, LocalDate.now());
-            vo.setMeetDays((int) Math.max(0, meetDays));
-        } else {
-            vo.setFirstChatTime(null);
-            vo.setMeetDays(0);
+        // 2-5. 并行执行无依赖的查询（虚拟线程 + CompletableFuture）
+        try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            CompletableFuture<UserProfileVO.LevelInfo> levelFuture = CompletableFuture.supplyAsync(
+                    () -> userProfileMapper.findLevelInfo(userId), executor);
+            CompletableFuture<UserProfileVO.EmotionInfo> emotionFuture = CompletableFuture.supplyAsync(
+                    () -> userProfileMapper.findLatestEmotion(userId), executor);
+            CompletableFuture<List<String>> tagsFuture = CompletableFuture.supplyAsync(
+                    () -> userProfileMapper.findInterestTags(userId), executor);
+            CompletableFuture<Integer> countFuture = CompletableFuture.supplyAsync(
+                    () -> userProfileMapper.countMessages(userId), executor);
+            CompletableFuture<LocalDate> firstDateFuture = CompletableFuture.supplyAsync(
+                    () -> userProfileMapper.findFirstChatDate(userId), executor);
+
+            CompletableFuture.allOf(levelFuture, emotionFuture, tagsFuture, countFuture, firstDateFuture).join();
+
+            // 2. 等级经验
+            UserProfileVO.LevelInfo levelInfo = levelFuture.join();
+            if (levelInfo != null) {
+                vo.setCurrentLevel(levelInfo.getCurrentLevel());
+                vo.setCurrentExp(levelInfo.getCurrentExp());
+                vo.setLevelUpExp(levelInfo.getLevelUpExp());
+                vo.setTotalExp(levelInfo.getTotalExp());
+            } else {
+                vo.setCurrentLevel(1);
+                vo.setCurrentExp(0);
+                vo.setLevelUpExp(100);
+                vo.setTotalExp(0);
+            }
+
+            // 3. 情绪 PAD
+            UserProfileVO.EmotionInfo emotionInfo = emotionFuture.join();
+            if (emotionInfo != null) {
+                vo.setPleasure(formatPadValue(emotionInfo.getPleasure()));
+                vo.setArousal(formatPadValue(emotionInfo.getArousal()));
+                vo.setDominance(formatPadValue(emotionInfo.getDominance()));
+                vo.setMoodDescription(emotionInfo.getMoodDescription());
+            }
+
+            // 4. AI 兴趣标签
+            vo.setInterestTags(tagsFuture.join());
+
+            // 5. 聊天统计
+            Integer messageCount = countFuture.join();
+            vo.setMessageCount(messageCount != null ? messageCount : 0);
+
+            LocalDate firstChatDate = firstDateFuture.join();
+            if (firstChatDate != null) {
+                vo.setFirstChatTime(firstChatDate.atStartOfDay());
+                long meetDays = ChronoUnit.DAYS.between(firstChatDate, LocalDate.now());
+                vo.setMeetDays((int) Math.max(0, meetDays));
+            } else {
+                vo.setFirstChatTime(null);
+                vo.setMeetDays(0);
+            }
         }
         
         log.info("用户 {} 资料获取完成", userId);

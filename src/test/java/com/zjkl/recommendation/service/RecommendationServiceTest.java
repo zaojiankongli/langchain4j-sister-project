@@ -1,7 +1,8 @@
 package com.zjkl.recommendation.service;
 
-import com.google.gson.Gson;
-import com.google.gson.JsonObject;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.zjkl.recommendation.entity.UserRecommendation;
 import com.zjkl.recommendation.mapper.UserRecommendationMapper;
 import dev.langchain4j.agentic.UntypedAgent;
@@ -38,7 +39,7 @@ import static org.mockito.Mockito.when;
 @DisplayName("RecommendationService 单元测试")
 class RecommendationServiceTest {
 
-    private static final Gson GSON = new Gson();
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Mock
     private UntypedAgent recommendationWorkflow;
@@ -315,65 +316,65 @@ class RecommendationServiceTest {
         @Test
         @DisplayName("JSON 中指定了 resourceType 应返回该类型")
         void explicitTypeInJson() throws Exception {
-            JsonObject obj = new JsonObject();
-            obj.addProperty("resourceType", "video");
+            ObjectNode obj = MAPPER.createObjectNode();
+            obj.put("resourceType", "video");
             assertEquals("video", invokeInferResourceType(obj, "https://example.com/doc"));
         }
 
         @Test
         @DisplayName("URL 包含 youtube 应推断为 video")
         void urlContainsYoutube() throws Exception {
-            assertEquals("video", invokeInferResourceType(new JsonObject(), "https://youtube.com/watch?v=abc"));
+            assertEquals("video", invokeInferResourceType(MAPPER.createObjectNode(), "https://youtube.com/watch?v=abc"));
         }
 
         @Test
         @DisplayName("URL 包含 bilibili 应推断为 video")
         void urlContainsBilibili() throws Exception {
-            assertEquals("video", invokeInferResourceType(new JsonObject(), "https://bilibili.com/video/BV123"));
+            assertEquals("video", invokeInferResourceType(MAPPER.createObjectNode(), "https://bilibili.com/video/BV123"));
         }
 
         @Test
         @DisplayName("URL 包含 vimeo 应推断为 video")
         void urlContainsVimeo() throws Exception {
-            assertEquals("video", invokeInferResourceType(new JsonObject(), "https://vimeo.com/123456"));
+            assertEquals("video", invokeInferResourceType(MAPPER.createObjectNode(), "https://vimeo.com/123456"));
         }
 
         @Test
         @DisplayName("URL 包含 blog 应推断为 article")
         void urlContainsBlog() throws Exception {
-            assertEquals("article", invokeInferResourceType(new JsonObject(), "https://example.com/blog/post-1"));
+            assertEquals("article", invokeInferResourceType(MAPPER.createObjectNode(), "https://example.com/blog/post-1"));
         }
 
         @Test
         @DisplayName("URL 包含 article 应推断为 article")
         void urlContainsArticle() throws Exception {
-            assertEquals("article", invokeInferResourceType(new JsonObject(), "https://example.com/articles/123"));
+            assertEquals("article", invokeInferResourceType(MAPPER.createObjectNode(), "https://example.com/articles/123"));
         }
 
         @Test
         @DisplayName("URL 包含 medium 应推断为 article")
         void urlContainsMedium() throws Exception {
-            assertEquals("article", invokeInferResourceType(new JsonObject(), "https://medium.com/@user/post"));
+            assertEquals("article", invokeInferResourceType(MAPPER.createObjectNode(), "https://medium.com/@user/post"));
         }
 
         @Test
         @DisplayName("无匹配的 URL 应返回 document")
         void noMatch_returnsDocument() throws Exception {
-            assertEquals("document", invokeInferResourceType(new JsonObject(), "https://example.com/page"));
+            assertEquals("document", invokeInferResourceType(MAPPER.createObjectNode(), "https://example.com/page"));
         }
 
         @Test
         @DisplayName("同时匹配 video 和 article 关键字时 video 优先")
         void videoMatchTakesPriority() throws Exception {
-            assertEquals("video", invokeInferResourceType(new JsonObject(), "https://medium.com/youtube-video"));
-            assertEquals("video", invokeInferResourceType(new JsonObject(), "https://blog.example.com/bilibili"));
-            assertEquals("video", invokeInferResourceType(new JsonObject(), "https://article.example.com/vimeo"));
+            assertEquals("video", invokeInferResourceType(MAPPER.createObjectNode(), "https://medium.com/youtube-video"));
+            assertEquals("video", invokeInferResourceType(MAPPER.createObjectNode(), "https://blog.example.com/bilibili"));
+            assertEquals("video", invokeInferResourceType(MAPPER.createObjectNode(), "https://article.example.com/vimeo"));
         }
 
         @Test
         @DisplayName("空类型和空 URL 应返回 document")
         void emptyTypeAndUrl_returnsDocument() throws Exception {
-            assertEquals("document", invokeInferResourceType(new JsonObject(), ""));
+            assertEquals("document", invokeInferResourceType(MAPPER.createObjectNode(), ""));
         }
     }
 
@@ -384,8 +385,8 @@ class RecommendationServiceTest {
         @Test
         @DisplayName("有效分数应正确解析为 BigDecimal")
         void validScore_parsesCorrectly() throws Exception {
-            JsonObject obj = new JsonObject();
-            obj.addProperty("relevanceScore", 0.75);
+            ObjectNode obj = MAPPER.createObjectNode();
+            obj.put("relevanceScore", 0.75);
             BigDecimal result = invokeParseRelevanceScore(obj);
             assertEquals(0, BigDecimal.valueOf(0.75).compareTo(result));
         }
@@ -393,7 +394,7 @@ class RecommendationServiceTest {
         @Test
         @DisplayName("缺少 relevanceScore 应返回默认值 0.5")
         void missingScore_returnsDefault() throws Exception {
-            JsonObject obj = new JsonObject();
+            ObjectNode obj = MAPPER.createObjectNode();
             BigDecimal result = invokeParseRelevanceScore(obj);
             assertEquals(0, BigDecimal.valueOf(0.5).compareTo(result));
         }
@@ -401,8 +402,8 @@ class RecommendationServiceTest {
         @Test
         @DisplayName("relevanceScore 为 null 应返回默认值 0.5")
         void nullScore_returnsDefault() throws Exception {
-            JsonObject obj = new JsonObject();
-            obj.add("relevanceScore", com.google.gson.JsonNull.INSTANCE);
+            ObjectNode obj = MAPPER.createObjectNode();
+            obj.putNull("relevanceScore");
             BigDecimal result = invokeParseRelevanceScore(obj);
             assertEquals(0, BigDecimal.valueOf(0.5).compareTo(result));
         }
@@ -410,8 +411,8 @@ class RecommendationServiceTest {
         @Test
         @DisplayName("relevanceScore 为 0 应返回 BigDecimal.ZERO")
         void zeroScore_returnsZero() throws Exception {
-            JsonObject obj = new JsonObject();
-            obj.addProperty("relevanceScore", 0);
+            ObjectNode obj = MAPPER.createObjectNode();
+            obj.put("relevanceScore", 0);
             BigDecimal result = invokeParseRelevanceScore(obj);
             assertEquals(0, BigDecimal.ZERO.compareTo(result));
         }
@@ -419,8 +420,8 @@ class RecommendationServiceTest {
         @Test
         @DisplayName("relevanceScore 为 1.0 应正确解析")
         void maxScore_parsesCorrectly() throws Exception {
-            JsonObject obj = new JsonObject();
-            obj.addProperty("relevanceScore", 1.0);
+            ObjectNode obj = MAPPER.createObjectNode();
+            obj.put("relevanceScore", 1.0);
             BigDecimal result = invokeParseRelevanceScore(obj);
             assertEquals(0, BigDecimal.valueOf(1.0).compareTo(result));
         }
@@ -433,8 +434,8 @@ class RecommendationServiceTest {
         @Test
         @DisplayName("存在的键应返回对应值")
         void existingKey_returnsValue() throws Exception {
-            JsonObject obj = new JsonObject();
-            obj.addProperty("name", "test-value");
+            ObjectNode obj = MAPPER.createObjectNode();
+            obj.put("name", "test-value");
             String result = invokeGetJsonString(obj, "name", "default");
             assertEquals("test-value", result);
         }
@@ -442,7 +443,7 @@ class RecommendationServiceTest {
         @Test
         @DisplayName("不存在的键应返回默认值")
         void missingKey_returnsDefault() throws Exception {
-            JsonObject obj = new JsonObject();
+            ObjectNode obj = MAPPER.createObjectNode();
             String result = invokeGetJsonString(obj, "missing", "default");
             assertEquals("default", result);
         }
@@ -450,8 +451,8 @@ class RecommendationServiceTest {
         @Test
         @DisplayName("值为 null 的键应返回默认值")
         void nullValue_returnsDefault() throws Exception {
-            JsonObject obj = new JsonObject();
-            obj.add("nullable", com.google.gson.JsonNull.INSTANCE);
+            ObjectNode obj = MAPPER.createObjectNode();
+            obj.putNull("nullable");
             String result = invokeGetJsonString(obj, "nullable", "default");
             assertEquals("default", result);
         }
@@ -459,8 +460,8 @@ class RecommendationServiceTest {
         @Test
         @DisplayName("空字符串值应返回空字符串")
         void emptyStringValue() throws Exception {
-            JsonObject obj = new JsonObject();
-            obj.addProperty("empty", "");
+            ObjectNode obj = MAPPER.createObjectNode();
+            obj.put("empty", "");
             String result = invokeGetJsonString(obj, "empty", "default");
             assertEquals("", result);
         }
@@ -508,20 +509,20 @@ class RecommendationServiceTest {
         return (List<UserRecommendation>) method.invoke(service, list, topN);
     }
 
-    private String invokeInferResourceType(JsonObject obj, String url) throws Exception {
-        Method method = RecommendationService.class.getDeclaredMethod("inferResourceType", JsonObject.class, String.class);
+    private String invokeInferResourceType(JsonNode obj, String url) throws Exception {
+        Method method = RecommendationService.class.getDeclaredMethod("inferResourceType", JsonNode.class, String.class);
         method.setAccessible(true);
         return (String) method.invoke(service, obj, url);
     }
 
-    private BigDecimal invokeParseRelevanceScore(JsonObject obj) throws Exception {
-        Method method = RecommendationService.class.getDeclaredMethod("parseRelevanceScore", JsonObject.class);
+    private BigDecimal invokeParseRelevanceScore(JsonNode obj) throws Exception {
+        Method method = RecommendationService.class.getDeclaredMethod("parseRelevanceScore", JsonNode.class);
         method.setAccessible(true);
         return (BigDecimal) method.invoke(service, obj);
     }
 
-    private String invokeGetJsonString(JsonObject obj, String key, String defaultValue) throws Exception {
-        Method method = RecommendationService.class.getDeclaredMethod("getJsonString", JsonObject.class, String.class, String.class);
+    private String invokeGetJsonString(JsonNode obj, String key, String defaultValue) throws Exception {
+        Method method = RecommendationService.class.getDeclaredMethod("getJsonString", JsonNode.class, String.class, String.class);
         method.setAccessible(true);
         return (String) method.invoke(service, obj, key, defaultValue);
     }

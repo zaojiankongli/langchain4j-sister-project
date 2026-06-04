@@ -7,6 +7,7 @@ import com.zjkl.emotion.service.EmotionService;
 import com.zjkl.memory.service.GraphSnapshotService;
 import com.zjkl.memory.service.PromptCacheService;
 import com.zjkl.memory.service.SummaryMemoryService;
+import com.zjkl.memory.service.SummaryMemoryService.MemoryBlockResult;
 import com.zjkl.user.domain.vo.UserProfileVO;
 import com.zjkl.user.service.UserProfileService;
 import dev.langchain4j.community.model.dashscope.QwenStreamingChatModel;
@@ -99,11 +100,11 @@ class SisterChatServiceTest {
     void shouldUseGraphOnlyWhenRouterRequestsGraphWithoutMemory() {
         when(graphSnapshotService.getSnapshot("u1")).thenReturn("snapshot");
         when(ragRouter.analyzeQuery(anyString(), any())).thenReturn(new RouterResult(false, true, "graph", null, null, null));
-        when(graphQueryService.buildGraphBlock("u1", "小王最近怎么样")).thenReturn("graph-block");
+        when(graphQueryService.buildGraphBlock("u1", "小王最近怎么样")).thenReturn(new GraphQueryService.GraphResult("graph-block", 0.8));
 
         service.chatWithVoice("小王最近怎么样", "u1", null);
 
-        verify(summaryMemoryService, never()).buildMemoryBlock(anyString(), anyString(), any());
+        verify(summaryMemoryService, never()).buildMemoryBlockWithScore(anyString(), anyString(), any());
         verify(graphQueryService).buildGraphBlock("u1", "小王最近怎么样");
 
         ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);
@@ -117,11 +118,12 @@ class SisterChatServiceTest {
     void shouldUseMemoryOnlyWhenRouterRequestsMemoryWithoutGraph() {
         when(graphSnapshotService.getSnapshot("u1")).thenReturn("");
         when(ragRouter.analyzeQuery(anyString(), any())).thenReturn(new RouterResult(true, false, "memory", "最近一周", null, null));
-        when(summaryMemoryService.buildMemoryBlock(anyString(), anyString(), any())).thenReturn("memory-block");
+        when(summaryMemoryService.buildMemoryBlockWithScore(anyString(), anyString(), any()))
+                .thenReturn(new MemoryBlockResult("memory-block", 0.7));
 
         service.chatWithVoice("上次那件事你还记得吗", "u1", null);
 
-        verify(summaryMemoryService).buildMemoryBlock(anyString(), anyString(), any());
+        verify(summaryMemoryService).buildMemoryBlockWithScore(anyString(), anyString(), any());
         verify(graphQueryService, never()).buildGraphBlock(anyString(), anyString());
 
         ArgumentCaptor<ChatRequest> captor = ArgumentCaptor.forClass(ChatRequest.class);

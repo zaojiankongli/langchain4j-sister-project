@@ -194,10 +194,8 @@ public class VectorGraphRAG {
             passageMetadatas.add(meta);
         }
 
-        // Drop and recreate for idempotent indexing (matching Python reference behavior)
-        store.dropCollections();
-        store.createCollections(true);
-        if (showProgress) log.info("Inserting into Milvus...");
+        // Use upsert semantics to avoid dropping existing data on incremental indexing
+        if (showProgress) log.info("Inserting (upsert) into Milvus...");
 
         store.insertEntities(entityTexts, graphBuilder.getEntityIds(),
                 entityEmbeddings, entityMetadatas, showProgress);

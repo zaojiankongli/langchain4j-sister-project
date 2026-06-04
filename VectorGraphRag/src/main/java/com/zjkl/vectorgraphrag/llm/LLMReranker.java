@@ -3,6 +3,7 @@ package com.zjkl.vectorgraphrag.llm;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonSyntaxException;
 import com.zjkl.vectorgraphrag.config.VectorGraphRagSettings;
 import lombok.extern.slf4j.Slf4j;
 
@@ -108,7 +109,7 @@ public class LLMReranker {
             return parseResponse(response, new HashSet<>(relationIds), relationIds, relationTexts);
 
         } catch (Exception e) {
-            log.warn("Reranking failed, using top relations: {}", e.getMessage());
+            log.debug("Reranking failed, using top relations: {}", e.getMessage());
             int limit = Math.min(settings.getFinalTopK(), relationIds.size());
             return Map.entry(
                     relationIds.subList(0, limit),
@@ -122,7 +123,8 @@ public class LLMReranker {
                                                                   List<String> allIds,
                                                                   List<String> allTexts) {
         try {
-            JsonObject json = gson.fromJson(response, JsonObject.class);
+            String cleaned = OpenAiClient.cleanMarkdownCodeBlock(response);
+            JsonObject json = gson.fromJson(cleaned, JsonObject.class);
             JsonArray usefulRelations = json.getAsJsonArray("useful_relations");
             if (usefulRelations == null) {
                 return Map.entry(List.of(), List.of());
@@ -163,8 +165,8 @@ public class LLMReranker {
 
             return Map.entry(selectedIds, selectedTexts);
 
-        } catch (Exception e) {
-            log.warn("Failed to parse reranker response: {}", e.getMessage());
+        } catch (JsonSyntaxException e) {
+            log.debug("Failed to parse reranker response: {}", e.getMessage());
             return Map.entry(List.of(), List.of());
         }
     }

@@ -35,7 +35,10 @@ public class MemoryController {
         if (userId == null) {
             return Result.unauthorized("请先登录");
         }
-        List<MemoryVO> voList = memoryQueryService.listMemories(userId, page, size, filter, excludeToday);
+        // 限制分页大小，防止攻击者传超大 size 拉取全量数据
+        int safeSize = Math.min(Math.max(size, 1), 100);
+        int safePage = Math.max(page, 1);
+        List<MemoryVO> voList = memoryQueryService.listMemories(userId, safePage, safeSize, filter, excludeToday);
         return Result.success(voList);
     }
     

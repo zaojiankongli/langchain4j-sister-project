@@ -93,7 +93,7 @@ public class GraphEntityService {
             return;
         }
         if (isRapidFireBlocked(userId)) {
-            log.warn("图写入跳过：rapid fire 限制 userId={}", userId);
+            log.debug("图写入跳过：rapid fire 限制 userId={}", userId);
             return;
         }
 
@@ -280,10 +280,12 @@ public class GraphEntityService {
     }
 
     private void evictEntitiesIfNeeded(String userId) {
+        // 查询上限必须大于 ENTITY_LIMIT，否则 rows.size() 永远 <= 500 < 1000，驱逐永不触发
         List<Map<String, Object>> rows = MilvusQueryUtil.queryByFilter(milvusClientV2,
                 milvusProperties.getGraphEntityCollectionName(),
                 MilvusQueryUtil.userFilter(userId),
-                List.of("id", "text", "type", "mention_count", "last_seen")
+                List.of("id", "text", "type", "mention_count", "last_seen"),
+                ENTITY_LIMIT + 1
         );
         if (rows.size() <= ENTITY_LIMIT) {
             return;
@@ -305,10 +307,12 @@ public class GraphEntityService {
     }
 
     private void mergeNearDuplicateEntities(String userId) {
+        // 需要查询全部实体才能做全局去重比较，上限设为 ENTITY_LIMIT * 2
         List<Map<String, Object>> rows = MilvusQueryUtil.queryByFilter(milvusClientV2,
                 milvusProperties.getGraphEntityCollectionName(),
                 MilvusQueryUtil.userFilter(userId),
-                List.of("id", "text", "type", "mention_count", "first_seen", "last_seen", "source_ids")
+                List.of("id", "text", "type", "mention_count", "first_seen", "last_seen", "source_ids"),
+                ENTITY_LIMIT * 2
         );
         Set<String> deletedIds = new HashSet<>();
 
@@ -378,32 +382,51 @@ public class GraphEntityService {
         if (relations.isEmpty()) {
             return;
         }
-        List<JsonObject> upserts = new ArrayList<>();
+
+        // 先批量构建所有新文本，再一次性 embedAll，避免 N+1 embedding 调用
+        List<String> newTexts = new ArrayList<>();
+        List<String> newIds = new ArrayList<>();
+        List<String> newSubjects = new ArrayList<>();
+        List<String> newObjects = new ArrayList<>();
         List<String> deletes = new ArrayList<>();
+
         for (Map<String, Object> relation : relations) {
             String subject = relation.get("subject").toString();
             String object = relation.get("object").toString();
             String newSubject = subject.equals(removeText) ? keepText : subject;
             String newObject = object.equals(removeText) ? keepText : object;
-            String newId = relationId(userId, newSubject, relation.get("predicate").toString(), newObject);
-            String text = newSubject + " " + relation.get("predicate") + " " + newObject;
-            Embedding embedding = embeddingModel.embed(text).content();
+            newSubjects.add(newSubject);
+            newObjects.add(newObject);
+            newIds.add(relationId(userId, newSubject, relation.get("predicate").toString(), newObject));
+            newTexts.add(newSubject + " " + relation.get("predicate") + " " + newObject);
+            deletes.add(relation.get("id").toString());
+        }
+
+        // 批量 embedding
+        List<dev.langchain4j.data.segment.TextSegment> segments = newTexts.stream()
+                .map(dev.langchain4j.data.segment.TextSegment::from)
+                .toList();
+        List<Embedding> batchEmbeddings = embeddingModel.embedAll(segments).content();
+
+        List<JsonObject> upserts = new ArrayList<>();
+        for (int i = 0; i < relations.size(); i++) {
+            Map<String, Object> relation = relations.get(i);
+            Embedding embedding = batchEmbeddings.get(i);
             normalizeEmbedding(embedding);
 
             JsonObject row = new JsonObject();
-            row.addProperty("id", newId);
+            row.addProperty("id", newIds.get(i));
             row.addProperty("user_id", userId);
-            row.addProperty("text", text);
-            row.addProperty("subject", newSubject);
+            row.addProperty("text", newTexts.get(i));
+            row.addProperty("subject", newSubjects.get(i));
             row.addProperty("predicate", relation.get("predicate").toString());
-            row.addProperty("object", newObject);
+            row.addProperty("object", newObjects.get(i));
             row.addProperty("relation_type", relation.get("relation_type").toString());
             row.addProperty("confidence", parseDouble(relation.get("confidence")));
             row.addProperty("timestamp", parseLong(relation.get("timestamp")));
             row.addProperty("source_id", relation.get("source_id").toString());
             row.add("vector", toJsonArray(embedding.vector()));
             upserts.add(row);
-            deletes.add(relation.get("id").toString());
         }
         milvusClientV2.upsert(UpsertReq.builder()
                 .collectionName(milvusProperties.getGraphRelationCollectionName())

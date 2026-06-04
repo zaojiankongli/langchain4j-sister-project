@@ -71,17 +71,18 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
             // 200ms 缓冲
             AudioBuffer audioBuffer = new AudioBuffer(200);
 
-            StringBuilder replyCollector = new StringBuilder();
+            // 使用线程安全的收集器替代 StringBuilder
+            List<String> replyChunks = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
 
             result.getReplyStream()
                 .concatMap(chunk -> {
                     chatPushService.pushText(userId, chunk, false);
-                    replyCollector.append(chunk);
+                    replyChunks.add(chunk);
                     return Mono.empty();
                 }, 1)
                 .doOnComplete(() -> {
                     log.info("LLM 回复完成：userId={}", userId);
-                    String fullReply = replyCollector.toString();
+                    String fullReply = String.join("", replyChunks);
                     log.info("完整 reply: userId={}, length={}", userId, fullReply.length());
 
                     // 过滤括号内容

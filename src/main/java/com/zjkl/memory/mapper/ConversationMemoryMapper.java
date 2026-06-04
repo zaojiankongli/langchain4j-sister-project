@@ -43,6 +43,20 @@ public interface ConversationMemoryMapper {
         @Param("endDate") String endDate,
         @Param("excludeToday") boolean excludeToday
     );
+
+    /**
+     * 游标分页查询：避免深分页性能问题
+     * 基于 memory_date + id 复合游标，首页传 null 即可
+     */
+    List<ConversationMemory> selectByUserIdCursor(
+        @Param("userId") String userId,
+        @Param("lastMemoryDate") LocalDate lastMemoryDate,
+        @Param("lastId") Long lastId,
+        @Param("limit") int limit,
+        @Param("beginDate") String beginDate,
+        @Param("endDate") String endDate,
+        @Param("excludeToday") boolean excludeToday
+    );
     
     /**
      * 更新图片 URL

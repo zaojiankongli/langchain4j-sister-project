@@ -6,6 +6,7 @@ import com.zjkl.ai.chat.service.MemorySearchFilters;
 import com.zjkl.ai.prompt.service.PromptTemplateService;
 import com.zjkl.ai.summary.service.SummaryService;
 import com.zjkl.common.config.properties.MilvusProperties;
+import com.zjkl.common.util.MilvusQueryUtil;
 import com.zjkl.common.context.UserContext;
 import com.zjkl.emotion.model.EmotionalState;
 import com.zjkl.emotion.service.EmotionService;
@@ -40,6 +41,13 @@ import java.util.stream.Collectors;
 @Service
 @Slf4j
 public class SummaryMemoryService {
+
+    /**
+     * 记忆块构建结果（含检索相关度评分，用于跨路 RAG 融合排序）
+     */
+    public record MemoryBlockResult(String block, double topScore) {
+        public static MemoryBlockResult empty() { return new MemoryBlockResult("", 0.0); }
+    }
 
     // ========== 依赖注入 ==========
     private final StringRedisTemplate stringRedisTemplate;
@@ -110,7 +118,7 @@ public class SummaryMemoryService {
 
     @Async
     public void generateSummaryAsync(String memoryId, List<ChatMessage> messagesSnapshot) {
-        log.info("开始异步生成用户 {} 的摘要，消息数：{}", memoryId, messagesSnapshot.size());
+        log.debug("开始异步生成用户 {} 的摘要，消息数：{}", memoryId, messagesSnapshot.size());
 
         try {
             EmotionalState currentEmotion = emotionService.getUserEmotion(memoryId);
@@ -154,14 +162,12 @@ public class SummaryMemoryService {
             long embedStart = System.currentTimeMillis();
             Embedding embedding = embeddingModel.embed(query).content();
             log.debug("embedding 耗时: {}ms, dim={}", System.currentTimeMillis() - embedStart, embedding.vector().length);
-            float[] denseVector = embedding.vector();
-            List<Float> denseList = new ArrayList<>(denseVector.length);
-            for (float v : denseVector) denseList.add(v);
+            List<Float> denseList = toFloatList(embedding.vector());
 
             int topK = limit * RETRIEVAL_MULTIPLIER;
 
             // 2. 构造两个 AnnSearchReq（v2.6.x: topK 控制每个向量字段的召回数）
-            String userFilter = "user_id == \"" + userId.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+            String userFilter = MilvusQueryUtil.userFilter(userId);
             List<AnnSearchReq> searchRequests = new ArrayList<>();
             searchRequests.add(AnnSearchReq.builder()
                     .vectorFieldName("dense_vector")
@@ -237,8 +243,17 @@ public class SummaryMemoryService {
     public List<String> searchMemoriesByDateRange(String userId, String query,
                                                    String startDate, String endDate, int limit) {
         List<String> results = hybridSearchMemories(userId, query, limit);
+        if (startDate == null && endDate == null) {
+            return results;
+        }
+        // 解析日期范围，用 >= 和 <= 替代原来的 || 子串匹配
+        String start = startDate != null ? startDate.replace("年", ".").replace("月", ".").replace("日", "") : "0000.00.00";
+        String end = endDate != null ? endDate.replace("年", ".").replace("月", ".").replace("日", "") : "9999.99.99";
         return results.stream()
-                .filter(r -> r.contains(startDate) || r.contains(endDate))
+                .filter(r -> {
+                    String datePart = r.length() >= 10 ? r.substring(0, 10) : r;
+                    return datePart.compareTo(start) >= 0 && datePart.compareTo(end) <= 0;
+                })
                 .limit(MAX_MEMORIES)
                 .collect(Collectors.toList());
     }
@@ -259,21 +274,49 @@ public class SummaryMemoryService {
     }
 
     /**
-     * 带过滤条件的记忆块构建
+     * 带过滤条件的记忆块构建（兼容旧 API，只返回文本）
      */
     public String buildMemoryBlock(String userId, String query, MemorySearchFilters filters) {
+        return buildMemoryBlockWithScore(userId, query, filters).block();
+    }
+
+    /**
+     * 带过滤条件 + 检索评分的记忆块构建（用于跨路 RAG 融合排序）
+     */
+    public MemoryBlockResult buildMemoryBlockWithScore(String userId, String query, MemorySearchFilters filters) {
         List<String> memories = hybridSearchMemories(userId, query, filters, MAX_MEMORIES * RETRIEVAL_MULTIPLIER);
         if (memories.isEmpty()) {
-            return "";
+            return MemoryBlockResult.empty();
         }
+        // 再次检索获取 top score（轻量：仅 1 条，不做后处理）
+        double topScore = 0.0;
+        try {
+            Embedding embedding = embeddingModel.embed(query).content();
+            List<Float> vecList = toFloatList(embedding.vector());
+            String userFilter = MilvusQueryUtil.userFilter(userId);
+            SearchReq scoreReq = SearchReq.builder()
+                    .collectionName(milvusCollectionName)
+                    .data(Collections.singletonList(new FloatVec(vecList)))
+                    .topK(1)
+                    .filter(userFilter)
+                    .build();
+            SearchResp scoreResp = milvusClientV2.search(scoreReq);
+            if (scoreResp.getSearchResults() != null && !scoreResp.getSearchResults().isEmpty()
+                    && !scoreResp.getSearchResults().get(0).isEmpty()) {
+                topScore = scoreResp.getSearchResults().get(0).get(0).getScore();
+            }
+        } catch (Exception e) {
+            log.debug("记忆 topScore 获取失败，使用默认 0", e);
+        }
+
         String footer = "\n\n用这些记忆自然地融入回复，仿佛你真的记住了这些事。不要生硬地引用\"我记得之前...\"——让记忆成为你回应的底色。";
         // ≤3 条无需压缩
         if (memories.size() <= MAX_MEMORIES) {
-            return "【哥哥和我的回忆】\n" + String.join("\n", memories) + footer;
+            return new MemoryBlockResult("【哥哥和我的回忆】\n" + String.join("\n", memories) + footer, topScore);
         }
         // >3 条 → LLM 一次性分篇+聚合压缩
         String compressed = compressMemoriesWithLLM(memories);
-        return "【哥哥和我的回忆】\n" + compressed + footer;
+        return new MemoryBlockResult("【哥哥和我的回忆】\n" + compressed + footer, topScore);
     }
 
     /** LLM 压缩记忆 */
@@ -283,7 +326,7 @@ public class SummaryMemoryService {
         try {
             return summaryService.chat("", prompt);
         } catch (Exception e) {
-            log.warn("LLM 记忆压缩失败，降级为硬截断: {}", e.getMessage());
+            log.debug("LLM 记忆压缩失败，降级为硬截断: {}", e.getMessage());
             return memories.stream()
                     .limit(MAX_MEMORIES)
                     .collect(Collectors.joining("\n"));
@@ -297,9 +340,7 @@ public class SummaryMemoryService {
         try {
             // dense embedding
             Embedding embedding = embeddingModel.embed(summary).content();
-            float[] denseVector = embedding.vector();
-            List<Float> denseList = new ArrayList<>(denseVector.length);
-            for (float v : denseVector) denseList.add(v);
+            List<Float> denseList = toFloatList(embedding.vector());
 
             String today = LocalDate.now(ZONE).format(DATE_FORMATTER);
             String id = userId + ":" + today;
@@ -452,6 +493,15 @@ public class SummaryMemoryService {
         }
     }
 
+    // ==================== 通用辅助 ====================
+
+    /** float[] → List<Float> 转换（Milvus API 需要 List<Float>） */
+    private static List<Float> toFloatList(float[] vector) {
+        List<Float> list = new ArrayList<>(vector.length);
+        for (float v : vector) list.add(v);
+        return list;
+    }
+
     // ==================== Redis 辅助（不变） ====================
 
     private String generateNewSummary(String memoryId, List<ChatMessage> messagesSnapshot, String characterCore) {
@@ -524,22 +574,47 @@ public class SummaryMemoryService {
     // ==================== 过滤器辅助 ====================
 
     /**
-     * 用记忆文本粗略匹配 date_hint（子串匹配 create_time）
+     * 用记忆文本前缀匹配 date_hint（解析记忆格式 "yyyy.MM.dd — ..." 的日期部分）
      */
     private boolean matchesDateHint(String memory, String dateHint) {
         if (dateHint == null) return true;
         // 记忆格式："2026.06.02 — 聊了..." → date part 是前 10 字符
         String datePart = memory.length() >= 10 ? memory.substring(0, 10) : memory;
-        String normalized = dateHint.replace("年", ".").replace("月", ".").replace("日", "");
+        String normalized = dateHint.replace("年", ".").replace("月", ".").replace("日", "")
+                .replace("/", ".").replace("-", ".").trim();
+        // 支持模糊匹配：年月日任一部分包含即可
+        // 例如 "2026.06" 匹配 "2026.06.02"，"06" 匹配 "2026.06.02"
+        if (normalized.length() >= 7) {
+            // 完整日期或年月：前缀匹配
+            return datePart.startsWith(normalized);
+        } else if (normalized.length() >= 4) {
+            // 仅年份或年月：包含匹配
+            return datePart.contains(normalized);
+        }
         return datePart.contains(normalized);
     }
 
     /**
-     * 用记忆文本粗略匹配 sentiment_hint
+     * 用记忆文本匹配 sentiment_hint（关键词匹配 + 常见同义词扩展）
      */
     private boolean matchesSentimentHint(String memory, String sentimentHint) {
         if (sentimentHint == null) return true;
-        // 简单子串匹配；后续可升级为从 metadata 解析 emotion_label
-        return memory.contains(sentimentHint);
+        String lower = memory.toLowerCase();
+        String hint = sentimentHint.toLowerCase().trim();
+        // 直接匹配
+        if (lower.contains(hint)) return true;
+        // 常见情感同义词扩展
+        return switch (hint) {
+            case "开心", "高兴", "快乐", "愉快", "幸福" ->
+                    lower.contains("开心") || lower.contains("高兴") || lower.contains("快乐")
+                    || lower.contains("愉快") || lower.contains("幸福") || lower.contains("笑");
+            case "难过", "伤心", "悲伤", "失落", "低落" ->
+                    lower.contains("难过") || lower.contains("伤心") || lower.contains("悲伤")
+                    || lower.contains("失落") || lower.contains("低落") || lower.contains("哭");
+            case "生气", "愤怒", "烦躁", "恼火" ->
+                    lower.contains("生气") || lower.contains("愤怒") || lower.contains("烦躁")
+                    || lower.contains("恼火") || lower.contains("烦");
+            default -> false;
+        };
     }
 }

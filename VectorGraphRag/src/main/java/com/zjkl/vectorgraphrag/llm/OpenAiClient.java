@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.zjkl.vectorgraphrag.config.VectorGraphRagSettings;
 import lombok.extern.slf4j.Slf4j;
 
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -62,11 +63,7 @@ public class OpenAiClient {
 
         String response = executeChat(messages, true);
 
-        JsonObject jsonResponse = gson.fromJson(response, JsonObject.class);
-        String content = jsonResponse.getAsJsonArray("choices")
-                .get(0).getAsJsonObject()
-                .get("message").getAsJsonObject()
-                .get("content").getAsString();
+        String content = extractContentFromResponse(response);
 
         if (cache != null && settings.isUseLlmCache()) {
             cache.set(settings.getLlmModel(), fullPrompt, content, settings.getLlmTemperature());
@@ -97,11 +94,7 @@ public class OpenAiClient {
 
         String response = executeChat(messages, false);
 
-        JsonObject jsonResponse = gson.fromJson(response, JsonObject.class);
-        String content = jsonResponse.getAsJsonArray("choices")
-                .get(0).getAsJsonObject()
-                .get("message").getAsJsonObject()
-                .get("content").getAsString();
+        String content = extractContentFromResponse(response);
 
         if (cache != null && settings.isUseLlmCache()) {
             cache.set(settings.getLlmModel(), fullPrompt, content, settings.getLlmTemperature());
@@ -138,7 +131,9 @@ public class OpenAiClient {
         String response = executeHttp(buildEmbedUrl(), body.toString(), settings.getLlmMaxRetries());
 
         JsonObject jsonResponse = gson.fromJson(response, JsonObject.class);
+        if (jsonResponse == null) throw new RuntimeException("Failed to parse batch embedding response as JSON");
         JsonArray data = jsonResponse.getAsJsonArray("data");
+        if (data == null || data.isEmpty()) throw new RuntimeException("Batch embedding response has no data");
 
         // Index by the "index" field in the response to preserve order
         List<List<Float>> results = new ArrayList<>();
@@ -243,7 +238,8 @@ public class OpenAiClient {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new RuntimeException("OpenAI API call interrupted", e);
-            } catch (Exception e) {
+            } catch (IOException e) {
+                // HTTP 网络层异常（IOException）→ 重试
                 attempt++;
                 if (attempt >= maxRetries) {
                     throw new RuntimeException("OpenAI API call failed after " + attempt + " retries", e);
@@ -260,8 +256,15 @@ public class OpenAiClient {
      */
     private List<Float> parseEmbeddingResponse(String response, int index) {
         JsonObject jsonResponse = gson.fromJson(response, JsonObject.class);
+        if (jsonResponse == null) throw new RuntimeException("Failed to parse embedding response as JSON");
         JsonArray data = jsonResponse.getAsJsonArray("data");
-        JsonArray embedding = data.get(index).getAsJsonObject().getAsJsonArray("embedding");
+        if (data == null || data.size() <= index) {
+            throw new RuntimeException("Embedding response has no data at index " + index);
+        }
+        JsonObject item = data.get(index).getAsJsonObject();
+        if (item == null) throw new RuntimeException("Embedding data item is null at index " + index);
+        JsonArray embedding = item.getAsJsonArray("embedding");
+        if (embedding == null) throw new RuntimeException("Embedding array is null at index " + index);
         List<Float> result = new ArrayList<>(embedding.size());
         for (int i = 0; i < embedding.size(); i++) {
             result.add(embedding.get(i).getAsFloat());
@@ -274,5 +277,57 @@ public class OpenAiClient {
         msg.addProperty("role", role);
         msg.addProperty("content", content);
         return msg;
+    }
+
+    /**
+     * 从 LLM 响应中安全提取 content 字段，逐层 null 检查避免 NPE/ClassCastException
+     */
+    private String extractContentFromResponse(String response) {
+        if (response == null || response.isBlank()) {
+            throw new RuntimeException("Empty LLM response");
+        }
+        JsonObject jsonResponse = gson.fromJson(response, JsonObject.class);
+        if (jsonResponse == null) {
+            throw new RuntimeException("Failed to parse LLM response as JSON");
+        }
+        JsonArray choices = jsonResponse.getAsJsonArray("choices");
+        if (choices == null || choices.isEmpty()) {
+            throw new RuntimeException("LLM response has no choices");
+        }
+        JsonObject firstChoice = choices.get(0).getAsJsonObject();
+        if (firstChoice == null) {
+            throw new RuntimeException("LLM response first choice is null");
+        }
+        JsonObject message = firstChoice.getAsJsonObject("message");
+        if (message == null) {
+            throw new RuntimeException("LLM response has no message");
+        }
+        var contentElem = message.get("content");
+        if (contentElem == null || contentElem.isJsonNull()) {
+            throw new RuntimeException("LLM response message has no content");
+        }
+        return contentElem.getAsString();
+    }
+
+    /**
+     * 清洗 LLM 输出中的 markdown 代码块包裹（```json ... ```）
+     * 在 EntityExtractor / TripletExtractor / LLMReranker 的 parseResponse 中调用
+     */
+    public static String cleanMarkdownCodeBlock(String text) {
+        if (text == null) return null;
+        String trimmed = text.trim();
+        // 去除开头的 ```json 或 ```
+        if (trimmed.startsWith("```")) {
+            int firstNewline = trimmed.indexOf('\n');
+            if (firstNewline > 0) {
+                trimmed = trimmed.substring(firstNewline + 1);
+            }
+            // 去除结尾的 ```
+            if (trimmed.endsWith("```")) {
+                trimmed = trimmed.substring(0, trimmed.length() - 3);
+            }
+            return trimmed.trim();
+        }
+        return trimmed;
     }
 }
