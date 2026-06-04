@@ -74,11 +74,14 @@ public class EmotionAnchorMonitor {
         double newA = newState.getArousal();
         double delta = Math.abs(newP - oldP);
 
+        Runnable triggerCallback = null;
+        Runnable endCallback = null;
+
         synchronized (state) {
             switch (state.status) {
                 case IDLE -> {
                     if (delta > TRIGGER_THRESHOLD) {
-                        triggerEvent(userId, state, oldP, newP, oldA, newA);
+                        triggerCallback = prepareTriggerEvent(userId, state, oldP, newP, oldA, newA);
                     }
                     state.lastMsgTime = LocalDateTime.now();
                 }
@@ -90,13 +93,13 @@ public class EmotionAnchorMonitor {
                     }
 
                     if (isSilent(state)) {
-                        endEvent(userId, state, newP, newA, "用户沉默超过" + SILENCE_HOURS + "小时且愉悦度低于正常值");
+                        endCallback = prepareEndEvent(userId, state, newP, newA, "用户沉默超过" + SILENCE_HOURS + "小时且愉悦度低于正常值");
                     }
                     else if (Math.abs(newP - state.startPleasure) < RETURN_THRESHOLD) {
-                        endEvent(userId, state, newP, newA, "情绪平稳回归基准");
+                        endCallback = prepareEndEvent(userId, state, newP, newA, "情绪平稳回归基准");
                     }
                     else if (isTimeout(state)) {
-                        endEvent(userId, state, newP, newA, "情绪持续偏移" + emotionProperties.getAnchorMaxDurationMinutes() + "分钟且愉悦度低于正常值");
+                        endCallback = prepareEndEvent(userId, state, newP, newA, "情绪持续偏移" + emotionProperties.getAnchorMaxDurationMinutes() + "分钟且愉悦度低于正常值");
                     }
                     else if (newP > state.peakPleasure) {
                         state.peakPleasure = newP;
@@ -104,6 +107,10 @@ public class EmotionAnchorMonitor {
                 }
             }
         }
+
+        // Invoke callbacks OUTSIDE synchronized block to avoid DB I/O under lock
+        if (triggerCallback != null) triggerCallback.run();
+        if (endCallback != null) endCallback.run();
     }
 
     public String getStatus(String userId) {
@@ -143,38 +150,54 @@ public class EmotionAnchorMonitor {
         }
     }
 
-    private void triggerEvent(String userId, MonitorState state, double oldP, double newP, double oldA, double newA) {
-        state.status = MonitorState.Status.MONITORING;
-        state.startPleasure = oldP;
-        state.peakPleasure = newP;
-        state.startArousal = oldA;
-        state.peakArousal = newA;
-        state.startTime = LocalDateTime.now();
-        state.lastMsgTime = LocalDateTime.now();
-
+    /**
+     * 准备触发事件：在 synchronized 内构建事件，返回 Runnable 在锁外执行回调。
+     * 回调成功后才将状态切换为 MONITORING；失败则保持 IDLE。
+     */
+    private Runnable prepareTriggerEvent(String userId, MonitorState state, double oldP, double newP, double oldA, double newA) {
+        LocalDateTime now = LocalDateTime.now();
         log.info("锚点事件触发 - userId={}, deltaP={}, startP={}, newP={}, startA={}, newA={}",
                 userId, newP - oldP, oldP, newP, oldA, newA);
 
-        if (onTriggerCallback != null) {
-            EmotionAnchorEvent event = EmotionAnchorEvent.builder()
-                    .userId(userId)
-                    .startTime(state.startTime)
-                    .startPleasure(toBigDecimal(oldP))
-                    .peakPleasure(toBigDecimal(newP))
-                    .deltaPleasure(toBigDecimal(newP - oldP))
-                    .startArousal(toBigDecimal(oldA))
-                    .peakArousal(toBigDecimal(newA))
-                    .deltaArousal(toBigDecimal(newA - oldA))
-                    .triggerReason("愉悦度变化 " + String.format("%.4f", Math.abs(newP - oldP)) + " 超过阈值 " + TRIGGER_THRESHOLD)
-                    .build();
-            onTriggerCallback.accept(event);
-        }
+        EmotionAnchorEvent event = EmotionAnchorEvent.builder()
+                .userId(userId)
+                .startTime(now)
+                .startPleasure(toBigDecimal(oldP))
+                .peakPleasure(toBigDecimal(newP))
+                .deltaPleasure(toBigDecimal(newP - oldP))
+                .startArousal(toBigDecimal(oldA))
+                .peakArousal(toBigDecimal(newA))
+                .deltaArousal(toBigDecimal(newA - oldA))
+                .triggerReason("愉悦度变化 " + String.format("%.4f", Math.abs(newP - oldP)) + " 超过阈值 " + TRIGGER_THRESHOLD)
+                .build();
+
+        return () -> {
+            try {
+                if (onTriggerCallback != null) {
+                    onTriggerCallback.accept(event);
+                }
+                // Callback succeeded — now commit state transition to MONITORING
+                synchronized (state) {
+                    state.status = MonitorState.Status.MONITORING;
+                    state.startPleasure = oldP;
+                    state.peakPleasure = newP;
+                    state.startArousal = oldA;
+                    state.peakArousal = newA;
+                    state.startTime = now;
+                    state.lastMsgTime = now;
+                }
+            } catch (Exception e) {
+                log.error("Trigger callback failed, staying IDLE - userId={}", userId, e);
+                // state.status remains IDLE — no cleanup needed
+            }
+        };
     }
 
     /**
-     * 结束锚点事件
+     * 准备结束事件：在 synchronized 内快照状态并构建事件，返回 Runnable 在锁外执行回调。
+     * 回调成功后将状态切换为 IDLE；失败则回退为 MONITORING。
      */
-    private void endEvent(String userId, MonitorState state, double endP, double endA, String endReason) {
+    private Runnable prepareEndEvent(String userId, MonitorState state, double endP, double endA, String endReason) {
         LocalDateTime endTime = LocalDateTime.now();
         // 比较结束愉悦度与起始愉悦度的差值来判断正负
         // 差值为零视为正面（情绪至少没有恶化）
@@ -183,32 +206,52 @@ public class EmotionAnchorMonitor {
                 ? EmotionAnchorEvent.EndType.POSITIVE
                 : EmotionAnchorEvent.EndType.NEGATIVE;
 
+        // Snapshot state while still inside synchronized
+        LocalDateTime capturedStartTime = state.startTime;
+        double capturedStartPleasure = state.startPleasure;
+        double capturedPeakPleasure = state.peakPleasure;
+        double capturedStartArousal = state.startArousal;
+        double capturedPeakArousal = state.peakArousal;
+
         log.info("锚点事件结束 - userId={}, endType={}, endReason={}, duration={}s",
                 userId, endType, endReason,
-                Duration.between(state.startTime, endTime).getSeconds());
+                Duration.between(capturedStartTime, endTime).getSeconds());
 
-        state.status = MonitorState.Status.IDLE;
+        EmotionAnchorEvent event = EmotionAnchorEvent.builder()
+                .userId(userId)
+                .startTime(capturedStartTime)
+                .endTime(endTime)
+                .startPleasure(toBigDecimal(capturedStartPleasure))
+                .peakPleasure(toBigDecimal(capturedPeakPleasure))
+                .endPleasure(toBigDecimal(endP))
+                .deltaPleasure(toBigDecimal(capturedPeakPleasure - capturedStartPleasure))
+                .startArousal(toBigDecimal(capturedStartArousal))
+                .peakArousal(toBigDecimal(capturedPeakArousal))
+                .endArousal(toBigDecimal(endA))
+                .deltaArousal(toBigDecimal(endA - capturedStartArousal))
+                .endType(endType)
+                .endReason(endReason)
+                .triggerReason("愉悦度变化 " + String.format("%.4f", Math.abs(capturedPeakPleasure - capturedStartPleasure)) + " 超过阈值 " + TRIGGER_THRESHOLD)
+                .build();
+        event.calculateDuration();
 
-        if (onEndCallback != null) {
-            EmotionAnchorEvent event = EmotionAnchorEvent.builder()
-                    .userId(userId)
-                    .startTime(state.startTime)
-                    .endTime(endTime)
-                    .startPleasure(toBigDecimal(state.startPleasure))
-                    .peakPleasure(toBigDecimal(state.peakPleasure))
-                    .endPleasure(toBigDecimal(endP))
-                    .deltaPleasure(toBigDecimal(state.peakPleasure - state.startPleasure))
-                    .startArousal(toBigDecimal(state.startArousal))
-                    .peakArousal(toBigDecimal(state.peakArousal))
-                    .endArousal(toBigDecimal(endA))
-                    .deltaArousal(toBigDecimal(endA - state.startArousal))
-                    .endType(endType)
-                    .endReason(endReason)
-                    .triggerReason("愉悦度变化 " + String.format("%.4f", Math.abs(state.peakPleasure - state.startPleasure)) + " 超过阈值 " + TRIGGER_THRESHOLD)
-                    .build();
-            event.calculateDuration();
-            onEndCallback.accept(event);
-        }
+        return () -> {
+            try {
+                if (onEndCallback != null) {
+                    onEndCallback.accept(event);
+                }
+                // Callback succeeded — commit transition to IDLE
+                synchronized (state) {
+                    state.status = MonitorState.Status.IDLE;
+                }
+            } catch (Exception e) {
+                log.error("End callback failed, reverting to MONITORING - userId={}", userId, e);
+                // Revert to MONITORING so the next onEmotionChange can retry
+                synchronized (state) {
+                    state.status = MonitorState.Status.MONITORING;
+                }
+            }
+        };
     }
 
     private boolean isSilent(MonitorState state) {
@@ -243,10 +286,16 @@ public class EmotionAnchorMonitor {
             }
         });
 
-        // 2. 最大容量检查：如果 map 超过阈值，按 lastMsgTime 最老的优先清除
+        // 2. 最大容量检查：如果 map 超过阈值，按 lastMsgTime 最老的优先清除（排除正在监测中的用户）
         if (monitors.size() > MAX_MONITOR_CAPACITY) {
             int excess = monitors.size() - MAX_MONITOR_CAPACITY;
             monitors.entrySet().stream()
+                    .filter(entry -> {
+                        var s = entry.getValue();
+                        synchronized (s) {
+                            return s.status != MonitorState.Status.MONITORING;
+                        }
+                    })
                     .sorted((a, b) -> {
                         LocalDateTime timeA = a.getValue().lastMsgTime;
                         LocalDateTime timeB = b.getValue().lastMsgTime;

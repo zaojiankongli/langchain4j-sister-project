@@ -548,6 +548,11 @@ public class GraphEntityService {
         if (Long.valueOf(1L).equals(count)) {
             stringRedisTemplate.expire(key, GraphRedisKeys.RAPID_FIRE_WINDOW);
         }
+        // 防止 TTL 丢失导致永久封锁：确保 key 始终有过期时间
+        Long ttl = stringRedisTemplate.getExpire(key, java.util.concurrent.TimeUnit.SECONDS);
+        if (ttl == null || ttl < 0) {
+            stringRedisTemplate.expire(key, GraphRedisKeys.RAPID_FIRE_WINDOW);
+        }
         if (count != null && count >= 3L) {
             // Set block marker with block TTL; counter resets when TTL expires
             stringRedisTemplate.opsForValue().set(key, "blocked", GraphRedisKeys.RAPID_FIRE_BLOCK);

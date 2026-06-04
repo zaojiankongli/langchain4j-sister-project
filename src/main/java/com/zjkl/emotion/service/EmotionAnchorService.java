@@ -130,8 +130,21 @@ public class EmotionAnchorService {
         try {
             semanticService.generateSemanticFields(event);
 
-            // 回写数据库
-            Long activeId = activeEventIds.remove(event.getUserId());
+            // Conditional remove: avoid deleting a newer event's ID that may have
+            // been written by handleAnchorTriggered after this end-event was created.
+            Long currentId = activeEventIds.get(event.getUserId());
+            Long activeId = null;
+            if (currentId != null && event.getId() != null && currentId.equals(event.getId())) {
+                activeId = activeEventIds.remove(event.getUserId());
+            } else if (currentId == null) {
+                // Already removed, try to use event's own ID
+                activeId = event.getId();
+            } else {
+                // currentId != event.getId() — a newer event has started;
+                // do NOT remove the newer ID. Fall through to use event's own ID.
+                activeId = event.getId();
+            }
+
             boolean updated = false;
             if (activeId != null) {
                 event.setId(activeId);

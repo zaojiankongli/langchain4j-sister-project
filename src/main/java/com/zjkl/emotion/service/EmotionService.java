@@ -226,8 +226,12 @@ public class EmotionService {
      * 更新用户情绪状态
      */
     public EmotionalState updateUserEmotion(String userId, DeltaEmotion delta) {
-        log.debug("情绪更新 - userId={}, 刺激：P={}, A={}, D={}",
-                userId, delta.getDeltaP(), delta.getDeltaA(), delta.getDeltaD());
+        // Null-safe extraction to prevent NPE from auto-unboxing
+        double dp = delta.getDeltaP() != null ? delta.getDeltaP() : 0.0;
+        double da = delta.getDeltaA() != null ? delta.getDeltaA() : 0.0;
+        double dd = delta.getDeltaD() != null ? delta.getDeltaD() : 0.0;
+
+        log.debug("情绪更新 - userId={}, 刺激：P={}, A={}, D={}", userId, dp, da, dd);
 
         org.redisson.api.RLock lock = redissonClient.getLock("lock:emotion:" + userId);
         boolean locked = false;
@@ -242,9 +246,9 @@ public class EmotionService {
 
             // 施加刺激（基于当前情绪的增量变化）
             double s = getUserSensitivity(userId);
-            double newP = current.getPleasure() + delta.getDeltaP() * s;
-            double newA = current.getArousal() + delta.getDeltaA() * s;
-            double newD = current.getDominance() + delta.getDeltaD() * s;
+            double newP = current.getPleasure() + dp * s;
+            double newA = current.getArousal() + da * s;
+            double newD = current.getDominance() + dd * s;
             current = new EmotionalState(newP, newA, newD);
 
             // 衰减只由 EmotionDecayScheduler 定时执行，此处不再调用 applyDecayAndRegression

@@ -86,8 +86,9 @@ public class GraphSnapshotService {
     private void maybeRebuildAsync(String userId, String targetVersion) {
         // 使用 Redis SETNX 分布式锁防止并发请求重复触发重建
         String lockKey = GraphRedisKeys.LAST_REBUILD_AT_KEY + "lock:" + userId;
+        String lockToken = java.util.UUID.randomUUID().toString();
         Boolean acquired = stringRedisTemplate.opsForValue().setIfAbsent(
-                lockKey, "1", java.time.Duration.ofMillis(SNAPSHOT_REBUILD_GAP_MS));
+                lockKey, lockToken, java.time.Duration.ofMillis(SNAPSHOT_REBUILD_GAP_MS));
         if (!Boolean.TRUE.equals(acquired)) {
             log.debug("图 snapshot 重建锁未获取，跳过: userId={}", userId);
             return;
@@ -97,13 +98,19 @@ public class GraphSnapshotService {
             try {
                 rebuildSnapshot(userId, targetVersion);
             } finally {
-                // 重建完成后删除锁（允许后续版本变更触发新重建）
-                stringRedisTemplate.delete(lockKey);
+                // 只删除自己持有的锁，避免误删其他实例的锁
+                String current = stringRedisTemplate.opsForValue().get(lockKey);
+                if (lockToken.equals(current)) {
+                    stringRedisTemplate.delete(lockKey);
+                }
             }
         }, asyncExecutor)
                 .exceptionally(e -> {
                     log.warn("图 snapshot 异步重建调度失败 userId={}", userId, e);
-                    stringRedisTemplate.delete(lockKey);
+                    String current = stringRedisTemplate.opsForValue().get(lockKey);
+                    if (lockToken.equals(current)) {
+                        stringRedisTemplate.delete(lockKey);
+                    }
                     return null;
                 });
     }

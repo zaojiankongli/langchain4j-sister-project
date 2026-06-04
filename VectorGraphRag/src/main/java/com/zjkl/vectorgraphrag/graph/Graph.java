@@ -194,6 +194,10 @@ public class Graph {
                 List.of(embedding), List.of(metadata), false);
 
         String canonical = relationTextToId.putIfAbsent(relationText, relationId);
+        if (canonical != null && !canonical.equals(relationId)) {
+            // 另一个线程已创建该关系，跳过 Milvus 插入避免重复
+            return canonical;
+        }
         return canonical != null ? canonical : relationId;
     }
 
@@ -229,6 +233,10 @@ public class Graph {
                 List.of(embedding), metadatas, false);
 
         String canonical = entityNameToId.putIfAbsent(normalized, entityId);
+        if (canonical != null && !canonical.equals(entityId)) {
+            // 另一个线程已创建该实体，跳过 Milvus 插入避免重复
+            return canonical;
+        }
         return canonical != null ? canonical : entityId;
     }
 

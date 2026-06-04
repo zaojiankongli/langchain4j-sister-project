@@ -6,7 +6,9 @@ import com.zjkl.emotion.model.vo.EmotionHistoryVO;
 import com.zjkl.emotion.model.vo.EvolutionEventVO;
 import com.zjkl.emotion.service.EmotionService;
 import com.zjkl.common.Result;
+import jakarta.validation.constraints.Size;
 import lombok.RequiredArgsConstructor;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -15,6 +17,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/emotion")
 @RequiredArgsConstructor
+@Validated
 public class EmotionController {
 
     private static final int MAX_LIMIT = 100;
@@ -23,7 +26,7 @@ public class EmotionController {
     private final UserContext userContext;
 
     @GetMapping("/{userId}")
-    public Result<Map<String, Object>> getEmotion(@PathVariable String userId) {
+    public Result<Map<String, Object>> getEmotion(@PathVariable @Size(max = 64) String userId) {
         int authCode = userContext.checkSelfAccessCode(userId);
         if (authCode != 0) {
             return Result.error(authCode, authCode == 401 ? "请先登录" : "无权访问");
@@ -38,7 +41,7 @@ public class EmotionController {
     }
 
     @GetMapping("/{userId}/mood")
-    public Result<Map<String, String>> getMood(@PathVariable String userId) {
+    public Result<Map<String, String>> getMood(@PathVariable @Size(max = 64) String userId) {
         int authCode = userContext.checkSelfAccessCode(userId);
         if (authCode != 0) {
             return Result.error(authCode, authCode == 401 ? "请先登录" : "无权访问");
@@ -52,7 +55,7 @@ public class EmotionController {
 
     @GetMapping("/{userId}/evolution")
     public Result<List<EvolutionEventVO>> getEvolution(
-            @PathVariable String userId,
+            @PathVariable @Size(max = 64) String userId,
             @RequestParam(defaultValue = "10") int limit) {
         int authCode = userContext.checkSelfAccessCode(userId);
         if (authCode != 0) {
@@ -65,7 +68,7 @@ public class EmotionController {
 
     @GetMapping("/{userId}/history")
     public Result<List<EmotionHistoryVO>> getHistory(
-            @PathVariable String userId,
+            @PathVariable @Size(max = 64) String userId,
             @RequestParam(defaultValue = "200") int limit) {
         int authCode = userContext.checkSelfAccessCode(userId);
         if (authCode != 0) {
@@ -77,7 +80,7 @@ public class EmotionController {
     }
 
     @PostMapping("/{userId}/reset")
-    public Result<Map<String, Object>> resetEmotion(@PathVariable String userId) {
+    public Result<Map<String, Object>> resetEmotion(@PathVariable @Size(max = 64) String userId) {
         int authCode = userContext.checkSelfAccessCode(userId);
         if (authCode != 0) {
             return Result.error(authCode, authCode == 401 ? "请先登录" : "无权访问");

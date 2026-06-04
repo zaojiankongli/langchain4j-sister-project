@@ -188,14 +188,17 @@ public class SisterChatService {
                     CompletableFuture.allOf(memoryFuture, snapshotFuture, graphFuture)
                             .get(15, java.util.concurrent.TimeUnit.SECONDS);
                 } catch (java.util.concurrent.TimeoutException te) {
-                    log.warn("RAG pipeline 超时（15s），使用已完成的结果继续", te);
+                    memoryFuture.cancel(true);
+                    snapshotFuture.cancel(true);
+                    graphFuture.cancel(true);
+                    log.warn("RAG pipeline 超时（15s），取消未完成的任务", te);
                 } catch (Exception e) {
                     log.warn("RAG pipeline 异常，使用已完成的结果继续", e);
                 }
 
-                MemoryBlockResult memResult = memoryFuture.get();
-                String graphSnapshot = snapshotFuture.get();
-                GraphResult graphResult = graphFuture.get();
+                MemoryBlockResult memResult = memoryFuture.isDone() ? memoryFuture.get() : MemoryBlockResult.empty();
+                String graphSnapshot = snapshotFuture.isDone() ? snapshotFuture.get() : "";
+                GraphResult graphResult = graphFuture.isDone() ? graphFuture.get() : GraphResult.empty();
 
                 // 跨路融合排序 + 去重
                 memoryBlock = mergeRagResults(route.primarySource(),
@@ -477,7 +480,7 @@ public class SisterChatService {
     }
 
     private static final Pattern IMAGE_URL_PATTERN = Pattern.compile(
-        "^https://(?!localhost|127\\.0\\.0\\.1|169\\.254\\.|10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.).+"
+        "^https://(?!localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|169\\.254\\.|10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.|\\[::|\\[0:).+"
     );
 
     private String wrapSnapshot(String graphSnapshot) {

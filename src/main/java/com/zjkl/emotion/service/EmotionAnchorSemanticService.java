@@ -97,6 +97,7 @@ public class EmotionAnchorSemanticService {
             }
 
             try {
+                // 同一天内仅首次锚点事件执行 LLM 语义分析，后续事件使用默认值以节省 API 调用
                 stringRedisTemplate.opsForValue().set(cacheKey, "1", Duration.ofHours(24));
             } catch (Exception e) {
                 log.warn("锚点摘要缓存写入失败: userId={}", userId, e);

@@ -306,8 +306,13 @@ public class LlmResponseStreamParser {
             .doOnComplete(() -> {
                 log.info("llmStream doOnComplete 触发，state={}", state[0]);
                 if (state[0] == ParseState.PARSING_REPLY) {
-                    log.error("LLM 流结束但 reply 未闭合，phase: {}", state[0]);
-                    replySink.tryEmitError(new IllegalStateException("LLM 流结束但 reply 未闭合"));
+                    // Best-effort: flush remaining buffer content before completing
+                    log.warn("LLM 流结束但 reply 未闭合，刷新剩余缓冲区内容，phase: {}", state[0]);
+                    if (replyBuf.length() > 0) {
+                        replySink.tryEmitNext(replyBuf.toString());
+                        replyBuf.setLength(0);
+                    }
+                    replySink.tryEmitComplete();
                 } else {
                     log.info("LLM 流完成，phase: {}", state[0]);
                     replySink.tryEmitComplete();

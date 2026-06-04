@@ -319,6 +319,8 @@ public class SummaryMemoryService {
         }
 
         // 复用已有的 embedding 获取 top score，避免二次调用 embeddingModel.embed()
+        // TODO: 性能优化 — 此处为获取 topScore 执行了第二次 Milvus 查询，
+        // 应从 hybridSearchInternal 的结果中直接提取 RRF 分数以消除冗余查询
         double topScore = 0.0;
         List<Float> embeddingVector = searchResult.embeddingVector();
         if (!embeddingVector.isEmpty()) {
