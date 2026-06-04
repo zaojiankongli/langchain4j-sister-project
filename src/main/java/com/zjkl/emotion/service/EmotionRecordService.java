@@ -2,7 +2,6 @@ package com.zjkl.emotion.service;
 
 import com.zjkl.ai.chat.entity.ConverMessage;
 import com.zjkl.ai.chat.service.ConverMessageService;
-import com.zjkl.ai.prompt.service.PromptTemplateService;
 import com.zjkl.emotion.assistant.EmotionReasonAgent;
 import com.zjkl.emotion.mapper.UserEmotionMapper;
 import com.zjkl.emotion.model.EmotionalState;
@@ -16,7 +15,6 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
-import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -36,7 +34,6 @@ public class EmotionRecordService {
     private final EmotionReasonAgent emotionReasonAgent;
     private final ConverMessageService converMessageService;
     private final UserEmotionMapper userEmotionMapper;
-    private final PromptTemplateService promptTemplateService;
 
     /**
      * 异步记录用户情绪快照
@@ -127,16 +124,7 @@ public class EmotionRecordService {
         try {
             String time = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm"));
 
-            // 渲染 characterCore（角色身份 + 动态情绪参数）
-            String characterCore = promptTemplateService.render("character/core", Map.of(
-                "pleasure", String.format("%.3f", emotion.getPleasure()),
-                "arousal", String.format("%.3f", emotion.getArousal()),
-                "dominance", String.format("%.3f", emotion.getDominance()),
-                "moodLabel", moodLabel != null ? moodLabel : ""
-            ));
-
             return emotionReasonAgent.generateReason(
-                    characterCore,
                     time,
                     moodLabel,
                     String.format("%.3f", emotion.getPleasure()),

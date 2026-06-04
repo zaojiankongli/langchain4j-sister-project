@@ -78,9 +78,4 @@ public enum ErrorCode {
         return Result.error(code, message);
     }
 
-    public <T> Result<T> toResult(T data) {
-        Result<T> result = Result.error(code, message);
-        result.setData(data);
-        return result;
-    }
 }

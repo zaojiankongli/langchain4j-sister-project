@@ -120,7 +120,7 @@ public class PeekStateTool {
         if (lastActive == null) {
             return false;
         }
-        return (System.currentTimeMillis() - lastActive) < peekProperties.getActiveThresholdMinutes() * 60 * 1000L;
+        return (System.currentTimeMillis() - lastActive) < peekProperties.getActiveThresholdMinutes() * 60L * 1000L;
     }
 
     /**

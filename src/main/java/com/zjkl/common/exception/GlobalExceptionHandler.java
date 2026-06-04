@@ -196,15 +196,6 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * AccessDeniedException (Spring Security / 自定义)
-     */
-    @ExceptionHandler(java.nio.file.AccessDeniedException.class)
-    public Result<?> handleAccessDenied(java.nio.file.AccessDeniedException e, HttpServletRequest request) {
-        log.warn("访问被拒绝 [{} {}]: {}", request.getMethod(), request.getRequestURI(), e.getMessage());
-        return Result.forbidden("访问被拒绝");
-    }
-
-    /**
      * 兜底
      */
     @ExceptionHandler(Exception.class)

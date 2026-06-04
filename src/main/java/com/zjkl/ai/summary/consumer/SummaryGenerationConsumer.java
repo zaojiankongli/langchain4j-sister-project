@@ -85,14 +85,12 @@ public class SummaryGenerationConsumer extends AbstractStreamConsumer {
             return;  // 不 ACK，等待重试
         }
 
-        boolean success = false;
         try {
             // 双重检查
             isProcessed = redisTemplate.opsForSet().isMember(processedKey, taskId);
             if (Boolean.TRUE.equals(isProcessed)) {
                 log.info("任务已处理（双重检查），跳过：taskId={}", taskId);
                 acknowledge(record);
-                success = true;
                 return;
             }
 
@@ -108,7 +106,6 @@ public class SummaryGenerationConsumer extends AbstractStreamConsumer {
 
             acknowledge(record);
             log.info("摘要任务完成：taskId={}", taskId);
-            success = true;
 
         } catch (Exception e) {
             log.error("摘要生成失败：taskId={}, userId={}", taskId, userId, e);
@@ -127,7 +124,6 @@ public class SummaryGenerationConsumer extends AbstractStreamConsumer {
                 redisTemplate.opsForStream().add("daily-summary:dead-letter", deadLetter);
                 redisTemplate.opsForStream().trim("daily-summary:dead-letter", DEAD_LETTER_STREAM_MAX_LENGTH, true);
                 acknowledge(record);
-                success = true; // 死信队列处理完毕，可以释放锁
             } else {
                 // 重试 < 3 次，抛出异常让基类统一处理（不 ACK）
                 // 不释放锁，依赖 Redis TTL 自然过期，防止其他实例立即获取同一消息

@@ -400,7 +400,11 @@ public class WakeUpScheduler {
         } finally {
             // 仅在实际执行了处理流程时缩短 TTL；早退（DND/冷却等）保留完整 TTL 防止重复处理
             if (processed) {
-                redisTemplate.expire(processingKey, 60, TimeUnit.SECONDS);
+                try {
+                    redisTemplate.expire(processingKey, 60, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    log.warn("缩短 processing key TTL 失败: userId={}", userId, e);
+                }
             }
             if (semAcquired) {
                 wakeupConcurrency.release();

@@ -41,7 +41,7 @@ public class ImageController {
     private Executor imageTaskExecutor;
 
     @GetMapping("/describe")
-    public Result<Map<String, String>> describe(@RequestParam @Pattern(regexp = "^https?://.+") String imageUrl) {
+    public Result<Map<String, String>> describe(@RequestParam @Pattern(regexp = "^https://.+") String imageUrl) {
         if (userContext.getUserId() == null) {
             return Result.unauthorized("请先登录");
         }
@@ -51,7 +51,7 @@ public class ImageController {
     }
 
     @GetMapping("/describe/peek")
-    public Result<Map<String, String>> describeForPeek(@RequestParam @Pattern(regexp = "^https?://.+") String imageUrl) {
+    public Result<Map<String, String>> describeForPeek(@RequestParam @Pattern(regexp = "^https://.+") String imageUrl) {
         if (userContext.getUserId() == null) {
             return Result.unauthorized("请先登录");
         }
@@ -84,7 +84,7 @@ public class ImageController {
      * SSRF 防护：校验 URL 必须使用 HTTPS 且目标地址不能是内网 IP。
      */
     private void validateRemoteUrl(String url) {
-        if (url == null || !url.matches("^https://.+")) {
+        if (url == null || !url.toLowerCase().matches("^https://.+")) {
             throw new IllegalArgumentException("URL must use HTTPS");
         }
         try {

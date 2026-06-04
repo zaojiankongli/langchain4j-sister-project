@@ -114,15 +114,6 @@ public class MailService {
         return mail;
     }
 
-    private void saveToRedis(String userId, List<MailMessage> mails) {
-        try {
-            String json = objectMapper.writeValueAsString(mails);
-            redisTemplate.opsForValue().set(MAIL_CACHE_KEY_PREFIX + userId, json, REDIS_TTL);
-        } catch (Exception e) {
-            log.warn("写入 Redis 邮件缓存失败: userId={}", userId, e);
-        }
-    }
-
     /**
      * SETNX-based cache write: only populates if the key does not already exist.
      * Prevents overwriting a cache invalidation triggered by a concurrent addMail().

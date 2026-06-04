@@ -19,8 +19,7 @@ public interface EmotionReasonAgent {
             请推测哥哥/姐姐此刻的情绪状态原因。
             """)
     @Agent("根据当前情绪 PAD 值和聊天记录，推测情绪状态的原因")
-    String generateReason(@V("characterCore") String characterCore,
-                          @V("time") String time,
+    String generateReason(@V("time") String time,
                           @V("moodLabel") String moodLabel,
                           @V("pleasure") String pleasure,
                           @V("arousal") String arousal,

@@ -68,6 +68,6 @@ class ControllerParameterValidationTest {
         Pattern pattern = parameter.getAnnotation(Pattern.class);
 
         assertNotNull(pattern, "imageUrl parameter must declare @Pattern");
-        assertEquals("^https?://.+", pattern.regexp());
+        assertEquals("^https://.+", pattern.regexp());
     }
 }

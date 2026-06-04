@@ -62,7 +62,9 @@ public class GraphRetriever {
             Set<String> seenIds = new LinkedHashSet<>();
 
             for (Map<String, Object> result : searchResults) {
-                double distance = ((Number) result.get("distance")).doubleValue();
+                Object distObj = result.get("distance");
+                if (distObj == null) continue;
+                double distance = ((Number) distObj).doubleValue();
                 if (distance <= eThreshold) continue;
 
                 @SuppressWarnings("unchecked")
@@ -93,7 +95,9 @@ public class GraphRetriever {
         List<Float> relationScores = new ArrayList<>();
 
         for (Map<String, Object> result : relationResults) {
-            double distance = ((Number) result.get("distance")).doubleValue();
+            Object distObj = result.get("distance");
+            if (distObj == null) continue;
+            double distance = ((Number) distObj).doubleValue();
             if (distance <= rThreshold) continue;
 
             @SuppressWarnings("unchecked")

@@ -46,7 +46,7 @@ public class Graph {
         String passageId = id != null ? id : UUID.randomUUID().toString();
         List<Float> embedding = embeddingClient.embed(text);
 
-        List<String> entityIds = new ArrayList<>();
+        Set<String> entityIdSet = new LinkedHashSet<>();
         List<String> relationIds = new ArrayList<>();
 
         if (triplets != null) {
@@ -57,10 +57,12 @@ public class Graph {
 
                 String subjectId = entityNameToId.get(normalizePhrase(triplet.getSubject()));
                 String objectId = entityNameToId.get(normalizePhrase(triplet.getObject()));
-                if (subjectId != null && !entityIds.contains(subjectId)) entityIds.add(subjectId);
-                if (objectId != null && !entityIds.contains(objectId)) entityIds.add(objectId);
+                if (subjectId != null) entityIdSet.add(subjectId);
+                if (objectId != null) entityIdSet.add(objectId);
             }
         }
+
+        List<String> entityIds = new ArrayList<>(entityIdSet);
 
         Map<String, Object> metadata = new HashMap<>();
         if (!entityIds.isEmpty()) metadata.put("entity_ids", entityIds);
@@ -124,7 +126,8 @@ public class Graph {
             for (Map.Entry<String, Map<String, Object>> entry : entityMap.entrySet()) {
                 List<String> pids = safeGetList(entry.getValue(), "passage_ids");
                 pids.remove(passageId);
-                store.upsertEntity(entry.getKey(), null, null, null, pids);
+                String existingText = safeGet(entry.getValue(), "text");
+                store.upsertEntity(entry.getKey(), existingText, null, null, pids);
             }
         }
 
@@ -139,7 +142,8 @@ public class Graph {
             for (Map.Entry<String, Map<String, Object>> entry : relationMap.entrySet()) {
                 List<String> pids = safeGetList(entry.getValue(), "passage_ids");
                 pids.remove(passageId);
-                store.upsertRelation(entry.getKey(), null, null, null, pids, null, null, null);
+                String existingText = safeGet(entry.getValue(), "text");
+                store.upsertRelation(entry.getKey(), existingText, null, null, pids, null, null, null);
             }
         }
 

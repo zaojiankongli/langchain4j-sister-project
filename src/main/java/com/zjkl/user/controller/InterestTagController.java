@@ -5,6 +5,7 @@ import com.zjkl.common.context.UserContext;
 import com.zjkl.common.util.RateLimiter;
 import com.zjkl.user.service.InterestTagGenerateService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import jakarta.annotation.PreDestroy;
@@ -22,6 +23,7 @@ import java.util.concurrent.Executors;
 @RestController
 @RequestMapping("/api/interest-tag")
 @RequiredArgsConstructor
+@Slf4j
 public class InterestTagController {
 
     private final InterestTagGenerateService interestTagGenerateService;
@@ -48,7 +50,7 @@ public class InterestTagController {
             try {
                 interestTagGenerateService.generateTags(userId);
             } catch (Exception e) {
-                // 已在 service 层记录日志
+                log.warn("异步标签生成异常(已降级): userId={}", userId, e);
             }
         }, tagExecutor);
         return Result.success(Map.of("status", "accepted", "message", "标签生成任务已提交，请稍后查看"));
