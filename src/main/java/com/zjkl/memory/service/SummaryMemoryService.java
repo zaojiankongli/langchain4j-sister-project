@@ -382,7 +382,7 @@ public class SummaryMemoryService {
             JsonObject metaJson = new JsonObject();
             metaJson.addProperty("create_time", today);
             double safeScore = Double.isNaN(sentimentScore) || Double.isInfinite(sentimentScore) ? 0.0 : sentimentScore;
-            metaJson.addProperty("sentiment_score", String.format("%.3f", safeScore));
+            metaJson.addProperty("sentiment_score", safeScore);
             metaJson.addProperty("emotion_label", emotionLabel != null ? emotionLabel : "平静");
             metaJson.addProperty("user_id", userId);
 
@@ -414,7 +414,7 @@ public class SummaryMemoryService {
         return results.stream()
                 // 1. RRF 分数阈值过滤
                 .filter(r -> r.getScore() >= threshold)
-                // 2. 解析 metadata 过滤 userId
+                // 2. Defense-in-depth: Milvus filter 已按 user_id 过滤，此处 Java 侧二次校验防止极端边界泄漏
                 .filter(r -> matchesUserId(r, userId))
                 // 3. 按分数降序
                 .sorted((a, b) -> Double.compare(b.getScore(), a.getScore()))

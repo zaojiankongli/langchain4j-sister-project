@@ -12,6 +12,7 @@ import org.springframework.stereotype.Component;
 @Component
 @RequiredArgsConstructor
 public class GraphAnchorListener {
+    // @Async 由 Langchain4jSisterProjectApplication 的 @EnableAsync 支持
 
     private final GraphEntityService graphEntityService;
 

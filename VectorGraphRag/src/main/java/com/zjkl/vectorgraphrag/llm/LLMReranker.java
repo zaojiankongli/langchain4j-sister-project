@@ -148,7 +148,9 @@ public class LLMReranker {
                     selectedIds.add(relId);
                 } else if (!validIds.contains(relId)) {
                     // Try to correct by text matching
-                    String lineText = line.substring(line.indexOf("]") + 1).trim();
+                    int closeBracket = line.indexOf("]");
+                    if (closeBracket < 0) continue; // skip malformed line
+                    String lineText = line.substring(closeBracket + 1).trim();
                     for (int j = 0; j < allTexts.size(); j++) {
                         if (allTexts.get(j).trim().equalsIgnoreCase(lineText)
                                 && seen.add(allIds.get(j))) {

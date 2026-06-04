@@ -102,7 +102,10 @@ public final class MilvusQueryUtil {
     }
 
     /**
-     * 转义 Milvus filter 表达式中的特殊字符（引号、反斜杠、换行、控制字符）
+     * 转义 Milvus 过滤表达式中的字符串值。
+     * 处理: \, ", \n, \r, \0
+     * 注意: 不转义 Milvus 表达式关键字 (and, or, not, in, like 等)，
+     * 因为此方法仅用于已加引号的字符串值内部，关键字不会被解析。
      */
     public static String escape(String value) {
         if (value == null) return "";

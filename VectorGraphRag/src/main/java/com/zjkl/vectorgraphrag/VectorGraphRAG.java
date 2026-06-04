@@ -177,7 +177,7 @@ public class VectorGraphRAG {
             meta.put("entity_ids", graphBuilder.getRelationToEntityIds()
                     .getOrDefault(rid, List.of()));
             meta.put("passage_ids", graphBuilder.getRelationToPassageIds()
-                    .getOrDefault(rid, List.of()));
+                    .getOrDefault(rid, Set.of()));
 
             Triplet triplet = graphBuilder.getRelationIdToTriplet().get(rid);
             if (triplet != null) {
@@ -194,7 +194,7 @@ public class VectorGraphRAG {
             meta.put("entity_ids", graphBuilder.getPassageToEntityIds()
                     .getOrDefault(pid, List.of()));
             meta.put("relation_ids", graphBuilder.getPassageToRelationIds()
-                    .getOrDefault(pid, List.of()));
+                    .getOrDefault(pid, Set.of()));
             passageMetadatas.add(meta);
         }
 
@@ -391,9 +391,19 @@ public class VectorGraphRAG {
         List<Map<String, Object>> relationData = store.getRelationsByIds(relationIds);
         Set<String> passageIds = new LinkedHashSet<>();
         for (Map<String, Object> rel : relationData) {
-            @SuppressWarnings("unchecked")
-            List<String> pids = (List<String>) rel.get("passage_ids");
-            if (pids != null) passageIds.addAll(pids);
+            Object pidsObj = rel.get("passage_ids");
+            List<String> pids;
+            if (pidsObj instanceof List<?> list) {
+                pids = list.stream().map(Object::toString).toList();
+            } else if (pidsObj != null && pidsObj.getClass().getName().contains("JsonArray")) {
+                // Milvus returns Gson JsonArray for array fields
+                pids = new java.util.ArrayList<>();
+                com.google.gson.JsonArray arr = (com.google.gson.JsonArray) pidsObj;
+                for (var el : arr) { pids.add(el.getAsString()); }
+            } else {
+                pids = List.of();
+            }
+            if (!pids.isEmpty()) passageIds.addAll(pids);
         }
 
         if (passageIds.isEmpty()) return List.of();

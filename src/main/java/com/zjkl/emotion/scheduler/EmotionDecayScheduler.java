@@ -29,6 +29,9 @@ public class EmotionDecayScheduler {
     public void decayActiveUsers() {
         try {
             Set<String> activeUsers = userActivityTracker.getActiveMemoryIdsInLastDays(1, MAX_ACTIVE_USERS_TO_SCAN);
+            if (activeUsers.size() >= MAX_ACTIVE_USERS_TO_SCAN) {
+                log.warn("活跃用户数触及扫描上限({}), 部分用户可能未被衰减处理", MAX_ACTIVE_USERS_TO_SCAN);
+            }
             if (activeUsers.isEmpty()) {
                 return;
             }

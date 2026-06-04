@@ -47,7 +47,7 @@ public final class EmotionalState {
      */
     public boolean isNeutral(double threshold) {
         return Math.abs(pleasure) < threshold &&
-               Math.abs(arousal) < threshold &&
+               arousal < threshold &&
                Math.abs(dominance) < threshold;
     }
 

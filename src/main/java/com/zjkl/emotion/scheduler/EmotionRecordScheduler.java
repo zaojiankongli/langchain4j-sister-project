@@ -39,7 +39,7 @@ public class EmotionRecordScheduler {
 
         try {
             Set<String> activeUserIds = userActivityTracker.getActiveMemoryIdsInLastDays(1, MAX_ACTIVE_USERS_TO_SCAN);
-            int successCount = 0;
+            int submittedCount = 0;
 
             for (String userId : activeUserIds) {
                 String dedupKey = EMOTION_RECORD_KEY_PREFIX + LocalDate.now() + ":" + hour + ":" + userId;
@@ -56,7 +56,7 @@ public class EmotionRecordScheduler {
                     }
 
                     emotionRecordService.recordEmotionAsync(userId);
-                    successCount++;
+                    submittedCount++;
                 } catch (Exception e) {
                     if (acquired) {
                         redisTemplate.delete(dedupKey);
@@ -66,7 +66,7 @@ public class EmotionRecordScheduler {
             }
 
             log.info("定时情绪记录任务完成: {} 个活跃用户, 提交 {} 个异步记录",
-                    activeUserIds.size(), successCount);
+                    activeUserIds.size(), submittedCount);
         } catch (Exception e) {
             log.error("定时情绪记录任务执行失败", e);
         }

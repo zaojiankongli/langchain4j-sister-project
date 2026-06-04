@@ -493,6 +493,8 @@ public class EmotionService {
     }
 
     /** 小缓存：MySQL 回退的情绪引擎参数，30s 过期防止频繁查库 */
+    // 注意: 此 Caffeine 缓存未注册到 Spring CacheManager，不会出现在 actuator 指标中。
+    // 如需统一管理，可迁移至 @Cacheable 或注册为 Spring Bean。
     private final Cache<String, Map<String, Double>> emotionConfigDbCache = Caffeine.newBuilder()
             .maximumSize(5000)
             .expireAfterWrite(30, TimeUnit.SECONDS)

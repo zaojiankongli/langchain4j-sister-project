@@ -35,10 +35,8 @@ public class MemoryController {
         if (userId == null) {
             return Result.unauthorized("请先登录");
         }
-        // 限制分页大小，与服务层 MAX_PAGE_SIZE(50) 保持一致，防止攻击者传超大 size 拉取全量数据
-        int safeSize = Math.min(Math.max(size, 1), 50);
-        int safePage = Math.max(page, 1);
-        List<MemoryVO> voList = memoryQueryService.listMemories(userId, safePage, safeSize, filter, excludeToday);
+        // 分页边界校验由 service 层统一处理（MemoryQueryService.MAX_PAGE_SIZE）
+        List<MemoryVO> voList = memoryQueryService.listMemories(userId, page, size, filter, excludeToday);
         return Result.success(voList);
     }
     

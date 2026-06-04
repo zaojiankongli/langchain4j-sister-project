@@ -162,7 +162,9 @@ public class AudioBuffer {
                 if (synthesisCompleted.get()) {
                     break;  // 合成完成，不再等待
                 }
-                canPlay.await(20, TimeUnit.MILLISECONDS);  // 等待最多 20ms（提高响应性）
+                // 50ms 轮询间隔足以满足低延迟播放启动需求（缓冲区阈值通常 200-500ms），
+                // 同时减少不必要的 CPU 唤醒
+                canPlay.await(50, TimeUnit.MILLISECONDS);
             }
         } finally {
             lock.unlock();

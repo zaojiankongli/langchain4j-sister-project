@@ -682,6 +682,8 @@ public class GraphEntityService {
     }
 
     private int editDistance(String a, String b) {
+        // Early exit: if length difference exceeds threshold, distance is guaranteed >= threshold
+        if (Math.abs(a.length() - b.length()) >= 3) return Integer.MAX_VALUE;
         int[][] dp = new int[a.length() + 1][b.length() + 1];
         for (int i = 0; i <= a.length(); i++) dp[i][0] = i;
         for (int j = 0; j <= b.length(); j++) dp[0][j] = j;

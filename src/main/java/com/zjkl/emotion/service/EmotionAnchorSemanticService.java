@@ -213,11 +213,15 @@ public class EmotionAnchorSemanticService {
 
     private String extractJson(String text) {
         int start = text.indexOf('{');
-        int end = text.lastIndexOf('}');
-        if (start >= 0 && end > start) {
-            return text.substring(start, end + 1);
+        if (start < 0) return text;
+        int depth = 0;
+        for (int i = start; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '{') depth++;
+            else if (c == '}') depth--;
+            if (depth == 0) return text.substring(start, i + 1);
         }
-        return text;
+        return text.substring(start); // fallback: no matching close brace
     }
 
     private String extractField(String json, String field) {

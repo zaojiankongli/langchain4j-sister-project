@@ -46,13 +46,13 @@ public class GraphBuilder {
     @Getter
     private final Map<String, List<String>> entityToPassageIds = new HashMap<>();
     @Getter
-    private final Map<String, List<String>> relationToPassageIds = new HashMap<>();
+    private final Map<String, Set<String>> relationToPassageIds = new HashMap<>();
     @Getter
     private final Map<String, List<String>> relationToEntityIds = new HashMap<>();
     @Getter
     private final Map<String, List<String>> passageToEntityIds = new HashMap<>();
     @Getter
-    private final Map<String, List<String>> passageToRelationIds = new HashMap<>();
+    private final Map<String, Set<String>> passageToRelationIds = new HashMap<>();
 
     public GraphBuilder(VectorGraphRagSettings settings) {
         this.settings = settings;
@@ -142,12 +142,16 @@ public class GraphBuilder {
                         .build())
                 .collect(Collectors.toList());
 
+        // Convert Set-based maps to List for ExtractionResult compatibility
+        Map<String, List<String>> relationToPassageIdsLists = new HashMap<>();
+        relationToPassageIds.forEach((k, v) -> relationToPassageIdsLists.put(k, new ArrayList<>(v)));
+
         return ExtractionResult.builder()
                 .documents(documents.stream().map(Document::getText).collect(Collectors.toList()))
                 .entities(entityList)
                 .relations(relationList)
                 .entityToRelationIds(new HashMap<>(entityToRelationIds))
-                .relationToPassageIds(new HashMap<>(relationToPassageIds))
+                .relationToPassageIds(relationToPassageIdsLists)
                 .build();
     }
 
@@ -173,9 +177,9 @@ public class GraphBuilder {
             relationToEntityIds.put(relationId, List.of(subjectId, objectId));
         }
 
-        // Link relation to passage
-        relationToPassageIds.computeIfAbsent(relationId, k -> new ArrayList<>()).add(passageId);
-        passageToRelationIds.computeIfAbsent(passageId, k -> new ArrayList<>()).add(relationId);
+        // Link relation to passage (LinkedHashSet to auto-deduplicate)
+        relationToPassageIds.computeIfAbsent(relationId, k -> new java.util.LinkedHashSet<>()).add(passageId);
+        passageToRelationIds.computeIfAbsent(passageId, k -> new java.util.LinkedHashSet<>()).add(relationId);
 
         return relationId;
     }

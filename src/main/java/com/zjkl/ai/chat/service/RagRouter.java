@@ -74,14 +74,6 @@ public class RagRouter {
         }
     }
 
-    /**
-     * @deprecated 使用 {@link #analyzeQuery(String, java.util.List)}
-     */
-    @Deprecated
-    public boolean shouldSearchMemories(String currentMessage, java.util.List<String> recentMessages) {
-        return analyzeQuery(currentMessage, recentMessages).needSearch();
-    }
-
     // ==================== 关键词回退路由 ====================
 
     private static final java.util.List<String> MEMORY_KEYWORDS = java.util.List.of(
@@ -106,15 +98,4 @@ public class RagRouter {
         return new RouterResult(memory, graph, primary, null, null, null);
     }
 
-    // ==================== 仅保留测试用的解析方法 ====================
-
-    /** @deprecated 仅测试用；AiServices 已自动处理 JSON → RouterResult */
-    @Deprecated
-    static boolean parseNeedSearch(String response) {
-        if (response == null) return false;
-        String cleaned = response
-                .replaceAll("```[a-z]*\\s*", "").replace("```", "")
-                .replaceAll("\"\\s*:\\s*\"", "\":\"").trim();
-        return cleaned.matches("(?s).*\"needSearch\"\\s*:\\s*[Tt][Rr][Uu][Ee].*");
-    }
 }

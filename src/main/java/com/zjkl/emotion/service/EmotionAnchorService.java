@@ -90,7 +90,7 @@ public class EmotionAnchorService {
         long positiveCount = endTypes.stream()
                 .filter("POSITIVE"::equals)
                 .count();
-        long negativeCount = endTypes.size() - positiveCount;
+        long negativeCount = endTypes.stream().filter("NEGATIVE"::equals).count();
 
         return String.format("最近%d次锚点事件：%d次正面结束，%d次负面结束",
                 endTypes.size(), positiveCount, negativeCount);

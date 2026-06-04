@@ -1,85 +1,13 @@
 package com.zjkl.ai.chat.service;
 
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * RagRouter 单元测试 — 覆盖 parseNeedSearch（向后兼容） + RouterResult 结构
+ * RagRouter 单元测试 — 覆盖 RouterResult 结构
  */
 class RagRouterTest {
-
-    // ========== parseNeedSearch — camelCase（langchain4j AiServices 字段名） ==========
-
-    @Test
-    void parseNeedSearch_plainTrue_returnsTrue() {
-        assertTrue(RagRouter.parseNeedSearch("{\"needSearch\": true}"));
-    }
-
-    @Test
-    void parseNeedSearch_plainFalse_returnsFalse() {
-        assertFalse(RagRouter.parseNeedSearch("{\"needSearch\": false}"));
-    }
-
-    @Test
-    void parseNeedSearch_capitalTrue_returnsTrue() {
-        assertTrue(RagRouter.parseNeedSearch("{\"needSearch\": True}"));
-    }
-
-    @Test
-    void parseNeedSearch_allCaps_returnsTrue() {
-        assertTrue(RagRouter.parseNeedSearch("{\"needSearch\": TRUE}"));
-    }
-
-    @Test
-    void parseNeedSearch_withSpaces_returnsTrue() {
-        assertTrue(RagRouter.parseNeedSearch("{ \"needSearch\" : true }"));
-    }
-
-    @Test
-    void parseNeedSearch_inJsonFence_returnsTrue() {
-        assertTrue(RagRouter.parseNeedSearch("```json\n{\"needSearch\": true}\n```"));
-    }
-
-    @Test
-    void parseNeedSearch_inPlainFence_returnsFalse() {
-        assertFalse(RagRouter.parseNeedSearch("```\n{\"needSearch\": false}\n```"));
-    }
-
-    @Test
-    void parseNeedSearch_withSurroundingText_returnsTrue() {
-        assertTrue(RagRouter.parseNeedSearch(
-                "Based on the context:\n{\"needSearch\": true}"));
-    }
-
-    @Test
-    void parseNeedSearch_null_returnsFalse() {
-        assertFalse(RagRouter.parseNeedSearch(null));
-    }
-
-    @Test
-    void parseNeedSearch_emptyString_returnsFalse() {
-        assertFalse(RagRouter.parseNeedSearch(""));
-    }
-
-    @Test
-    void parseNeedSearch_randomText_returnsFalse() {
-        assertFalse(RagRouter.parseNeedSearch("hello world"));
-    }
-
-    @ParameterizedTest
-    @ValueSource(strings = {
-            "{\"needSearch\": True}",
-            "  {\"needSearch\":true}  ",
-            "{\"needSearch\":true,\"other\":\"value\"}",
-            "some text {\"needSearch\": true} more text"
-    })
-    void parseNeedSearch_variations_returnsTrue(String input) {
-        assertTrue(RagRouter.parseNeedSearch(input),
-                "Expected true for: " + input);
-    }
 
     // ========== RouterResult 结构 ==========
 
