@@ -3,6 +3,7 @@ package com.zjkl.auth.service;
 import com.zjkl.auth.dto.CompleteProfileRequest;
 import com.zjkl.auth.dto.LoginRequest;
 import com.zjkl.auth.exception.UnauthorizedException;
+import com.zjkl.common.ErrorCode;
 import com.zjkl.common.exception.BusinessException;
 import com.zjkl.common.config.properties.AuthProperties;
 import com.zjkl.common.util.HashUtil;
@@ -99,7 +100,6 @@ public class AuthService {
     private static String maskEmail(String email) {
         if (email == null || !email.contains("@")) return "***";
         int at = email.indexOf('@');
-        if (at <= 1) return email.charAt(0) + "***" + email.substring(at);
         return email.charAt(0) + "***" + email.substring(at);
     }
     
@@ -127,7 +127,7 @@ public class AuthService {
         } catch (Exception e) {
             redisTemplate.delete(CODE_PREFIX + email);
             log.error("验证码邮件发送失败: email={}", maskEmail(email), e);
-            throw new BusinessException("验证码发送失败，请稍后再试");
+            throw new BusinessException(ErrorCode.AUTH_CODE_SEND_FAILED, "验证码发送失败，请稍后再试");
         }
 
         log.info("验证码已发送至 {}", maskEmail(email));

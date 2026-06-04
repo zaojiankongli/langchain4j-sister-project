@@ -1,6 +1,5 @@
 package com.zjkl.common.config.properties;
 
-import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Positive;
 import lombok.Data;
@@ -14,10 +13,9 @@ import org.springframework.validation.annotation.Validated;
  * 不同核心数的服务器可通过配置文件调整，推荐值（2核 / 4核 / 8核）：
  * <ul>
  *   <li>websocket-sender: 2 / 4 / 8</li>
- *   <li>async-core: 2 / 4 / 8</li>
- *   <li>async-max: 4 / 8 / 16</li>
- *   <li>scheduling: 2 / 4 / 6</li>
  * </ul>
+ * <p>
+ * 注：@Async 异步任务已迁移至虚拟线程执行器（见 AsyncConfig），无需独立线程池配置。
  */
 @Data
 @Validated
@@ -40,27 +38,6 @@ public class ThreadPoolProperties {
     @Positive
     @Max(10_000)
     private int websocketSenderQueueCapacity = 100;
-
-    // ==================== @Async 异步任务线程池 ====================
-
-    /** 异步任务线程池核心大小（默认：2） */
-    @Positive
-    @Max(16)
-    private int asyncCorePoolSize = 2;
-
-    /** 异步任务线程池最大大小（默认：4） */
-    @Positive
-    @Max(32)
-    private int asyncMaxPoolSize = 4;
-
-    /** 异步任务队列容量（默认：100） */
-    @Positive
-    @Max(10_000)
-    private int asyncQueueCapacity = 100;
-
-    /** 异步任务线程名前缀（默认：async-task-） */
-    @NotBlank
-    private String asyncThreadNamePrefix = "async-task-";
 
     // ==================== Redisson 连接池 ====================
 

@@ -124,7 +124,11 @@ public class VectorGraphRAG {
 
     /**
      * Add Document objects to the knowledge base.
-     * Full indexing pipeline: extract triplets → build graph → embed → index in Milvus.
+     * Full indexing pipeline: extract triplets -> build graph -> embed -> index in Milvus.
+     *
+     * <p><b>Incremental indexing:</b> On repeated calls, the internal {@code GraphBuilder}
+     * accumulates entities, relations, and passages. The returned {@link ExtractionResult}
+     * reflects the full accumulated state, not just the current batch.</p>
      */
     public ExtractionResult addDocuments(List<Document> documents, boolean extractTriplets, boolean showProgress) {
         // Ensure all documents have IDs

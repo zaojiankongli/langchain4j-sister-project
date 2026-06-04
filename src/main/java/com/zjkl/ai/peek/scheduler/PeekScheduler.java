@@ -14,6 +14,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -21,6 +22,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 
 /**
  * Peek 定时调度 — 在线+活跃用户定期截图请求
@@ -43,6 +46,20 @@ public class PeekScheduler {
     private static final String PEEK_PENDING_KEY_PREFIX = "peek:pending:";
     private static final String PEEK_RATE_LIMIT_KEY = "peek:rate_limit:current";
     private static final Duration RATE_LIMIT_WINDOW = Duration.ofSeconds(30);
+
+    /**
+     * Lua 脚本：原子递增 + 设置过期时间，防止 INCR 与 EXPIRE 之间的进程崩溃
+     * 导致速率限制键永不过期。
+     * KEYS[1] = rate limit key, ARGV[1] = TTL seconds
+     */
+    private static final String RATE_LIMIT_LUA =
+            "local current = redis.call('INCR', KEYS[1])\n" +
+            "if current == 1 then\n" +
+            "  redis.call('EXPIRE', KEYS[1], tonumber(ARGV[1]))\n" +
+            "end\n" +
+            "return current";
+    private static final DefaultRedisScript<Long> RATE_LIMIT_SCRIPT =
+            new DefaultRedisScript<>(RATE_LIMIT_LUA, Long.class);
     private static final Executor PEEK_EXECUTOR = Thread::startVirtualThread;
 
     @Scheduled(cron = "0 0/20 8-22 * * ?")
@@ -139,11 +156,11 @@ public class PeekScheduler {
             return 1;
         }
 
-        // 全局速率限制
-        Long current = redisTemplate.opsForValue().increment(PEEK_RATE_LIMIT_KEY);
-        if (current == 1) {
-            redisTemplate.expire(PEEK_RATE_LIMIT_KEY, RATE_LIMIT_WINDOW);
-        }
+        // 全局速率限制（Lua 脚本原子递增 + 过期，防止 INCR/EXPIRE 间崩溃导致键永不过期）
+        long current = redisTemplate.execute(
+                RATE_LIMIT_SCRIPT,
+                Collections.singletonList(PEEK_RATE_LIMIT_KEY),
+                String.valueOf(RATE_LIMIT_WINDOW.getSeconds()));
         if (current > peekProperties.getMaxConcurrentRequests()) {
             redisTemplate.delete(requestLockKey);
             log.warn("peek 全局速率限制，跳过：userId={}", userId);

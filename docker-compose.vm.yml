@@ -1,0 +1,118 @@
+# 本地 VM 4GB 测试 — Docker 一键部署
+# MySQL + Redis + 后端 + 前端 （Milvus 连云服务器）
+#
+# 使用:
+#   1. 安装 docker + docker compose
+#   2. 在 VM 上创建 .env.vm（参考下方说明）
+#   3. docker compose -f docker-compose.vm.yml --env-file .env.vm build
+#   4. docker compose -f docker-compose.vm.yml --env-file .env.vm up -d
+#   5. 浏览器访问 http://192.168.100.128
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: vm-mysql
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root1234}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-zjkl_sister}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./src/main/resources/database/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+    networks:
+      - zjkl
+
+  redis:
+    image: redis:7-alpine
+    container_name: vm-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+      start_period: 60s
+    networks:
+      - zjkl
+
+  backend:
+    image: eclipse-temurin:21-jre-alpine
+    container_name: vm-app
+    ports:
+      - "8080:8080"
+    volumes:
+      # 挂载预构建的 JAR
+      - ./target/langchain4j_sister_project-0.0.1-SNAPSHOT.jar:/app/app.jar:ro
+    working_dir: /app
+    command: java -jar app.jar
+    environment:
+      SPRING_PROFILES_ACTIVE: vm
+
+      # MySQL
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USERNAME: ${MYSQL_USERNAME:-zjkl}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-zjkl123}
+
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DATABASE: 0
+      REDIS_PASSWORD: ""
+
+      # Milvus → 云服务器
+      MILVUS_HOST: ${MILVUS_HOST:?MILVUS_HOST must be set}
+      MILVUS_PORT: 19530
+
+      # 应用密钥（必填）
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      APP_DEFAULT_IMAGE_URL: https://placehold.co/512x512
+
+      # TTS
+      TTS_MODEL: ${TTS_MODEL:-cosyvoice-v3.5-flash}
+      TTS_VOICE: ${TTS_VOICE}
+
+      # CORS
+      CORS_ALLOWED_ORIGINS: http://192.168.100.128,http://localhost
+      WEBSOCKET_ALLOWED_ORIGINS: http://192.168.100.128,http://localhost
+
+      # 邮件/OSS/MCP — 测试可空
+      MAIL_HOST: ""
+      MAIL_PORT: ""
+      MAIL_USERNAME: ""
+      MAIL_PASSWORD: ""
+      OSS_ENDPOINT: ""
+      OSS_ACCESS_KEY_ID: ""
+      OSS_ACCESS_KEY_SECRET: ""
+      OSS_BUCKET_NAME: ""
+      OSS_REGION: ""
+      FIRECRAWL_API_KEY: ""
+      CONTEXT7_API_KEY: ""
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - zjkl
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  zjkl:
+    driver: bridge

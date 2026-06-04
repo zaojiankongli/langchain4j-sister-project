@@ -162,7 +162,7 @@ public class AudioBuffer {
                 if (synthesisCompleted.get()) {
                     break;  // 合成完成，不再等待
                 }
-                canPlay.await(50, TimeUnit.MILLISECONDS);  // 等待最多 50ms
+                canPlay.await(20, TimeUnit.MILLISECONDS);  // 等待最多 20ms（提高响应性）
             }
         } finally {
             lock.unlock();

@@ -54,28 +54,6 @@
         LIMIT #{offset}, #{limit}
     </select>
 
-    <!-- 游标分页：避免深分页性能问题，基于 memory_date + id 复合游标 -->
-    <select id="selectByUserIdCursor" resultType="com.zjkl.user.domain.ConversationMemory">
-        SELECT id, user_id, title, content, mood, memory_date, image_url, created_at
-        FROM conversation_memories
-        WHERE user_id = #{userId}
-        <if test="lastMemoryDate != null">
-            AND (memory_date &lt; #{lastMemoryDate}
-                 OR (memory_date = #{lastMemoryDate} AND id &lt; #{lastId}))
-        </if>
-        <if test="beginDate != null">
-            AND memory_date &gt;= #{beginDate}
-        </if>
-        <if test="endDate != null">
-            AND memory_date &lt; #{endDate}
-        </if>
-        <if test="excludeToday">
-            AND memory_date &lt; CURDATE()
-        </if>
-        ORDER BY memory_date DESC, id DESC
-        LIMIT #{limit}
-    </select>
-
     <!-- 更新图片 URL -->
     <update id="updateImageUrl">
         UPDATE conversation_memories 

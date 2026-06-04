@@ -26,28 +26,14 @@ public class UserContext {
     }
 
     /**
-     * 校验当前用户是否有权访问目标用户的资源（仅限本人访问）。
-     *
-     * @param targetUserId 路径参数中的目标用户 ID
-     * @return null 表示校验通过；否则返回错误信息字符串
-     */
-    public String checkSelfAccess(String targetUserId) {
-        String current = getUserId();
-        if (current == null) {
-            return "请先登录";
-        }
-        if (!current.equals(targetUserId)) {
-            return "无权访问其他用户的数据";
-        }
-        return null;
-    }
-
-    /**
      * 校验当前用户是否有管理员权限。
      *
      * @param authProperties 认证配置，用于判断管理员身份
      * @return null 表示有权限，否则返回错误消息字符串
+     * @deprecated 耦合了 AuthProperties 到上下文类。建议使用 {@code checkSelfAccessCode} 的模式，
+     *             将管理员校验迁移到独立的 AdminAccessChecker 或返回状态码而非字符串。
      */
+    @Deprecated
     public String checkAdminAccess(AuthProperties authProperties) {
         String userId = getUserId();
         if (userId == null) {

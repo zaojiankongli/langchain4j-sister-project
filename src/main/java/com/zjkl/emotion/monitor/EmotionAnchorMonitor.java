@@ -177,7 +177,8 @@ public class EmotionAnchorMonitor {
     private void endEvent(String userId, MonitorState state, double endP, double endA, String endReason) {
         LocalDateTime endTime = LocalDateTime.now();
         // 比较结束愉悦度与起始愉悦度的差值来判断正负
-        boolean isPositiveEnd = (endP - state.startPleasure) > 0;
+        // 差值为零视为正面（情绪至少没有恶化）
+        boolean isPositiveEnd = (endP - state.startPleasure) >= 0;
         EmotionAnchorEvent.EndType endType = isPositiveEnd
                 ? EmotionAnchorEvent.EndType.POSITIVE
                 : EmotionAnchorEvent.EndType.NEGATIVE;
@@ -232,12 +233,14 @@ public class EmotionAnchorMonitor {
         LocalDateTime threshold = LocalDateTime.now().minusHours(CLEANUP_HOURS);
         int before = monitors.size();
 
-        // 1. 清理 IDLE 且超时的用户
+        // 1. 清理 IDLE 且超时的用户（synchronized 保证不会误删正在被 onEmotionChange 重新激活的状态）
         monitors.entrySet().removeIf(entry -> {
             MonitorState state = entry.getValue();
-            return state.status == MonitorState.Status.IDLE
-                    && state.lastMsgTime != null
-                    && state.lastMsgTime.isBefore(threshold);
+            synchronized (state) {
+                return state.status == MonitorState.Status.IDLE
+                        && state.lastMsgTime != null
+                        && state.lastMsgTime.isBefore(threshold);
+            }
         });
 
         // 2. 最大容量检查：如果 map 超过阈值，按 lastMsgTime 最老的优先清除

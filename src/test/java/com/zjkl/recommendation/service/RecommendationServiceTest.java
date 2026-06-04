@@ -80,7 +80,7 @@ class RecommendationServiceTest {
     }
 
     @Test
-    @DisplayName("工作流失败时应释放生成锁")
+    @DisplayName("工作流失败时应保留生成锁（由 TTL 冷却，不主动释放）")
     void generateRecommendations_shouldReleaseGenerationLockWhenWorkflowFails() {
         String userId = "u1";
 
@@ -90,7 +90,8 @@ class RecommendationServiceTest {
         RuntimeException error = assertThrows(RuntimeException.class, () -> service.generateRecommendations(userId));
 
         assertTrue(error.getMessage().contains("推荐工作流执行失败"));
-        verify(redisTemplate).delete("recommendation:generate:" + java.time.LocalDate.now() + ":" + userId);
+        // 工作流已运行后失败，锁不主动释放，由 TTL 作为冷却期
+        verify(redisTemplate, never()).delete(anyString());
     }
 
     @Nested

@@ -473,6 +473,7 @@ public class EmotionService {
     /**
      * 从 Redis user:emotion-config:* 解析指定字段，-1 表示无数据
      */
+    @SuppressWarnings("unchecked")
     private double readEmotionConfigField(String userId, String field) {
         String key = EMOTION_CONFIG_KEY_PREFIX + userId;
         String json = redisTemplate.opsForValue().get(key);

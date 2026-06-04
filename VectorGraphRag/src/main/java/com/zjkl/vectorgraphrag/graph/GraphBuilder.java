@@ -77,6 +77,18 @@ public class GraphBuilder {
         passageToRelationIds.clear();
     }
 
+    /**
+     * Build graph from documents with extracted triplets.
+     *
+     * <p><b>Incremental indexing note:</b> This method does NOT call {@link #clear()} before
+     * processing, so entities, relations, and passages accumulate across multiple calls.
+     * The returned {@link ExtractionResult} reflects the <em>full accumulated state</em>,
+     * not just the data from the current batch. Call {@link #clear()} first if a fresh
+     * build is needed.</p>
+     *
+     * <p>Duplicate passages (same document ID) are skipped. Duplicate entities (same
+     * normalized name) and relations (same text) are merged.</p>
+     */
     public ExtractionResult buildFromDocuments(List<Document> documents) {
         // 注意：不再调用 clear()，以支持增量索引场景。
         // 如需从空白状态开始构建，请在调用前手动调用 clear()。

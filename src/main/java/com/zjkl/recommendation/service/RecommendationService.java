@@ -98,6 +98,7 @@ public class RecommendationService {
         }
 
         boolean permitAcquired = false;
+        boolean workflowRan = false;
 
         try {
             permitAcquired = workflowConcurrency.tryAcquire(5, TimeUnit.SECONDS);
@@ -120,11 +121,14 @@ public class RecommendationService {
 
             try {
                 result = future.get(RecommendationConstants.WORKFLOW_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+                workflowRan = true;
             } catch (TimeoutException e) {
                 future.cancel(true);
+                workflowRan = true;
                 log.error("用户 {} 推荐工作流超时 ({}s)", userId, RecommendationConstants.WORKFLOW_TIMEOUT_SECONDS);
                 throw new RuntimeException("推荐工作流超时: userId=" + userId, e);
             } catch (Exception e) {
+                workflowRan = true;
                 log.error("用户 {} 推荐工作流执行失败", userId, e);
                 throw new RuntimeException("推荐工作流执行失败: userId=" + userId, e);
             }
@@ -156,7 +160,12 @@ public class RecommendationService {
             if (permitAcquired) {
                 workflowConcurrency.release();
             }
-            redisTemplate.delete(lockKey);
+            // Only delete the lock when the workflow did NOT run (early returns).
+            // When the workflow ran and failed, let the TTL act as a cooldown
+            // to prevent rapid retries from hitting the same error.
+            if (!workflowRan) {
+                redisTemplate.delete(lockKey);
+            }
         }
     }
 

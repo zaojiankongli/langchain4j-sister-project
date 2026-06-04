@@ -26,7 +26,7 @@ public class RedissonConfig {
     
     /**
      * 创建 Redisson 客户端
-     * 连接池大小通过 app.thread-pool.redisson-pool-size 配置（默认 32，2 核推荐值）
+     * 连接池大小通过 app.thread-pool.redisson-pool-size 配置（默认 8，2 核推荐值）
      */
     @Bean
     public RedissonClient redissonClient() {

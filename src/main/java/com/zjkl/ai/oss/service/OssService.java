@@ -128,6 +128,12 @@ public class OssService {
             if (responseCode != HttpURLConnection.HTTP_OK) {
                 throw new IOException("下载文件失败，HTTP 状态码：" + responseCode);
             }
+
+            // 校验远程服务器返回的 Content-Type 必须为图片类型，防止非图片文件伪装上传
+            String remoteContentType = connection.getContentType();
+            if (remoteContentType == null || !remoteContentType.toLowerCase().trim().startsWith("image/")) {
+                throw new IllegalArgumentException("远程 URL 返回的内容类型不是图片（Content-Type: " + remoteContentType + "）");
+            }
             
             // 获取文件名
             String filename = objectKeyGenerator.extractFilenameFromUrl(fileUrl, connection);

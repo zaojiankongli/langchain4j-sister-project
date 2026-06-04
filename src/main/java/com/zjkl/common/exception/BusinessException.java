@@ -9,6 +9,8 @@ import lombok.Getter;
  * 使用方式：
  * throw new BusinessException(ErrorCode.USER_NOT_FOUND);
  * throw new BusinessException(ErrorCode.OSS_UPLOAD_FAILED, "自定义消息");
+ * <p>
+ * 注：已移除 BusinessException(String) 构造器，避免绕过 ErrorCode 默认 500。
  */
 @Getter
 public class BusinessException extends RuntimeException {
@@ -28,10 +30,5 @@ public class BusinessException extends RuntimeException {
     public BusinessException(int code, String message) {
         super(message);
         this.code = code;
-    }
-
-    public BusinessException(String message) {
-        super(message);
-        this.code = 500;
     }
 }

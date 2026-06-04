@@ -1,0 +1,116 @@
+version: "3.8"
+
+# 本地 4GB 虚拟机测试用 — 去掉 Milvus 省 2GB+，加了内存硬限制
+# 用法: docker compose -f docker-compose.test.yml up -d
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: sister-mysql
+    restart: unless-stopped
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: zjkl_sister
+      MYSQL_USER: zjkl
+      MYSQL_PASSWORD: zjkl123
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - sister-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: sister-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - sister-network
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sister-app
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      # MySQL
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_USERNAME: zjkl
+      MYSQL_PASSWORD: zjkl123
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DATABASE: 0
+      REDIS_PASSWORD: ""
+      # Milvus — 本地测试不用，配空占位避免启动报错
+      MILVUS_HOST: ""
+      MILVUS_PORT: ""
+      # 以下改成你的测试密钥
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-sk-test}
+      JWT_SECRET: ${JWT_SECRET:-test-jwt-secret-for-local-dev}
+      APP_DEFAULT_IMAGE_URL: https://placehold.co/512x512
+      CORS_ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:5173"
+      WEBSOCKET_ALLOWED_ORIGINS: "http://localhost:3000,http://localhost:5173"
+      # TTS
+      TTS_MODEL: ${TTS_MODEL:-cosyvoice-v3.5-flash}
+      TTS_VOICE: ${TTS_VOICE:-test-voice}
+      # 邮箱 — 本地测试可空
+      MAIL_HOST: ""
+      MAIL_PORT: ""
+      MAIL_USERNAME: ""
+      MAIL_PASSWORD: ""
+      # OSS — 本地测试可空
+      OSS_ENDPOINT: ""
+      OSS_ACCESS_KEY_ID: ""
+      OSS_ACCESS_KEY_SECRET: ""
+      OSS_BUCKET_NAME: ""
+      OSS_REGION: ""
+      # MCP — 本地测试可空
+      FIRECRAWL_API_KEY: ""
+      CONTEXT7_API_KEY: ""
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - sister-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+volumes:
+  mysql_data:
+  redis_data:
+
+networks:
+  sister-network:
+    driver: bridge

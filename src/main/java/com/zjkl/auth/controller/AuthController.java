@@ -22,7 +22,9 @@ import java.util.Map;
 public class AuthController {
 
     private static final long SEND_CODE_WINDOW_MS = 60_000; // 1 分钟窗口
-    private static final int SEND_CODE_MAX = 1;              // 每分钟最多 1 次
+    private static final int SEND_CODE_MAX = 1;              // 每分钟每邮箱最多 1 次
+    private static final long SEND_CODE_GLOBAL_WINDOW_MS = 60_000; // 1 分钟窗口
+    private static final int SEND_CODE_GLOBAL_MAX = 60;             // 全局每分钟最多 60 次（防邮件轰炸）
 
     private static final long LOGIN_WINDOW_MS = 60_000;    // 1 分钟窗口
     private static final int LOGIN_MAX = 5;                 // 每分钟每邮箱最多 5 次
@@ -44,9 +46,14 @@ public class AuthController {
 
     @PostMapping("/send-code")
     public Result<?> sendCode(@RequestBody @Valid SendCodeRequest request) {
+        // 全局限流：防止邮件轰炸（二级保护）
+        if (!rateLimiter.tryAcquire("rate:send-code:global", SEND_CODE_GLOBAL_MAX, SEND_CODE_GLOBAL_WINDOW_MS)) {
+            return Result.rateLimited("系统繁忙，请稍后再试");
+        }
+        // 每邮箱限流
         String rateKey = "rate:send-code:" + request.email();
         if (!rateLimiter.tryAcquire(rateKey, SEND_CODE_MAX, SEND_CODE_WINDOW_MS)) {
-            return Result.error(429, "请求过于频繁，请 1 分钟后再试");
+            return Result.rateLimited("请求过于频繁，请 1 分钟后再试");
         }
         authService.sendCode(request.email());
         return Result.success();
@@ -57,7 +64,7 @@ public class AuthController {
         // 限流：每邮箱每分钟最多 5 次登录尝试
         String rateKey = "rate:login:" + request.email();
         if (!rateLimiter.tryAcquire(rateKey, LOGIN_MAX, LOGIN_WINDOW_MS)) {
-            return Result.error(429, "登录尝试过于频繁，请 1 分钟后再试");
+            return Result.rateLimited("登录尝试过于频繁，请 1 分钟后再试");
         }
         Map<String, Object> result = authService.login(request);
         return Result.success(result);
@@ -70,7 +77,7 @@ public class AuthController {
         String tokenHash = hashToken(token);
         String rateKey = "rate:refresh:" + tokenHash;
         if (!rateLimiter.tryAcquire(rateKey, REFRESH_MAX, REFRESH_WINDOW_MS)) {
-            return Result.error(429, "刷新过于频繁，请稍后再试");
+            return Result.rateLimited("刷新过于频繁，请稍后再试");
         }
         Map<String, Object> result = authService.refreshToken(request.refreshToken());
         return Result.success(result);
@@ -93,7 +100,7 @@ public class AuthController {
         }
         String rateKey = "rate:complete-profile:" + userId;
         if (!rateLimiter.tryAcquire(rateKey, COMPLETE_PROFILE_MAX, COMPLETE_PROFILE_WINDOW_MS)) {
-            return Result.error(429, "操作过于频繁，请稍后再试");
+            return Result.rateLimited("操作过于频繁，请稍后再试");
         }
         authService.completeProfile(userId, request);
         return Result.success();

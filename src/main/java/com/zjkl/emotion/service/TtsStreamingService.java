@@ -15,7 +15,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.nio.ByteBuffer;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 @Service
@@ -26,15 +25,10 @@ public class TtsStreamingService {
     private final TtsProperties ttsProperties;
     private final ChatPushService chatPushService;
 
-    /** 防止双重关闭的原子标记 */
-    private final AtomicBoolean synthesizerClosed = new AtomicBoolean(false);
-
     /**
      * 初始化 TTS
      */
     public SpeechSynthesizer initTtsSynthesizer(String userId, VoiceParams params, AudioBuffer audioBuffer) {
-        // 重置关闭标记，允许新 synthesizer 被关闭
-        synthesizerClosed.set(false);
         try {
             SpeechSynthesisParam synthesisParam = buildDashScopeParam(params);
 
@@ -85,14 +79,11 @@ public class TtsStreamingService {
     }
 
     /**
-     * 关闭 Synthesizer（AtomicBoolean 防止双重关闭）
+     * 关闭 Synthesizer（安全关闭，catch 异常不抛出）
+     * 每个 synthesizer 独立管理生命周期，不使用共享标记
      */
     public void closeSynthesizer(SpeechSynthesizer synthesizer) {
         if (synthesizer == null) return;
-        if (!synthesizerClosed.compareAndSet(false, true)) {
-            log.debug("Synthesizer 已关闭过，跳过重复关闭");
-            return;
-        }
         try {
             var duplexApi = synthesizer.getDuplexApi();
             if (duplexApi != null) {

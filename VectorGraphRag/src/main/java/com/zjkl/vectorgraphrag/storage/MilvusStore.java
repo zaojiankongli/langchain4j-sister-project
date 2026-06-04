@@ -254,6 +254,7 @@ public class MilvusStore {
     }
 
     public List<Map<String, Object>> searchPassages(List<Float> queryEmbedding, int topK, String filter) {
+        validateFilter(filter);
         SearchReq.SearchReqBuilder builder = SearchReq.builder()
                 .collectionName(passageCollection)
                 .data(Collections.singletonList(new FloatVec(queryEmbedding)))
@@ -336,6 +337,7 @@ public class MilvusStore {
     public List<Map<String, Object>> getPassagesByIds(List<String> passageIds, String filter) {
         if (passageIds == null || passageIds.isEmpty()) return List.of();
         validateIds(passageIds);
+        validateFilter(filter);
 
         String idsStr = passageIds.stream()
                 .map(id -> "\"" + id + "\"")
@@ -355,6 +357,7 @@ public class MilvusStore {
 
     public List<String> queryPassageIds(String filter) {
         if (filter == null || filter.trim().isEmpty()) return List.of();
+        validateFilter(filter);
 
         QueryResp resp = client.query(QueryReq.builder()
                 .collectionName(passageCollection)
@@ -537,6 +540,7 @@ public class MilvusStore {
      */
     public List<Map<String, Object>> searchRelationsWithFilter(List<Float> queryEmbedding,
                                                                 int topK, String filter) {
+        validateFilter(filter);
         SearchReq.SearchReqBuilder builder = SearchReq.builder()
                 .collectionName(relationCollection)
                 .data(Collections.singletonList(new FloatVec(queryEmbedding)))
@@ -566,11 +570,28 @@ public class MilvusStore {
      */
     private static final Pattern SAFE_ID_PATTERN = Pattern.compile("^[\\p{L}0-9._\\-:]+$");
 
+    /**
+     * 校验 Milvus filter 表达式不含危险字符（引号、分号、注释等），
+     * 防止 filter 注入攻击。
+     */
+    private static final Pattern UNSAFE_FILTER_PATTERN = Pattern.compile("[\"'`;]|--|/\\*|\\*/");
+
     public static void validateIds(List<String> ids) {
         for (String id : ids) {
             if (id == null || !SAFE_ID_PATTERN.matcher(id).matches()) {
                 throw new IllegalArgumentException("Invalid ID for Milvus filter: " + id);
             }
+        }
+    }
+
+    /**
+     * 校验 Milvus filter 表达式：拒绝包含引号、分号、注释等可能导致注入的字符。
+     */
+    public static void validateFilter(String filter) {
+        if (filter == null || filter.trim().isEmpty()) return;
+        if (UNSAFE_FILTER_PATTERN.matcher(filter).find()) {
+            throw new IllegalArgumentException(
+                    "Invalid Milvus filter expression (contains unsafe characters): " + filter);
         }
     }
 

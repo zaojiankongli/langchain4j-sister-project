@@ -64,7 +64,7 @@ public class MessageDTO {
     public static MessageDTO fromEntity(String id, String role, LocalDateTime createdAt, java.util.List<MessageContent> contents) {
         String type = "text";
         String content = "";
-        String text = null;
+        String text = "";
 
         if (contents != null && !contents.isEmpty()) {
             // 先提取文本内容

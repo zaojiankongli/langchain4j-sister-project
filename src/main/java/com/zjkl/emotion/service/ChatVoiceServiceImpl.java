@@ -180,7 +180,10 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
                 });
             // replyChain 已构建但尚未订阅，等待 voiceParams 完成后再订阅
 
-            // 先订阅 voiceParams，确保 TTS synthesizer 在 replyStream 处理前已就绪
+            // 订阅顺序保证：voiceParams Mono 在 doFinally 中触发 replyChain 订阅，
+            // 确保 TTS synthesizer 在 replyStream 处理前已就绪（synthesizerRef 已赋值）。
+            // delta_emotion 独立订阅，不依赖 voiceParams/replyChain 的完成顺序。
+            // 超时保护：TTS 30s + 音频播放 60s，两者独立超时互不影响。
             result.getVoiceParams()
                 .doOnSuccess(params -> {
                     log.info("voice_params 已解析：userId={}, volume={}", userId, params.getVolume());
@@ -205,6 +208,9 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
                                 synthesizerRef.set(synthesizer);
                                 log.info("TTS 已就绪（应用用户设置）：userId={}, adjustedVolume={}, adjustedSpeed={}",
                                     userId, adjustedVolume, settings.getTtsSpeed());
+                            } else {
+                                log.warn("TTS 初始化返回 null，语音合成将跳过：userId={}", userId);
+                                chatPushService.pushError(userId, "语音服务初始化失败，已跳过音频");
                             }
                         }
                     }

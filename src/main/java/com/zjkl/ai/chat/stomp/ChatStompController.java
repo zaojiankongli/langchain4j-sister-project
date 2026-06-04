@@ -1,6 +1,7 @@
 package com.zjkl.ai.chat.stomp;
 
 import com.zjkl.ai.chat.stomp.dto.ChatRequest;
+import com.zjkl.common.ErrorCode;
 import com.zjkl.common.exception.BusinessException;
 import com.zjkl.common.util.RateLimiter;
 import com.zjkl.emotion.service.ChatVoiceService;
@@ -47,7 +48,7 @@ public class ChatStompController {
         String imageUrl = request.getImageUrl();
 
         if (imageUrl != null && imageUrl.length() > 500) {
-            throw new BusinessException("图片URL过长");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "图片URL过长");
         }
 
         // 限流：每用户 10 条/分钟

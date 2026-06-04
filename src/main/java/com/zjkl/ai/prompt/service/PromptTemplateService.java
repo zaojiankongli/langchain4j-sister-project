@@ -29,6 +29,11 @@ public class PromptTemplateService {
     private static final Pattern VARIABLE_PATTERN = Pattern.compile("\\{([^}]+)\\}");
     
     /**
+     * 双花括号转义占位符模式：{{variableName}}
+     */
+    private static final Pattern DOUBLE_BRACE_PATTERN = Pattern.compile("\\{\\{([^}]+)\\}\\}");
+    
+    /**
      * 获取模板并渲染变量
      * 
      * @param templateKey 模板 Key（如 "summary-full"）
@@ -71,7 +76,7 @@ public class PromptTemplateService {
         
         // 第一步：将 {{var}} 替换为临时占位符，避免被单花括号模式误匹配
         String processed = template;
-        Matcher escapeMatcher = Pattern.compile("\\{\\{([^}]+)\\}\\}").matcher(processed);
+        Matcher escapeMatcher = DOUBLE_BRACE_PATTERN.matcher(processed);
         StringBuilder escapeResult = new StringBuilder();
         while (escapeMatcher.find()) {
             String variableName = escapeMatcher.group(1);

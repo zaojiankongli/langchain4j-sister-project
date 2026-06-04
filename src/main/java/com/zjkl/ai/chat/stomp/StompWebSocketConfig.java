@@ -115,7 +115,7 @@ public class StompWebSocketConfig implements WebSocketMessageBrokerConfigurer {
                         throw new IllegalArgumentException(STOMP_AUTH_FAILED_MESSAGE);
                     }
                 }
-                // SUBSCRIBE 授权：防止用户订阅其他用户的解析后队列
+                // SUBSCRIBE 授权：deny-by-default 策略，仅允许已知的安全目标
                 if (accessor != null && StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
                     String destination = accessor.getDestination();
                     java.security.Principal user = accessor.getUser();
@@ -125,28 +125,41 @@ public class StompWebSocketConfig implements WebSocketMessageBrokerConfigurer {
                         throw new IllegalArgumentException(STOMP_AUTH_FAILED_MESSAGE);
                     }
                     if (destination != null) {
-                        // 严格匹配已知队列前缀 + "-user" + userId，防止 indexOf 误匹配中间子串
-                        java.util.regex.Matcher m = USER_DEST_PATTERN.matcher(destination);
-                        if (m.matches()) {
-                            String targetUserId = m.group(1);
-                            if (!targetUserId.isEmpty() && !targetUserId.equals(user.getName())) {
-                                log.warn("STOMP SUBSCRIBE 越权拦截：userId={} 试图订阅 {}",
-                                        user.getName(), destination);
-                                throw new IllegalArgumentException(STOMP_ACCESS_DENIED_MESSAGE);
-                            }
-                        }
-                        // 也检查原始 /user/ 前缀目标
+                        boolean allowed = false;
+
+                        // 1. 允许用户自己的 /user/queue/* 和 /user/topic/* 目标
+                        //    Spring 会将 /user/queue/* 解析为 /queue/*-user{userId}
                         if (destination.startsWith("/user/")) {
                             String[] parts = destination.split("/");
-                            if (parts.length >= 3) {
+                            if (parts.length >= 4) {
+                                // /user/{userId}/queue/... 或 /user/{userId}/topic/...
                                 String embedded = parts[2];
-                                if (!"queue".equals(embedded) && !"topic".equals(embedded)
-                                        && !embedded.equals(user.getName())) {
-                                    log.warn("STOMP SUBSCRIBE 越权拦截：userId={} 试图订阅 /user/{}/...",
-                                            user.getName(), embedded);
-                                    throw new IllegalArgumentException(STOMP_ACCESS_DENIED_MESSAGE);
+                                if (("queue".equals(embedded) || "topic".equals(embedded))) {
+                                    allowed = true;
+                                } else if (embedded.equals(user.getName())) {
+                                    allowed = true;
                                 }
                             }
+                        }
+
+                        // 2. 允许解析后的用户专属队列（/queue/*-user{userId}）
+                        if (!allowed) {
+                            java.util.regex.Matcher m = USER_DEST_PATTERN.matcher(destination);
+                            if (m.matches()) {
+                                String targetUserId = m.group(1);
+                                if (targetUserId.equals(user.getName())) {
+                                    allowed = true;
+                                }
+                            }
+                        }
+
+                        // 3. 允许通用 topic（如公告频道），仅当确实需要时放开
+                        //    目前无公共 topic，留空
+
+                        if (!allowed) {
+                            log.warn("STOMP SUBSCRIBE 拒绝未知目标：userId={}, destination={}",
+                                    user.getName(), destination);
+                            throw new IllegalArgumentException(STOMP_ACCESS_DENIED_MESSAGE);
                         }
                     }
                 }

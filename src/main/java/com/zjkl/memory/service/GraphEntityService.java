@@ -125,7 +125,16 @@ public class GraphEntityService {
         if (userIds == null || userIds.isEmpty()) {
             return;
         }
+        // 总超时保护：4 小时后停止处理剩余用户，避免任务无限运行
+        long deadline = System.currentTimeMillis() + 4 * 60 * 60 * 1000L;
+        int processed = 0;
+        int skipped = 0;
         for (String userId : userIds) {
+            if (System.currentTimeMillis() > deadline) {
+                log.warn("图压缩任务达到 4 小时超时上限，已处理 {} 个用户，跳过剩余 {} 个用户",
+                        processed, userIds.size() - processed);
+                break;
+            }
             String lockKey = GRAPH_COMPACT_LOCK_KEY_PREFIX + userId;
             boolean acquired = false;
             try {
@@ -136,11 +145,13 @@ public class GraphEntityService {
                 );
                 acquired = Boolean.TRUE.equals(setIfAbsent);
                 if (!acquired) {
+                    skipped++;
                     continue;
                 }
 
                 mergeNearDuplicateEntities(userId);
                 evictEntitiesIfNeeded(userId);
+                processed++;
             } catch (Exception e) {
                 if (acquired) {
                     stringRedisTemplate.delete(lockKey);
@@ -148,6 +159,7 @@ public class GraphEntityService {
                 log.warn("图压缩失败 userId={}", userId, e);
             }
         }
+        log.info("图压缩任务完成: 处理 {} 个用户, 跳过 {} 个用户 (锁/超时)", processed, skipped);
     }
 
     private void upsertGraph(String userId, EmotionAnchorEvent event, List<TripletRecord> triplets) {

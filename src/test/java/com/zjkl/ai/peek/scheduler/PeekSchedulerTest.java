@@ -15,12 +15,17 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
+
 import java.time.Duration;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -77,6 +82,8 @@ class PeekSchedulerTest {
         lenient().when(peekStateTool.isWakeupMutex("u1")).thenReturn(false);
         lenient().when(peekStateTool.calculatePeekProbability(eq("u1"), org.mockito.ArgumentMatchers.any())).thenReturn(1.0);
         lenient().when(peekStateTool.getContinuousActiveMinutes("u1")).thenReturn(60);
+        // Default: Lua 脚本速率限制返回 1（不超限）
+        lenient().when(redisTemplate.execute(any(RedisScript.class), any(List.class), anyString())).thenReturn(1L);
     }
 
     @Test
@@ -94,7 +101,6 @@ class PeekSchedulerTest {
     void processUserPeek_shouldReleasePerUserMutexWhenPushFails() {
         var timeContext = new TimeContextTool.TimeContext("12:00", "中午", "午餐时间", "3", false, "中午好");
         when(valueOperations.setIfAbsent("peek:request-lock:u1", "1", Duration.ofSeconds(120))).thenReturn(true);
-        when(valueOperations.increment("peek:rate_limit:current")).thenReturn(1L);
         doThrow(new RuntimeException("push failed")).when(chatPushService).pushPeekRequest(eq("u1"), anyString());
 
         assertThrows(RuntimeException.class,
@@ -107,7 +113,7 @@ class PeekSchedulerTest {
     void processUserPeek_shouldReleasePerUserMutexWhenGlobalRateLimitRejects() {
         var timeContext = new TimeContextTool.TimeContext("12:00", "中午", "午餐时间", "3", false, "中午好");
         when(valueOperations.setIfAbsent("peek:request-lock:u1", "1", Duration.ofSeconds(120))).thenReturn(true);
-        when(valueOperations.increment("peek:rate_limit:current")).thenReturn(6L);
+        when(redisTemplate.execute(any(RedisScript.class), any(List.class), anyString())).thenReturn(6L);
 
         int result = (int) ReflectionTestUtils.invokeMethod(scheduler, "processUserPeek", "u1", timeContext);
 

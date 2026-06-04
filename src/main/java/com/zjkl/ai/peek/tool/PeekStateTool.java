@@ -10,6 +10,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 
 /**
  * Peek 专用状态工具
@@ -35,6 +37,8 @@ public class PeekStateTool {
     private final PeekProperties peekProperties;
 
     private static final int NEVER_PEEKED_MINUTES = Integer.MAX_VALUE;
+    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm");
+    private static final LocalTime LATE_NIGHT_THRESHOLD = LocalTime.of(22, 0);
 
     // ========== 概率计算 ==========
 
@@ -57,8 +61,9 @@ public class PeekStateTool {
             modifier *= 1.2;
         }
 
-        // 深夜：不打扰
-        if (timeContext.currentTime().compareTo("22:00") >= 0) {
+        // 深夜：不打扰 — parse to LocalTime for correct comparison
+        LocalTime currentTime = LocalTime.parse(timeContext.currentTime(), TIME_FMT);
+        if (!currentTime.isBefore(LATE_NIGHT_THRESHOLD)) {
             modifier *= 0.3;
         }
 

@@ -17,12 +17,21 @@ import java.util.List;
 
 /**
  * MyBatis TypeHandler，用于将 List<MessageContent> 与 JSON 互相转换
+ *
+ * 注意：MyBatis TypeHandler 实例化由 MyBatis 管理（非 Spring Bean），无法直接注入 Spring ObjectMapper。
+ * 此处使用独立 ObjectMapper 并配置与 Spring 一致的容错设置。
+ *
+ * TODO: 如果后续需要将此 TypeHandler 注册为 Spring Bean（例如通过 MyBatis-Plus @Bean 注册），
+ *       应改为注入 Spring 管理的 ObjectMapper，避免维护两套序列化配置。
+ *       当前可通过 SqlSessionFactoryBean.setTypeHandlers() 手动注册 Spring Bean 实例。
  */
 @Slf4j
 @MappedTypes(List.class)
 public class ConverMessageContentTypeHandler implements TypeHandler<List<MessageContent>> {
 
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static final ObjectMapper objectMapper = new ObjectMapper()
+            .configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+            .configure(com.fasterxml.jackson.databind.SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
 
     @Override
     public void setParameter(PreparedStatement ps, int i, List<MessageContent> parameter, JdbcType jdbcType) throws SQLException {

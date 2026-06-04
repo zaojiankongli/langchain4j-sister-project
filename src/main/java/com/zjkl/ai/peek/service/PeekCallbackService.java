@@ -17,6 +17,7 @@ import com.zjkl.wakeup.tool.TimeContextTool;
 import com.zjkl.wakeup.tool.UserStateTool;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -37,8 +38,8 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class PeekCallbackService {
 
-    private static final ObjectMapper objectMapper = new ObjectMapper();
     private static final String DEFAULT_PEEK_MESSAGE = "刚刚看了一下，你正在专注呢，我就不打扰啦～";
+    private static final String PEEK_REQUEST_LOCK_KEY_PREFIX = "peek:request-lock:";
 
     private final ImageDescriptionService imageDescriptionService;
     private final PeekContentAgent peekContentAgent;
@@ -50,6 +51,8 @@ public class PeekCallbackService {
     private final PeekStateTool peekStateTool;
     private final TimeContextTool timeContextTool;
     private final UserStateTool userStateTool;
+    private final ObjectMapper objectMapper;
+    private final StringRedisTemplate redisTemplate;
 
     /**
      * 异步处理 peek 截图回调
@@ -193,6 +196,8 @@ public class PeekCallbackService {
 
         } catch (Exception e) {
             log.error("peek 处理失败：userId={}, peekId={}", userId, peekId, e);
+            // 清理请求锁，使后续请求不被阻塞
+            redisTemplate.delete(PEEK_REQUEST_LOCK_KEY_PREFIX + userId);
             chatPushService.pushError(userId, "peek 处理失败了，下次再试试吧~");
         }
     }

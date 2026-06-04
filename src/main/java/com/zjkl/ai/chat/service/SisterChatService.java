@@ -4,6 +4,7 @@ import com.zjkl.emotion.model.EmotionalState;
 import com.zjkl.emotion.service.EmotionService;
 import com.zjkl.ai.image.service.ImageDescriptionService;
 import com.zjkl.common.constant.PromptConstants;
+import com.zjkl.common.ErrorCode;
 import com.zjkl.common.exception.BusinessException;
 import com.zjkl.memory.service.PromptCacheService;
 import com.zjkl.memory.service.GraphSnapshotService;
@@ -234,35 +235,9 @@ public class SisterChatService {
     }
 
     /**
-     * 流式聊天（自动获取情绪状态和默认用户画像）
-     */
-    public ChatResult chat(String promptText, String memoryId, String imageUrl) {
-        EmotionalState current = emotionService.getUserEmotion(memoryId);
-        String moodDesc = emotionService.getUserMoodDescription(memoryId);
-        return chat(promptText, memoryId, imageUrl, moodDesc, current, "哥哥", "", "", "");
-    }
-
-    /**
-     * 流式聊天（指定用户画像，无记忆块）
-     */
-    public ChatResult chat(String promptText, String memoryId, String imageUrl,
-                           String moodDesc, EmotionalState current,
-                           String userName, String userHobbies, String userBio) {
-        return chat(promptText, memoryId, imageUrl, moodDesc, current, userName, userHobbies, userBio, "");
-    }
-
-    /**
-     * 流式聊天（完整参数）
-     */
-    public ChatResult chat(String promptText, String memoryId, String imageUrl,
-                           String moodDesc, EmotionalState current,
-                           String userName, String userHobbies, String userBio,
-                           String memoryBlock) {
-        return chat(promptText, memoryId, imageUrl, moodDesc, current, userName, userHobbies, userBio, memoryBlock, null);
-    }
-
-    /**
      * 流式聊天（完整参数 + 预加载的 chatMemory，避免重复加载）
+     * 
+     * 唯一公开的 chat 入口。所有调用方（chatWithVoice）直接使用此方法。
      */
     public ChatResult chat(String promptText, String memoryId, String imageUrl,
                            String moodDesc, EmotionalState current,
@@ -306,18 +281,6 @@ public class SisterChatService {
         });
 
         return new ChatResult(sink.asFlux(), imageDescFuture);
-    }
-
-    private List<ChatMessage> buildMessages(String promptText, String memoryId, String imageUrl,
-                                            String moodDesc, EmotionalState current) {
-        return buildMessages(promptText, memoryId, imageUrl, moodDesc, current, "哥哥", "", "", "", null);
-    }
-
-    private List<ChatMessage> buildMessages(String promptText, String memoryId, String imageUrl,
-                                            String moodDesc, EmotionalState current,
-                                            String userName, String userHobbies, String userBio,
-                                            String memoryBlock) {
-        return buildMessages(promptText, memoryId, imageUrl, moodDesc, current, userName, userHobbies, userBio, memoryBlock, null);
     }
 
     private List<ChatMessage> buildMessages(String promptText, String memoryId, String imageUrl,
@@ -506,10 +469,10 @@ public class SisterChatService {
     private void validateImageUrl(String url) {
         if (url == null || url.isBlank()) return;
         if (!url.startsWith("https://")) {
-            throw new BusinessException("图片URL必须以https开头");
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "图片URL必须以https开头");
         }
         if (!IMAGE_URL_PATTERN.matcher(url).matches()) {
-            throw new BusinessException("不允许访问内网地址");
+            throw new BusinessException(ErrorCode.FORBIDDEN, "不允许访问内网地址");
         }
     }
 

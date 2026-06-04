@@ -8,12 +8,16 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.core.ZSetOperations;
+import org.springframework.data.redis.core.script.RedisScript;
 
 import java.time.Duration;
+import java.util.List;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -35,6 +39,11 @@ class UserActivityTrackerTest {
     void setUp() {
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(redisTemplate.opsForZSet()).thenReturn(zSetOperations);
+        // Force fallback to non-atomic path for testability
+        lenient().when(redisTemplate.execute(any(RedisScript.class), any(List.class), anyString(), anyString(), anyString(), anyString(), anyString()))
+                .thenThrow(new RuntimeException("Lua not available in test"));
+        lenient().when(redisTemplate.execute(any(RedisScript.class), any(List.class)))
+                .thenThrow(new RuntimeException("Lua not available in test"));
         userActivityTracker = new UserActivityTracker(redisTemplate);
     }
 

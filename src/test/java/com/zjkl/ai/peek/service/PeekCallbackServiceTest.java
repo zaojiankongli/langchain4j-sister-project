@@ -1,5 +1,6 @@
 package com.zjkl.ai.peek.service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zjkl.ai.chat.entity.MessageContent;
 import com.zjkl.ai.chat.service.ConverMessageService;
 import com.zjkl.ai.chat.stomp.ChatPushService;
@@ -18,7 +19,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.nio.ByteBuffer;
 import java.util.List;
@@ -58,6 +61,10 @@ class PeekCallbackServiceTest {
     private TimeContextTool timeContextTool;
     @Mock
     private UserStateTool userStateTool;
+    @Spy
+    private ObjectMapper objectMapper;
+    @Mock
+    private StringRedisTemplate stringRedisTemplate;
 
     private PeekCallbackService service;
 
@@ -73,7 +80,9 @@ class PeekCallbackServiceTest {
                 chatPushService,
                 peekStateTool,
                 timeContextTool,
-                userStateTool
+                userStateTool,
+                objectMapper,
+                stringRedisTemplate
         );
 
         when(chatPushService.isUserConnected("u1")).thenReturn(true);

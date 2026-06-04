@@ -38,10 +38,6 @@ app:
     websocket-sender-core-size: 2
     websocket-sender-max-size: 4
     websocket-sender-queue-capacity: 100
-    async-core-pool-size: 2
-    async-max-pool-size: 4
-    async-queue-capacity: 100
-    async-thread-name-prefix: async-task-
     redisson-min-idle: 2
     redisson-pool-size: 8
 

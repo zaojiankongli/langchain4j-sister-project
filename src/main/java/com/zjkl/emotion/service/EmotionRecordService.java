@@ -98,10 +98,13 @@ public class EmotionRecordService {
         StringBuilder history = new StringBuilder(Math.min(MAX_CHAT_LENGTH + 32, 4096));
         for (ConverMessage msg : messages) {
             String role = "user".equals(msg.getRole()) ? "哥哥/姐姐" : "妹妹(早空)";
-            String text = msg.getContents().stream()
-                    .filter(c -> "text".equals(c.getType()))
-                    .map(c -> c.getText())
-                    .collect(Collectors.joining(" "));
+            String text = "";
+            if (msg.getContents() != null) {
+                text = msg.getContents().stream()
+                        .filter(c -> "text".equals(c.getType()))
+                        .map(c -> c.getText() != null ? c.getText() : "")
+                        .collect(Collectors.joining(" "));
+            }
 
             if (!history.isEmpty()) {
                 history.append('\n');

@@ -4,8 +4,7 @@ import com.zjkl.mail.entity.MailMessage;
 import com.zjkl.mail.mapper.MailMessageMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -25,21 +24,17 @@ import java.util.UUID;
  */
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class MailService {
 
     private static final String MAIL_CACHE_KEY_PREFIX = "user:mails:";
     private static final Duration REDIS_TTL = Duration.ofMinutes(5);
+    private static final String WELCOME_FLAG_KEY_PREFIX = "mail:welcome:";
+    private static final Duration WELCOME_FLAG_TTL = Duration.ofHours(1);
 
     private final MailMessageMapper mailMapper;
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
-
-    public MailService(MailMessageMapper mailMapper, StringRedisTemplate redisTemplate) {
-        this.mailMapper = mailMapper;
-        this.redisTemplate = redisTemplate;
-        this.objectMapper = new ObjectMapper();
-        this.objectMapper.registerModule(new JavaTimeModule());
-    }
 
     /**
      * 获取用户信件列表（Redis → MySQL，按时间降序）
@@ -58,8 +53,12 @@ public class MailService {
         // 2. MySQL 持久层
         List<MailMessage> mails = mailMapper.selectByUserId(userId);
         if (mails == null || mails.isEmpty()) {
-            // 新用户 → 插入欢迎信件
-            mailMapper.insertWelcomeMails(userId);
+            // 新用户 → 插入欢迎信件（Redis 幂等标记防止并发重复插入）
+            String welcomeKey = WELCOME_FLAG_KEY_PREFIX + userId;
+            Boolean isFirstTime = redisTemplate.opsForValue().setIfAbsent(welcomeKey, "1", WELCOME_FLAG_TTL);
+            if (Boolean.TRUE.equals(isFirstTime)) {
+                mailMapper.insertWelcomeMails(userId);
+            }
             mails = mailMapper.selectByUserId(userId);
         }
 

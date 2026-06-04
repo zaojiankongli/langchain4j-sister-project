@@ -219,17 +219,45 @@ public class EmotionAnchorSemanticService {
         int valueStart = json.indexOf('"', colonIdx);
         if (valueStart < 0) return null;
 
-        // 从 valueStart+1 开始逐字符扫描，正确处理转义引号
+        // 从 valueStart+1 开始逐字符扫描，正确处理转义序列
         StringBuilder sb = new StringBuilder();
         for (int i = valueStart + 1; i < json.length(); i++) {
             char c = json.charAt(i);
             if (c == '\\' && i + 1 < json.length()) {
                 char next = json.charAt(i + 1);
-                if (next == '"' || next == '\\') {
-                    sb.append(next);
-                    i++; // 跳过被转义的字符
-                    continue;
+                switch (next) {
+                    case '"', '\\' -> { sb.append(next); i++; }
+                    case 'n' -> { sb.append('\n'); i++; }
+                    case 't' -> { sb.append('\t'); i++; }
+                    case 'r' -> { sb.append('\r'); i++; }
+                    case 'b' -> { sb.append('\b'); i++; }
+                    case 'f' -> { sb.append('\f'); i++; }
+                    case '/' -> { sb.append('/'); i++; }
+                    case 'u' -> {
+                        // Unicode escape: backslash-u-XXXX (4 hex digits)
+                        if (i + 5 < json.length()) {
+                            String hex = json.substring(i + 2, i + 6);
+                            try {
+                                sb.append((char) Integer.parseInt(hex, 16));
+                                i += 5;
+                            } catch (NumberFormatException e) {
+                                sb.append(c);
+                            }
+                        } else {
+                            sb.append(c);
+                        }
+                    }
+                    default -> {
+                        // 未识别的转义序列（如 \a, \v）：保留反斜杠和后续字符
+                        sb.append(c);
+                        sb.append(next);
+                        i++;
+                    }
                 }
+                continue;
+            }
+            if (c == '\\') {
+                // 末尾反斜杠（字符串最后一个字符是 \）：保留它
                 sb.append(c);
                 continue;
             }

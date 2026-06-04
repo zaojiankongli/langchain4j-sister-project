@@ -43,6 +43,10 @@ public class Result<T> {
         return result;
     }
 
+    public static <T> Result<T> error(ErrorCode errorCode) {
+        return error(errorCode.getCode(), errorCode.getMessage());
+    }
+
     public static <T> Result<T> badRequest(String message) {
         return error(400, message);
     }
@@ -57,6 +61,10 @@ public class Result<T> {
 
     public static <T> Result<T> notFound(String message) {
         return error(404, message);
+    }
+
+    public static <T> Result<T> rateLimited(String message) {
+        return error(429, message);
     }
 
     public static <T> Result<T> error(String message) {

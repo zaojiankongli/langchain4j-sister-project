@@ -87,17 +87,37 @@ public class RecommendationAiConfig {
         return false;
     }
 
-    /** 错误处理 */
+    /** 错误处理 — 最多重试 MAX_ERROR_RETRIES 次，防止无限循环 */
+    private static final int MAX_ERROR_RETRIES = 3;
+    private static final String ERROR_RETRY_COUNT_KEY = "__error_retry_count";
+
     private ErrorRecoveryResult handleWorkflowError(ErrorContext errorContext) {
         log.error("推荐工作流 Agent [{}] 执行失败: {}", errorContext.agentName(), errorContext.exception().getMessage());
+
+        // Increment retry counter in scope state
+        AgenticScope scope = errorContext.agenticScope();
+        String retryCountStr = scope.readState(ERROR_RETRY_COUNT_KEY, "0");
+        int retryCount;
+        try {
+            retryCount = Integer.parseInt(retryCountStr);
+        } catch (NumberFormatException e) {
+            retryCount = 0;
+        }
+        retryCount++;
+        scope.writeState(ERROR_RETRY_COUNT_KEY, String.valueOf(retryCount));
+
+        if (retryCount > MAX_ERROR_RETRIES) {
+            log.error("推荐工作流已达到最大重试次数 ({}), 放弃重试", MAX_ERROR_RETRIES);
+            return ErrorRecoveryResult.throwException();
+        }
 
         String agentName = errorContext.agentName();
         if (RecommendationConstants.AGENT_RECOMMEND.equals(agentName)
                 || RecommendationConstants.AGENT_SCORE.equals(agentName)
                 || RecommendationConstants.AGENT_ACCUMULATE.equals(agentName)
                 || RecommendationConstants.AGENT_EXTRACT.equals(agentName)) {
-            errorContext.agenticScope().writeState(RecommendationConstants.OUTPUT_KEY_RAW_RECOMMENDATIONS, "[]");
-            errorContext.agenticScope().writeState(RecommendationConstants.OUTPUT_KEY_SCORED_RESULT,
+            scope.writeState(RecommendationConstants.OUTPUT_KEY_RAW_RECOMMENDATIONS, "[]");
+            scope.writeState(RecommendationConstants.OUTPUT_KEY_SCORED_RESULT,
                     "{\"recommendations\":[],\"feedback\":\"搜索或评分失败，请尝试不同方向\"}");
             return ErrorRecoveryResult.retry();
         }

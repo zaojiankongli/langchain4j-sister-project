@@ -519,7 +519,7 @@ public class SummaryMemoryService {
         public boolean test(SearchResp.SearchResult r) {
             String content = (String) r.getEntity().get("content");
             if (content == null) return false;
-            String fingerprint = content.length() > 80 ? content.substring(0, 80) : content;
+            String fingerprint = content.length() > 200 ? content.substring(0, 200) : content;
             return seen.add(fingerprint);
         }
     }

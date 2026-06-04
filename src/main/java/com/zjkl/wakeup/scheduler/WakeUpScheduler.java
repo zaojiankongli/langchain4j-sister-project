@@ -280,7 +280,7 @@ public class WakeUpScheduler {
         if (validCount == 0) {
             String fallbackMsg = promptBuilder.buildFallbackMessage(timeContext);
             log.info("无有效候选，使用 fallback：userId={}, msgLength={}", userId, fallbackMsg.length());
-            boolean sent = sendWakeUpWithVoice(userId, fallbackMsg, null);
+            boolean sent = sendWakeUpWithVoice(userId, fallbackMsg, null, settings);
             if (!sent) {
                 return 2;
             }
@@ -300,7 +300,7 @@ public class WakeUpScheduler {
             int actualSentIndex = swapResult.getActualSentIndex();
             GeneratorOutput selectedOutput = contentGenerator.selectOutput(candidates, actualSentIndex);
             VoiceSynthesisParam finalVoiceParams = selectedOutput != null ? selectedOutput.getVoiceParams() : null;
-            boolean sent = sendWakeUpWithVoice(userId, msg, finalVoiceParams);
+            boolean sent = sendWakeUpWithVoice(userId, msg, finalVoiceParams, settings);
             if (!sent) {
                 return 2;
             }
@@ -382,7 +382,7 @@ public class WakeUpScheduler {
         GeneratorOutput selectedOutput = contentGenerator.selectOutput(candidates, actualSentIndex);
         VoiceSynthesisParam finalVoiceParams = selectedOutput != null ? selectedOutput.getVoiceParams() : null;
 
-        boolean sent = sendWakeUpWithVoice(userId, finalMessage, finalVoiceParams);
+        boolean sent = sendWakeUpWithVoice(userId, finalMessage, finalVoiceParams, settings);
         if (!sent) {
             return 2;
         }
@@ -422,10 +422,10 @@ public class WakeUpScheduler {
         }
     }
 
-    private boolean sendWakeUpWithVoice(String userId, String content, VoiceSynthesisParam voiceParams) {
+    private boolean sendWakeUpWithVoice(String userId, String content, VoiceSynthesisParam voiceParams,
+                                        com.zjkl.settings.model.UserSettings settings) {
         try {
-            // === 读取用户 TTS 设置 ===
-            var settings = settingsService.getSettings(userId);
+            // === 读取用户 TTS 设置（已通过参数传入，避免重复查询）===
             if (!settings.isTtsEnabled()) {
                 log.info("用户已关闭 TTS，发送纯文本：userId={}", userId);
                 chatPushService.pushText(userId, content, true);

@@ -12,6 +12,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.time.LocalTime;
+import java.time.format.DateTimeFormatter;
 
 /**
  * 用户状态工具
@@ -32,6 +34,8 @@ public class UserStateTool {
     private static final String DND_KEY_PREFIX = "user:dnd:";
     private static final String LAST_WAKEUP_KEY_PREFIX = "user:last_wakeup:";
     private static final Long EMOTION_EXPIRE_DAYS = 7L;
+    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm");
+    private static final LocalTime LATE_NIGHT_THRESHOLD = LocalTime.of(21, 30);
 
     /**
      * 用户状态快照
@@ -123,8 +127,9 @@ public class UserStateTool {
             modifier *= 0.8;
         }
 
-        // 深夜衰减
-        if (timeContext.currentTime().compareTo("21:30") >= 0) {
+        // 深夜衰减 — parse to LocalTime for correct comparison
+        LocalTime currentTime = LocalTime.parse(timeContext.currentTime(), TIME_FMT);
+        if (!currentTime.isBefore(LATE_NIGHT_THRESHOLD)) {
             modifier *= 0.7;
         }
 

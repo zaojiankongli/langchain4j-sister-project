@@ -45,7 +45,7 @@ public class UserProfileManageService {
             throw new IllegalArgumentException("用户不存在");
         }
 
-        log.info("开始完善用户资料 - userId: {}, username: {}, hasAvatar: {}",
+        log.debug("开始完善用户资料 - userId: {}, username: {}, hasAvatar: {}",
             userId, request.username(), request.avatarUrl() != null && !request.avatarUrl().isBlank());
 
         if (request.username() != null && !request.username().isBlank()) {
@@ -75,11 +75,11 @@ public class UserProfileManageService {
 
         if (request.avatarUrl() != null && !request.avatarUrl().isBlank()) {
             user.setAvatarUrl(request.avatarUrl());
-            log.info("用户设置头像：{}", request.avatarUrl());
+            log.debug("用户设置头像：{}", request.avatarUrl());
         }
 
         userMapper.update(user);
-        log.info("用户资料完善成功 - userId: {}, username: {}, avatarUrl: {}",
+        log.debug("用户资料完善成功 - userId: {}, username: {}, avatarUrl: {}",
             userId, user.getUsername(), user.getAvatarUrl());
     }
 

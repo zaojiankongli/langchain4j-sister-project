@@ -75,10 +75,6 @@ class CommonPropertiesValidationTest {
         properties.setWebsocketSenderCoreSize(0);
         properties.setWebsocketSenderMaxSize(0);
         properties.setWebsocketSenderQueueCapacity(0);
-        properties.setAsyncCorePoolSize(0);
-        properties.setAsyncMaxPoolSize(0);
-        properties.setAsyncQueueCapacity(0);
-        properties.setAsyncThreadNamePrefix("");
         properties.setRedissonMinIdle(0);
         properties.setRedissonPoolSize(0);
 

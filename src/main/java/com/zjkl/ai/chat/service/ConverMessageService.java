@@ -111,8 +111,10 @@ public class ConverMessageService {
     public List<ConverMessage> getLatestByTimeRange(String userId, LocalDateTime startTime, LocalDateTime endTime, int limit) {
         int cappedLimit = Math.max(1, limit);
         List<ConverMessage> messages = converMessageMapper.selectLatestByUserIdAndTimeRange(userId, startTime, endTime, cappedLimit);
-        Collections.reverse(messages);
-        return messages;
+        // 包装为可变列表，防止某些 MyBatis 配置返回不可变 List 导致 Collections.reverse 抛 UOE
+        List<ConverMessage> mutable = new ArrayList<>(messages);
+        Collections.reverse(mutable);
+        return mutable;
     }
 
     /**

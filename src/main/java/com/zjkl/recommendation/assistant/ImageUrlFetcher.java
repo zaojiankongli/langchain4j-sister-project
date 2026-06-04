@@ -155,12 +155,14 @@ public class ImageUrlFetcher {
             String htmlStr = html.toString();
             Matcher matcher = OG_IMAGE_PATTERN.matcher(htmlStr);
             if (matcher.find()) {
-                return matcher.group(1);
+                String ogUrl = matcher.group(1);
+                return validateOgImageUrl(ogUrl);
             }
 
             matcher = OG_IMAGE_ALT_PATTERN.matcher(htmlStr);
             if (matcher.find()) {
-                return matcher.group(1);
+                String ogUrl = matcher.group(1);
+                return validateOgImageUrl(ogUrl);
             }
 
             return null;
@@ -191,6 +193,22 @@ public class ImageUrlFetcher {
             if (isLocalOrPrivateAddress(address)) {
                 throw new IllegalArgumentException("local/private address blocked");
             }
+        }
+    }
+
+    /**
+     * Validate an extracted OG:image URL for safe scheme and non-private host.
+     * Returns the URL if valid, null otherwise.
+     */
+    private String validateOgImageUrl(String ogUrl) {
+        if (ogUrl == null || ogUrl.isBlank()) return null;
+        try {
+            URI uri = new URI(ogUrl);
+            validateRemoteUrl(uri);
+            return ogUrl;
+        } catch (Exception e) {
+            log.debug("ImageUrlFetcher OG:image URL validation failed: {}", e.getMessage());
+            return null;
         }
     }
 

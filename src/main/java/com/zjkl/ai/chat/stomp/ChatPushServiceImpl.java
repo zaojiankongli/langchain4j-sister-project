@@ -6,7 +6,10 @@ import org.springframework.stereotype.Service;
 
 /**
  * STOMP 消息推送实现类
- * 将连接状态管理和心跳检查委托给专门的组件
+ *
+ * 大部分 push 方法直接委托给 ConnectionStateManager。
+ * onUserConnected / onUserDisconnected 负责协调 ConnectionStateManager（连接/队列管理）
+ * 和 HeartbeatChecker（心跳计时器）两个组件的生命周期。
  */
 @Service
 @RequiredArgsConstructor

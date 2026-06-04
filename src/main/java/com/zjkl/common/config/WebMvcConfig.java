@@ -22,8 +22,6 @@ public class WebMvcConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(authInterceptor)
                 .addPathPatterns("/api/**")
-                .excludePathPatterns(authProperties.getWhitelist() != null
-                        ? authProperties.getWhitelist().toArray(new String[0])
-                        : new String[0]);
+                .excludePathPatterns(authProperties.getWhitelist().toArray(new String[0]));
     }
 }

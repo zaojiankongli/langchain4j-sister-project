@@ -7,12 +7,14 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -29,6 +31,27 @@ public class WakeUpTracker {
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final double AB_TEST_RATIO = 0.05;
     private static final long REPLY_WINDOW_MINUTES = 30;
+
+    /**
+     * Lua script for atomic append to a JSON array stored in Redis.
+     * KEYS[1] = record key, ARGV[1] = new record JSON, ARGV[2] = TTL seconds.
+     * If the key does not exist, initializes a new array.
+     */
+    private static final String ATOMIC_APPEND_LUA =
+            "local key = KEYS[1]\n" +
+            "local newRecord = ARGV[1]\n" +
+            "local ttl = tonumber(ARGV[2])\n" +
+            "local existing = redis.call('GET', key)\n" +
+            "local arr\n" +
+            "if existing and #existing > 0 then\n" +
+            "  arr = existing:sub(1, -2) .. ',' .. newRecord .. ']'\n" +
+            "else\n" +
+            "  arr = '[' .. newRecord .. ']'\n" +
+            "end\n" +
+            "redis.call('SET', key, arr, 'EX', ttl)\n" +
+            "return 1";
+    private static final DefaultRedisScript<Long> ATOMIC_APPEND_SCRIPT = new DefaultRedisScript<>(ATOMIC_APPEND_LUA, Long.class);
+    private static final long RECORD_TTL_SECONDS = Duration.ofDays(7).toSeconds();
 
     public SwapResult maybeSwap(List<String> candidates, int[] scores, int bestIndex) {
         return maybeSwap(candidates, scores, bestIndex, ThreadLocalRandom.current().nextDouble(), null);
@@ -77,20 +100,11 @@ public class WakeUpTracker {
             record.setFinalMessage(finalMessage);
             record.setUserReplied(false);
 
-            String existing = redisTemplate.opsForValue().get(key);
-            List<WakeUpRecord> records;
-            if (existing != null) {
-                try {
-                    records = objectMapper.readValue(existing,
-                            objectMapper.getTypeFactory().constructCollectionType(List.class, WakeUpRecord.class));
-                } catch (Exception e) {
-                    records = new ArrayList<>();
-                }
-            } else {
-                records = new ArrayList<>();
-            }
-            records.add(record);
-            redisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(records), Duration.ofDays(7));
+            String recordJson = objectMapper.writeValueAsString(record);
+            redisTemplate.execute(ATOMIC_APPEND_SCRIPT,
+                    Collections.singletonList(key),
+                    recordJson,
+                    String.valueOf(RECORD_TTL_SECONDS));
         } catch (Exception e) {
             log.warn("记录唤醒发送失败: userId={}", userId, e);
         }

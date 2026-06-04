@@ -1,0 +1,23 @@
+# ==================== 生产环境 ====================
+# 直接使用预构建的 JAR，不重新编译
+# 构建: docker build -f Dockerfile.prod -t backend:latest .
+
+FROM eclipse-temurin:21-jre-alpine
+WORKDIR /app
+
+# 复制预构建的 JAR（需先 mvn package）
+COPY target/langchain4j_sister_project-0.0.1-SNAPSHOT.jar app.jar
+
+# 安全：非 root 用户
+USER nobody:nobody
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
+  CMD wget -qO- http://localhost:8080/actuator/health || exit 1
+
+ENTRYPOINT ["java", \
+  "-XX:+UseZGC", \
+  "-XX:MaxRAMPercentage=75.0", \
+  "-Djava.security.egd=file:/dev/./urandom", \
+  "-jar", "app.jar"]

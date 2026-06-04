@@ -8,6 +8,7 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -32,17 +33,17 @@ public class AuthProperties {
     @Positive
     private Long refreshTokenExpiration;
 
-    /** 无需认证的公开路径前缀 */
-    private List<String> whitelist;
+    /** 无需认证的公开路径前缀（默认空列表） */
+    private List<String> whitelist = Collections.emptyList();
 
-    /** 管理员用户 ID 列表，用于管理接口权限校验 */
-    private List<String> adminIds;
+    /** 管理员用户 ID 列表，用于管理接口权限校验（默认空列表） */
+    private List<String> adminIds = Collections.emptyList();
 
     /**
      * 判断指定用户是否为管理员
      */
     public boolean isAdmin(String userId) {
-        return userId != null && adminIds != null && adminIds.contains(userId);
+        return userId != null && adminIds.contains(userId);
     }
 
     @AssertTrue(message = "JWT 签名密钥不能使用占位值")

@@ -47,7 +47,7 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Bean Validation 校验失败
+     * Bean Validation 约束校验失败（方法参数级别）
      */
     @ExceptionHandler(ConstraintViolationException.class)
     public Result<?> handleConstraintViolation(ConstraintViolationException e, HttpServletRequest request) {
@@ -85,7 +85,6 @@ public class GlobalExceptionHandler {
         return Result.badRequest("文件大小超过限制");
     }
 
-
     /**
      * 业务参数校验失败
      */
@@ -104,13 +103,13 @@ public class GlobalExceptionHandler {
         return Result.badRequest("当前服务状态异常，请稍后重试");
     }
 
+    // ==================== 401 - 认证失败 ====================
 
     @ExceptionHandler(UnauthorizedException.class)
     public Result<?> handleUnauthorized(UnauthorizedException e, HttpServletRequest request) {
         log.warn("认证失败 [{} {}]: {}", request.getMethod(), request.getRequestURI(), e.getMessage());
         return Result.unauthorized(sanitizeUnauthorizedMessage(e.getMessage()));
     }
-
 
     /**
      * 资源不存在

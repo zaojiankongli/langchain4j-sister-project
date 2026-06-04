@@ -84,22 +84,26 @@ public class GraphSnapshotService {
     }
 
     private void maybeRebuildAsync(String userId, String targetVersion) {
-        String lastRebuildAt = stringRedisTemplate.opsForValue().get(GraphRedisKeys.LAST_REBUILD_AT_KEY + userId);
-        long now = System.currentTimeMillis();
-        if (lastRebuildAt != null) {
-            try {
-                long last = Long.parseLong(lastRebuildAt);
-                if (now - last < SNAPSHOT_REBUILD_GAP_MS) {
-                    return;
-                }
-            } catch (NumberFormatException e) {
-                log.warn("图 snapshot 重建时间戳解析失败，将强制重建: userId={}, value={}", userId, lastRebuildAt);
-            }
+        // 使用 Redis SETNX 分布式锁防止并发请求重复触发重建
+        String lockKey = GraphRedisKeys.LAST_REBUILD_AT_KEY + "lock:" + userId;
+        Boolean acquired = stringRedisTemplate.opsForValue().setIfAbsent(
+                lockKey, "1", java.time.Duration.ofMillis(SNAPSHOT_REBUILD_GAP_MS));
+        if (!Boolean.TRUE.equals(acquired)) {
+            log.debug("图 snapshot 重建锁未获取，跳过: userId={}", userId);
+            return;
         }
         // 使用注入的 executor 异步执行（@Async 自调用无效，改用 CompletableFuture）
-        CompletableFuture.runAsync(() -> rebuildSnapshot(userId, targetVersion), asyncExecutor)
+        CompletableFuture.runAsync(() -> {
+            try {
+                rebuildSnapshot(userId, targetVersion);
+            } finally {
+                // 重建完成后删除锁（允许后续版本变更触发新重建）
+                stringRedisTemplate.delete(lockKey);
+            }
+        }, asyncExecutor)
                 .exceptionally(e -> {
                     log.warn("图 snapshot 异步重建调度失败 userId={}", userId, e);
+                    stringRedisTemplate.delete(lockKey);
                     return null;
                 });
     }

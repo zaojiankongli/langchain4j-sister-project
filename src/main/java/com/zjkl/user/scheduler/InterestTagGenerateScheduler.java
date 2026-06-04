@@ -17,6 +17,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -30,6 +31,10 @@ public class InterestTagGenerateScheduler {
 
     private static final String INTEREST_TAG_SCHEDULER_KEY_PREFIX = "interest-tag:scheduler:";
     private static final int MAX_ACTIVE_USERS_TO_SCAN = 200;
+    /**
+     * 限制并发 AI 调用数，防止 DashScope 速率限制（200 用户同时调用会触发限流）
+     */
+    private static final int MAX_CONCURRENT_AI_CALLS = 10;
 
     private final InterestTagGenerateService interestTagGenerateService;
     private final UserActivityTracker userActivityTracker;
@@ -51,6 +56,7 @@ public class InterestTagGenerateScheduler {
             // 获取近 1 天有活动的用户
             Set<String> activeUserIds = userActivityTracker.getActiveMemoryIdsInLastDays(1, MAX_ACTIVE_USERS_TO_SCAN);
             AtomicInteger successCount = new AtomicInteger(0);
+            Semaphore aiSemaphore = new Semaphore(MAX_CONCURRENT_AI_CALLS);
 
             List<CompletableFuture<Void>> futures = new ArrayList<>();
             for (String userId : activeUserIds) {
@@ -68,10 +74,22 @@ public class InterestTagGenerateScheduler {
                             return;
                         }
 
-                        var tags = interestTagGenerateService.generateTags(userId);
-                        if (!tags.isEmpty()) {
-                            successCount.incrementAndGet();
+                        // 信号量控制并发 AI 调用数，防止 DashScope 限流
+                        aiSemaphore.acquire();
+                        try {
+                            var tags = interestTagGenerateService.generateTags(userId);
+                            if (!tags.isEmpty()) {
+                                successCount.incrementAndGet();
+                            }
+                        } finally {
+                            aiSemaphore.release();
                         }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        if (acquired) {
+                            redisTemplate.delete(dedupKey);
+                        }
+                        log.warn("兴趣标签生成被中断: userId={}", userId);
                     } catch (Exception e) {
                         if (acquired) {
                             redisTemplate.delete(dedupKey);

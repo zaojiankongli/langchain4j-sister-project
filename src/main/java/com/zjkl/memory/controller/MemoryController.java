@@ -35,8 +35,8 @@ public class MemoryController {
         if (userId == null) {
             return Result.unauthorized("请先登录");
         }
-        // 限制分页大小，防止攻击者传超大 size 拉取全量数据
-        int safeSize = Math.min(Math.max(size, 1), 100);
+        // 限制分页大小，与服务层 MAX_PAGE_SIZE(50) 保持一致，防止攻击者传超大 size 拉取全量数据
+        int safeSize = Math.min(Math.max(size, 1), 50);
         int safePage = Math.max(page, 1);
         List<MemoryVO> voList = memoryQueryService.listMemories(userId, safePage, safeSize, filter, excludeToday);
         return Result.success(voList);
@@ -48,6 +48,9 @@ public class MemoryController {
     @GetMapping("/{id}")
     public Result<MemoryVO> detail(@PathVariable Long id) {
         String currentUserId = userContext.getUserId();
+        if (currentUserId == null) {
+            return Result.unauthorized("请先登录");
+        }
         try {
             MemoryVO vo = memoryQueryService.getMemoryDetail(id, currentUserId);
             return Result.success(vo);
