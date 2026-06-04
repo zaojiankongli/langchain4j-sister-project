@@ -23,6 +23,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -33,6 +34,8 @@ import java.util.concurrent.Executors;
 @Service
 @Slf4j
 public class UserProfileServiceImpl implements UserProfileService {
+    
+    private static final Set<String> ALLOWED_CONTENT_TYPES = Set.of("image/jpeg", "image/png", "image/webp", "image/gif");
     
     private final UserProfileMapper userProfileMapper;
     private final OssService ossService;
@@ -155,7 +158,7 @@ public class UserProfileServiceImpl implements UserProfileService {
     }
     
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void updateProfile(String userId, UserProfileUpdateDTO dto) {
         log.info("更新用户 {} 的资料", userId);
         
@@ -174,7 +177,7 @@ public class UserProfileServiceImpl implements UserProfileService {
     }
     
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void updateBasic(String userId, String username, Integer gender) {
         log.info("更新用户 {} 基本信息: username={}, gender={}", userId, username, gender);
         int rows = userProfileMapper.updateUserBasic(userId, username, gender);
@@ -184,7 +187,7 @@ public class UserProfileServiceImpl implements UserProfileService {
     }
     
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void updateHobbies(String userId, String hobbies) {
         log.info("更新用户 {} 爱好", userId);
         int rows = userProfileMapper.updateUserHobbies(userId, hobbies);
@@ -194,7 +197,7 @@ public class UserProfileServiceImpl implements UserProfileService {
     }
     
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void updateAiType(String userId, Integer aiType) {
         log.info("更新用户 {} AI类型: {}", userId, aiType);
         int rows = userProfileMapper.updateUserAiType(userId, aiType);
@@ -204,7 +207,7 @@ public class UserProfileServiceImpl implements UserProfileService {
     }
     
     @Override
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public String uploadAvatar(String userId, MultipartFile file) {
         // 参数校验
         if (userId == null || userId.isBlank()) {
@@ -213,6 +216,12 @@ public class UserProfileServiceImpl implements UserProfileService {
         
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("请选择要上传的文件");
+        }
+        
+        // 文件类型校验
+        String contentType = file.getContentType();
+        if (contentType == null || !ALLOWED_CONTENT_TYPES.contains(contentType)) {
+            throw new BusinessException("不支持的文件类型，仅支持 JPEG、PNG、WebP、GIF");
         }
         
         log.info("用户上传头像 - userId: {}, 文件名：{}, 大小：{} bytes", 

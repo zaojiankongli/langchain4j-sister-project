@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zjkl.ai.chat.entity.MessageContent;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.ibatis.type.JdbcType;
 import org.apache.ibatis.type.MappedTypes;
 import org.apache.ibatis.type.TypeHandler;
@@ -17,6 +18,7 @@ import java.util.List;
 /**
  * MyBatis TypeHandler，用于将 List<MessageContent> 与 JSON 互相转换
  */
+@Slf4j
 @MappedTypes(List.class)
 public class ConverMessageContentTypeHandler implements TypeHandler<List<MessageContent>> {
 
@@ -30,6 +32,7 @@ public class ConverMessageContentTypeHandler implements TypeHandler<List<Message
             try {
                 ps.setString(i, objectMapper.writeValueAsString(parameter));
             } catch (JsonProcessingException e) {
+                log.warn("序列化 MessageContent 列表失败，回退为空数组", e);
                 ps.setString(i, "[]");
             }
         }
@@ -60,6 +63,7 @@ public class ConverMessageContentTypeHandler implements TypeHandler<List<Message
         try {
             return objectMapper.readValue(json, new TypeReference<List<MessageContent>>() {});
         } catch (JsonProcessingException e) {
+            log.warn("反序列化 MessageContent 列表失败，返回空列表: json={}", json, e);
             return List.of();
         }
     }

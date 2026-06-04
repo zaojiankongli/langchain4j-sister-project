@@ -17,7 +17,11 @@ import java.util.List;
 @Component
 public class WakeUpContentGenerator {
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
+
+    public WakeUpContentGenerator(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
 
     /**
      * 解析 Generator Agent 的 JSON 输出

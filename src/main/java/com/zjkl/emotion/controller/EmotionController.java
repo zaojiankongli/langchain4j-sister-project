@@ -71,7 +71,7 @@ public class EmotionController {
         if (authCode != 0) {
             return Result.error(authCode, authCode == 401 ? "请先登录" : "无权访问");
         }
-        limit = Math.max(1, Math.min(limit, 500));
+        limit = Math.max(1, Math.min(limit, MAX_LIMIT));
         List<EmotionHistoryVO> voList = emotionService.getEmotionHistory(userId, limit);
         return Result.success(voList);
     }

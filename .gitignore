@@ -51,7 +51,7 @@ package-lock.json
 skills-lock.json
 
 ### Local config with secrets ###
-application-local.yml
+**/application-local.yml
 src/main/resources/application-test.yml
 src/main/resources/application-vm.yml
 

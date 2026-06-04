@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDate;
 import java.time.Duration;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Set;
 
 /**
@@ -49,10 +50,13 @@ public class MailScheduler {
             return;
         }
 
+        // 限制处理用户数，防止定时任务执行过久
+        List<String> limitedUserIds = userIds.stream().limit(200).toList();
+
         String today = LocalDate.now().format(DateTimeFormatter.ofPattern("MM/dd"));
         int sent = 0;
 
-        for (String userId : userIds) {
+        for (String userId : limitedUserIds) {
             String cooldownKey = DAILY_SUMMARY_COOLDOWN_KEY_PREFIX + LocalDate.now() + ":" + userId;
             boolean acquired = false;
             try {
@@ -79,7 +83,7 @@ public class MailScheduler {
             }
         }
 
-        log.info("每日情绪总结完成：发送={} 封", sent);
+        log.info("每日情绪总结完成：活跃用户={}, 处理用户={}, 发送={} 封", userIds.size(), limitedUserIds.size(), sent);
     }
 
     /**

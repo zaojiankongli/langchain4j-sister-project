@@ -12,7 +12,9 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
 
+import java.security.MessageDigest;
 import java.time.Duration;
+import java.util.Map;
 
 /**
  * JWT 认证拦截器
@@ -69,8 +71,8 @@ public class AuthInterceptor implements HandlerInterceptor {
             return false;
         }
 
-        // 检查 token 是否已被吊销（黑名单）
-        if (Boolean.TRUE.equals(stringRedisTemplate.hasKey("auth:token:blacklist:" + token))) {
+        // 检查 token 是否已被吊销（黑名单，使用 SHA-256 哈希值作为 key）
+        if (Boolean.TRUE.equals(stringRedisTemplate.hasKey("auth:token:blacklist:" + sha256(token)))) {
             log.warn("Token 已被吊销：userId={}", parseResult.userId());
             writeUnauthorized(response);
             return false;
@@ -84,9 +86,11 @@ public class AuthInterceptor implements HandlerInterceptor {
             Boolean notRecentlyRefreshed = stringRedisTemplate.opsForValue()
                     .setIfAbsent(throttleKey, "1", REFRESH_THROTTLE_TTL);
             if (Boolean.TRUE.equals(notRecentlyRefreshed)) {
-                User user = userMapper.findById(parseResult.userId());
-                if (user != null) {
-                    String newAccessToken = jwtUtil.generateAccessToken(user);
+                // 从 JWT claims 中提取用户信息，避免查询 DB
+                Map<String, String> claims = jwtUtil.parseAccessTokenClaims(token);
+                if (claims != null && claims.get("userId") != null) {
+                    String newAccessToken = jwtUtil.generateAccessToken(
+                            claims.get("userId"), claims.get("email"), claims.get("username"));
                     response.setHeader(NEW_ACCESS_TOKEN_HEADER, newAccessToken);
                     log.debug("Access token 已刷新，剩余有效期：{}ms", parseResult.remainingTimeMs());
                 }
@@ -119,5 +123,19 @@ public class AuthInterceptor implements HandlerInterceptor {
         response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
         response.setContentType("application/json;charset=UTF-8");
         response.getWriter().write(UNAUTHORIZED_BODY);
+    }
+
+    private static String sha256(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(input.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : hash) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 not available", e);
+        }
     }
 }

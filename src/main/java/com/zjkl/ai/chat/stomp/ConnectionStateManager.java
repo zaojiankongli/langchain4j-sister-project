@@ -6,6 +6,7 @@ import com.zjkl.common.config.properties.ThreadPoolProperties;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.event.EventListener;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
 
@@ -105,6 +106,16 @@ public class ConnectionStateManager {
         enqueueMessage(userId, message);
     }
 
+    public void pushPetExpression(String userId, String expression, double intensity, long durationMs) {
+        WebSocketMessage message = WebSocketMessage.petExpression(expression, intensity, durationMs);
+        enqueueMessage(userId, message);
+    }
+
+    public void pushPetMotion(String userId, String motion, String priority) {
+        WebSocketMessage message = WebSocketMessage.petMotion(motion, priority);
+        enqueueMessage(userId, message);
+    }
+
     public void pushEmotionUpdate(String userId, double pleasure, double arousal, double dominance, String moodLabel, String moodDescription) {
         Map<String, Object> emotionData = Map.of(
             "pleasure", pleasure,
@@ -180,6 +191,15 @@ public class ConnectionStateManager {
         }, 5, TimeUnit.SECONDS);
     }
 
+    /**
+     * 监听 HeartbeatChecker 发布的心跳超时断连事件（解耦设计）
+     */
+    @EventListener
+    public void handleUserDisconnectedEvent(HeartbeatChecker.UserDisconnectedEvent event) {
+        log.debug("收到心跳超时断连事件：userId={}", event.userId());
+        onUserDisconnected(event.userId());
+    }
+
     // ==================== 内部方法 ====================
 
     private void ensureSenderStarted(String queueKey) {
@@ -214,7 +234,13 @@ public class ConnectionStateManager {
     }
 
     private void senderLoop(String queueKey) {
-        String userId = queueKey.replace(MessageQueueManager.CONTROL_SUFFIX, "");
+        // M9: 安全推导 userId，避免 replace 误替换中间子串
+        String userId;
+        if (queueKey.endsWith(MessageQueueManager.CONTROL_SUFFIX)) {
+            userId = queueKey.substring(0, queueKey.length() - MessageQueueManager.CONTROL_SUFFIX.length());
+        } else {
+            userId = queueKey;
+        }
         boolean isControlQueue = queueKey.endsWith(MessageQueueManager.CONTROL_SUFFIX);
         String destination = isControlQueue ? CONTROL_DESTINATION : CHAT_DESTINATION;
 
@@ -240,24 +266,18 @@ public class ConnectionStateManager {
 
                 log.debug("senderLoop 获取到消息: queueKey={}, type={}", queueKey, message.getType());
 
-                var lock = queueManager.getLock(userId);
+                // M8: sender loop 本身是每用户单线程串行化机制，无需 ReentrantLock
                 boolean sendSuccess = false;
-                lock.lock();
-                try {
-                    if (!stateRegistry.isConnected(userId)) {
-                        log.debug("用户已断开，丢弃消息: userId={}", userId);
-                        sendSuccess = true;
-                        continue;
-                    }
-
+                if (!stateRegistry.isConnected(userId)) {
+                    log.debug("用户已断开，丢弃消息: userId={}", userId);
+                    sendSuccess = true;
+                } else {
                     try {
                         sendMessage(userId, destination, message);
                         sendSuccess = true;
                     } catch (Exception e) {
                         log.error("发送消息失败：userId={}, type={}", userId, message.getType(), e);
                     }
-                } finally {
-                    lock.unlock();
                 }
 
                 if (!sendSuccess) {

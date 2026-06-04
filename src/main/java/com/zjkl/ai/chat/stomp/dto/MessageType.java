@@ -49,5 +49,15 @@ public enum MessageType {
     /**
      * 情绪状态更新
      */
-    EMOTION_UPDATE
+    EMOTION_UPDATE,
+
+    /**
+     * 桌宠语义表情事件
+     */
+    PET_EXPRESSION,
+
+    /**
+     * 桌宠语义动作事件
+     */
+    PET_MOTION
 }

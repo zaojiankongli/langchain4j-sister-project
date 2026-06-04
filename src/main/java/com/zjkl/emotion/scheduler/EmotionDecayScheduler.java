@@ -7,7 +7,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
 
 /**
  * 情绪衰减定时任务 — 每30分钟对所有活跃用户执行情绪衰减
@@ -29,12 +32,17 @@ public class EmotionDecayScheduler {
             if (activeUsers.isEmpty()) {
                 return;
             }
-            for (String userId : activeUsers) {
-                try {
-                    emotionService.decayUserEmotion(userId);
-                } catch (Exception e) {
-                    log.warn("情绪衰减失败: userId={}", userId, e);
-                }
+            try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+                List<CompletableFuture<Void>> futures = activeUsers.stream()
+                        .map(userId -> CompletableFuture.runAsync(() -> {
+                            try {
+                                emotionService.decayUserEmotion(userId);
+                            } catch (Exception e) {
+                                log.warn("情绪衰减失败: userId={}", userId, e);
+                            }
+                        }, executor))
+                        .toList();
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
             }
             log.debug("情绪衰减完成: {} 用户", activeUsers.size());
         } catch (Exception e) {

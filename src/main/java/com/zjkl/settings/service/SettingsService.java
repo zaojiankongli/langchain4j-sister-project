@@ -96,6 +96,9 @@ public class SettingsService {
 
     /**
      * 保存配置并同步人格设定到情绪引擎
+     *
+     * 注意：@Transactional 只覆盖 MySQL 操作。Redis 写入不在事务范围内，
+     * 失败时通过 restoreNonTransactionalState() 进行补偿回滚。
      */
     @Transactional
     public void saveSettingsWithPersonality(String userId, UserSettings settings) {
@@ -181,9 +184,13 @@ public class SettingsService {
     }
 
     private void savePersonalityToRedis(String userId, UserSettings settings) {
-        if (!"custom".equals(settings.getPersonalityPreset())) return;
-
         String key = PERSONALITY_KEY_PREFIX + userId;
+        if (!"custom".equals(settings.getPersonalityPreset())) {
+            // 切换为非自定义预设时，清除旧的自定义 OCEAN 数据，避免残留干扰
+            redisTemplate.delete(key);
+            return;
+        }
+
         try {
             var oceanMap = Map.of(
                     "openness", settings.getOpenness(),

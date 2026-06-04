@@ -481,6 +481,7 @@ public class MilvusStore {
 
     private boolean deleteById(String collection, String id) {
         try {
+            validateIds(List.of(id));
             client.delete(io.milvus.v2.service.vector.request.DeleteReq.builder()
                     .collectionName(collection)
                     .filter("id == \"" + id + "\"")

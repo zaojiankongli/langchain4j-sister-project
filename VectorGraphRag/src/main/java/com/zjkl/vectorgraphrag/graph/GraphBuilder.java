@@ -76,7 +76,8 @@ public class GraphBuilder {
     }
 
     public ExtractionResult buildFromDocuments(List<Document> documents) {
-        clear();
+        // 注意：不再调用 clear()，以支持增量索引场景。
+        // 如需从空白状态开始构建，请在调用前手动调用 clear()。
 
         for (Document doc : documents) {
             String passageId = doc.getId() != null ? doc.getId() : UUID.randomUUID().toString();

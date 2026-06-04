@@ -13,7 +13,10 @@ public enum ErrorCode {
     NOT_FOUND(404, "资源不存在"),
     METHOD_NOT_ALLOWED(405, "请求方法不支持"),
     TOO_MANY_REQUESTS(429, "请求过于频繁，请稍后重试"),
+    RATE_LIMITED(429, "请求过于频繁"),
+    UNPROCESSABLE_ENTITY(422, "请求参数校验失败"),
     INTERNAL_ERROR(500, "服务器内部错误"),
+    SERVICE_UNAVAILABLE(503, "服务暂时不可用，请稍后重试"),
     TIMEOUT(504, "服务超时，请稍后重试"),
 
     // ==================== 认证模块 (1000) ====================

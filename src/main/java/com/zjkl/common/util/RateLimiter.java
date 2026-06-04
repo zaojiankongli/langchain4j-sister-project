@@ -10,11 +10,18 @@ import java.util.List;
 public class RateLimiter {
 
     private static final String LUA_SCRIPT =
-        "local count = redis.call('incr', KEYS[1]) " +
-        "if count == 1 then " +
-        "    redis.call('pexpire', KEYS[1], ARGV[1]) " +
+        "local key = KEYS[1] " +
+        "local now = tonumber(ARGV[1]) " +
+        "local window = tonumber(ARGV[2]) " +
+        "local max = tonumber(ARGV[3]) " +
+        "redis.call('zremrangebyscore', key, 0, now - window) " +
+        "local count = redis.call('zcard', key) " +
+        "if count < max then " +
+        "    redis.call('zadd', key, now, now .. '-' .. math.random(1000000)) " +
+        "    redis.call('pexpire', key, window) " +
+        "    return 1 " +
         "end " +
-        "return count";
+        "return 0";
 
     private final StringRedisTemplate redisTemplate;
     private final DefaultRedisScript<Long> script;
@@ -31,7 +38,10 @@ public class RateLimiter {
      * @return true 如果允许通过，false 如果被限流
      */
     public boolean tryAcquire(String key, int maxRequests, long windowMs) {
-        Long count = redisTemplate.execute(script, List.of(key), String.valueOf(windowMs));
-        return count != null && count <= maxRequests;
+        Long result = redisTemplate.execute(script, List.of(key),
+                String.valueOf(System.currentTimeMillis()),
+                String.valueOf(windowMs),
+                String.valueOf(maxRequests));
+        return result != null && result == 1;
     }
 }

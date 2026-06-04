@@ -8,14 +8,19 @@ import com.zjkl.common.Result;
 import com.zjkl.common.context.UserContext;
 import jakarta.validation.constraints.Pattern;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
+import java.net.InetAddress;
+import java.net.URI;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * 图片服务接口
  */
+@Slf4j
 @RestController
 @RequestMapping("/api/image")
 @RequiredArgsConstructor
@@ -32,6 +37,7 @@ public class ImageController {
         if (userContext.getUserId() == null) {
             return Result.unauthorized("请先登录");
         }
+        validateRemoteUrl(imageUrl);
         String description = imageDescriptionService.describe(imageUrl);
         return Result.success(Map.of("imageUrl", imageUrl, "description", description));
     }
@@ -41,6 +47,7 @@ public class ImageController {
         if (userContext.getUserId() == null) {
             return Result.unauthorized("请先登录");
         }
+        validateRemoteUrl(imageUrl);
         String description = imageDescriptionService.describeForPeek(imageUrl);
         return Result.success(Map.of("imageUrl", imageUrl, "description", description));
     }
@@ -55,11 +62,37 @@ public class ImageController {
     }
 
     @PostMapping("/generate")
-    public Result<Map<String, String>> generateImage(@RequestBody ImageElements elements) {
+    public CompletableFuture<Result<Map<String, String>>> generateImage(@RequestBody ImageElements elements) {
         if (userContext.getUserId() == null) {
-            return Result.unauthorized("请先登录");
+            return CompletableFuture.completedFuture(Result.unauthorized("请先登录"));
         }
-        String imageUrl = wanxImageService.generate(elements);
-        return Result.success(Map.of("imageUrl", imageUrl));
+        return CompletableFuture.supplyAsync(() -> {
+            String imageUrl = wanxImageService.generate(elements);
+            return Result.success(Map.of("imageUrl", imageUrl));
+        });
+    }
+
+    /**
+     * SSRF 防护：校验 URL 必须使用 HTTPS 且目标地址不能是内网 IP。
+     */
+    private void validateRemoteUrl(String url) {
+        if (url == null || !url.matches("^https://.*")) {
+            throw new IllegalArgumentException("URL must use HTTPS");
+        }
+        try {
+            URI uri = URI.create(url);
+            String host = uri.getHost();
+            if (host == null || host.isBlank()) {
+                throw new IllegalArgumentException("URL must have a valid host");
+            }
+            InetAddress addr = InetAddress.getByName(host);
+            if (addr.isLoopbackAddress() || addr.isLinkLocalAddress() || addr.isSiteLocalAddress() || addr.isAnyLocalAddress()) {
+                throw new IllegalArgumentException("Internal URLs are not allowed");
+            }
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("Invalid URL: " + e.getMessage());
+        }
     }
 }

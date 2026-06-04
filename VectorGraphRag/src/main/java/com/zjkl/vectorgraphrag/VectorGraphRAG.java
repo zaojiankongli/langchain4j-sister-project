@@ -63,10 +63,10 @@ public class VectorGraphRAG {
     private final Graph graph;
 
     @Getter
-    private GraphRetriever retriever;
+    private volatile GraphRetriever retriever;
 
     @Getter
-    private ExtractionResult extractionResult;
+    private volatile ExtractionResult extractionResult;
 
     /**
      * Create VectorGraphRAG with custom settings.
@@ -434,7 +434,7 @@ public class VectorGraphRAG {
         this.retriever = null;
     }
 
-    private GraphRetriever getOrCreateRetriever() {
+    private synchronized GraphRetriever getOrCreateRetriever() {
         if (retriever == null) {
             retriever = new GraphRetriever(settings, store, embeddingClient, entityExtractor);
         }

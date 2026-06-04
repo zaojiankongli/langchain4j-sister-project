@@ -124,4 +124,11 @@
           AND start_time &lt; DATE_SUB(NOW(), INTERVAL #{maxDurationMinutes} MINUTE)
     </update>
 
+    <!-- 查询所有未关闭的锚点事件，用于服务重启时重建 activeEventIds 映射 -->
+    <select id="selectOpenEvents" resultMap="BaseResultMap">
+        SELECT * FROM emotion_anchor_events
+        WHERE end_time IS NULL
+        ORDER BY start_time DESC
+    </select>
+
 </mapper>

@@ -28,6 +28,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -63,6 +64,16 @@ public class GraphQueryService {
     private static final int ENTITY_DISPLAY_LIMIT = 3;
     /** 格式化输出：关系展示上限 */
     private static final int RELATION_DISPLAY_LIMIT = 5;
+
+    /** 实体文本安全校验：仅允许字母、数字和空格，防止 Milvus filter 注入 */
+    private static final Pattern SAFE_ENTITY_PATTERN = Pattern.compile("^[\\p{L}\\p{N}\\s]+$");
+
+    private String validateEntityText(String text) {
+        if (text == null || !SAFE_ENTITY_PATTERN.matcher(text).matches()) {
+            throw new IllegalArgumentException("Invalid entity text: contains unsafe characters");
+        }
+        return text;
+    }
 
     public GraphQueryService(MilvusClientV2 milvusClientV2,
                              MilvusProperties milvusProperties,
@@ -196,7 +207,10 @@ public class GraphQueryService {
         Map<String, Map<String, Object>> merged = new LinkedHashMap<>();
 
         String relationFilter = MilvusQueryUtil.userFilter(userId) + " and (" + entityTexts.stream()
-                .map(text -> "subject == \"" + MilvusQueryUtil.escape(text) + "\" or object == \"" + MilvusQueryUtil.escape(text) + "\"")
+                .map(text -> {
+                    validateEntityText(text);
+                    return "subject == \"" + MilvusQueryUtil.escape(text) + "\" or object == \"" + MilvusQueryUtil.escape(text) + "\"";
+                })
                 .collect(Collectors.joining(" or ")) + ")";
         for (Map<String, Object> relation : MilvusQueryUtil.queryByFilter(milvusClientV2,
                 milvusProperties.getGraphRelationCollectionName(),

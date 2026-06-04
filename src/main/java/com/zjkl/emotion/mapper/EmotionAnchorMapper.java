@@ -55,4 +55,9 @@ public interface EmotionAnchorMapper {
      * 关闭超过最大持续时长的未结束锚点事件（服务重启恢复时使用）
      */
     int closeStaleEvents(@Param("maxDurationMinutes") int maxDurationMinutes);
+
+    /**
+     * 查询所有未关闭的锚点事件（end_time IS NULL），用于服务重启时重建 activeEventIds 映射
+     */
+    List<EmotionAnchorEvent> selectOpenEvents();
 }

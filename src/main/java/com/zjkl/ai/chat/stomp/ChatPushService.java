@@ -11,6 +11,10 @@ public interface ChatPushService {
 
     void pushText(String userId, String content, boolean isComplete);
 
+    void pushPetExpression(String userId, String expression, double intensity, long durationMs);
+
+    void pushPetMotion(String userId, String motion, String priority);
+
     void pushEmotionUpdate(String userId, double pleasure, double arousal, double dominance, String moodLabel, String moodDescription);
 
     void pushSystem(String userId, String content);

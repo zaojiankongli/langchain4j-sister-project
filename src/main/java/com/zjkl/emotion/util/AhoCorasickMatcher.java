@@ -4,6 +4,10 @@ import java.util.*;
 
 /**
  * AC 自动机多模式匹配器。
+ * <p>
+ * 注意：此类不是线程安全的，每个线程应创建独立实例。
+ * 内部状态 {@code current} 会在 {@link #feedChar(char)} 调用时改变，
+ * 多线程共享同一实例会导致匹配结果错乱。
  */
 public class AhoCorasickMatcher {
 

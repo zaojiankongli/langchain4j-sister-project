@@ -1,5 +1,6 @@
 package com.zjkl.wakeup.scheduler;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zjkl.ai.chat.service.ConverMessageService;
 import com.zjkl.ai.chat.stomp.ChatPushService;
 import com.zjkl.ai.component.UserActivityTracker;
@@ -81,9 +82,10 @@ class WakeUpSchedulerTest {
     @BeforeEach
     void setUp() {
         WakeUpPromptBuilder promptBuilder = new WakeUpPromptBuilder();
-        WakeUpContentGenerator contentGenerator = new WakeUpContentGenerator();
-        WakeUpScorer scorer = new WakeUpScorer();
-        WakeUpArbiter arbiter = new WakeUpArbiter();
+        ObjectMapper objectMapper = new ObjectMapper();
+        WakeUpContentGenerator contentGenerator = new WakeUpContentGenerator(objectMapper);
+        WakeUpScorer scorer = new WakeUpScorer(objectMapper);
+        WakeUpArbiter arbiter = new WakeUpArbiter(objectMapper);
         WakeUpProperties wakeUpProperties = new WakeUpProperties();
 
         scheduler = new WakeUpScheduler(

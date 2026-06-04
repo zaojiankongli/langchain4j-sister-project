@@ -4,6 +4,7 @@ import com.zjkl.emotion.model.EmotionalState;
 import com.zjkl.emotion.service.EmotionService;
 import com.zjkl.ai.image.service.ImageDescriptionService;
 import com.zjkl.common.constant.PromptConstants;
+import com.zjkl.common.exception.BusinessException;
 import com.zjkl.memory.service.PromptCacheService;
 import com.zjkl.memory.service.GraphSnapshotService;
 import com.zjkl.memory.service.SummaryMemoryService;
@@ -33,6 +34,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
+import java.util.regex.Pattern;
 
 /**
  * 聊天服务
@@ -84,8 +86,8 @@ public class SisterChatService {
     private static final String TEMPLATE_KEY = PromptConstants.VOICE_CHAT_TEMPLATE;
 
     // ========== RAG 路由/融合参数常量 ==========
-    /** 路由上下文：从历史消息尾部取多少条（≈30 轮对话） */
-    private static final int ROUTE_CONTEXT_WINDOW = 60;
+    /** 路由上下文：从历史消息尾部取多少条（≈20 轮对话） */
+    private static final int ROUTE_CONTEXT_WINDOW = 40;
     /** 路由上下文：最多取多少条最近消息 */
     private static final int ROUTE_MAX_RECENT = 30;
     /** 跨路融合：memory topScore 领先 graph 多少才排前面 */
@@ -140,9 +142,9 @@ public class SisterChatService {
 
         // RAG：路由器判断是否需要搜索记忆 + 提取过滤条件
         String memoryBlock = "";
+        // M30: 提前加载 chatMemory，避免后续 buildMessages 重复加载
+        var chatMemory = chatMemoryProvider.get(memoryId);
         try {
-            // 获取最近消息作为路由上下文
-            var chatMemory = chatMemoryProvider.get(memoryId);
             java.util.List<String> recentMessages = new java.util.ArrayList<>();
             if (chatMemory != null) {
                 var msgs = chatMemory.messages();
@@ -199,7 +201,7 @@ public class SisterChatService {
             log.debug("RAG 路由/记忆搜索失败，跳过记忆注入: {}", e.getMessage());
         }
 
-        return chat(promptText, memoryId, imageUrl, moodDesc, current, userName, userHobbies, userBio, memoryBlock);
+        return chat(promptText, memoryId, imageUrl, moodDesc, current, userName, userHobbies, userBio, memoryBlock, chatMemory);
     }
 
     /**
@@ -249,9 +251,20 @@ public class SisterChatService {
                            String moodDesc, EmotionalState current,
                            String userName, String userHobbies, String userBio,
                            String memoryBlock) {
-        // 有图片则并行描述
+        return chat(promptText, memoryId, imageUrl, moodDesc, current, userName, userHobbies, userBio, memoryBlock, null);
+    }
+
+    /**
+     * 流式聊天（完整参数 + 预加载的 chatMemory，避免重复加载）
+     */
+    public ChatResult chat(String promptText, String memoryId, String imageUrl,
+                           String moodDesc, EmotionalState current,
+                           String userName, String userHobbies, String userBio,
+                           String memoryBlock, dev.langchain4j.memory.ChatMemory preloadedChatMemory) {
+        // 有图片则并行描述（含 SSRF 防护校验）
         final CompletableFuture<String> imageDescFuture;
         if (imageUrl != null && !imageUrl.isBlank()) {
+            validateImageUrl(imageUrl);
             imageDescFuture = CompletableFuture.supplyAsync(() -> {
                 log.debug("开始 VLM 理解图片: {}", imageUrl);
                 return imageDescriptionService.describe(imageUrl);
@@ -262,7 +275,7 @@ public class SisterChatService {
         }
 
         ChatRequest chatRequest = ChatRequest.builder()
-                .messages(buildMessages(promptText, memoryId, imageUrl, moodDesc, current, userName, userHobbies, userBio, memoryBlock))
+                .messages(buildMessages(promptText, memoryId, imageUrl, moodDesc, current, userName, userHobbies, userBio, memoryBlock, preloadedChatMemory))
                 .build();
 
         Sinks.Many<String> sink = Sinks.many().unicast().onBackpressureBuffer();
@@ -290,13 +303,20 @@ public class SisterChatService {
 
     private List<ChatMessage> buildMessages(String promptText, String memoryId, String imageUrl,
                                             String moodDesc, EmotionalState current) {
-        return buildMessages(promptText, memoryId, imageUrl, moodDesc, current, "哥哥", "", "", "");
+        return buildMessages(promptText, memoryId, imageUrl, moodDesc, current, "哥哥", "", "", "", null);
     }
 
     private List<ChatMessage> buildMessages(String promptText, String memoryId, String imageUrl,
                                             String moodDesc, EmotionalState current,
                                             String userName, String userHobbies, String userBio,
                                             String memoryBlock) {
+        return buildMessages(promptText, memoryId, imageUrl, moodDesc, current, userName, userHobbies, userBio, memoryBlock, null);
+    }
+
+    private List<ChatMessage> buildMessages(String promptText, String memoryId, String imageUrl,
+                                            String moodDesc, EmotionalState current,
+                                            String userName, String userHobbies, String userBio,
+                                            String memoryBlock, dev.langchain4j.memory.ChatMemory preloadedChatMemory) {
         List<ChatMessage> messagesToSend = new ArrayList<>();
 
         // 系统提示词（含用户画像）
@@ -308,8 +328,8 @@ public class SisterChatService {
             messagesToSend.add(SystemMessage.from(memoryBlock));
         }
 
-        // 历史消息
-        var memory = chatMemoryProvider.get(memoryId);
+        // 历史消息（使用预加载的 chatMemory 避免重复加载）
+        var memory = (preloadedChatMemory != null) ? preloadedChatMemory : chatMemoryProvider.get(memoryId);
         List<ChatMessage> historyMessages = (memory != null) ? memory.messages() : Collections.emptyList();
         if (!historyMessages.isEmpty()) {
             messagesToSend.addAll(historyMessages);
@@ -472,6 +492,23 @@ public class SisterChatService {
         if (isBlank(second)) return first.trim();
         return first.trim() + "\n\n" + second.trim();
     }
+
+    /**
+     * 校验图片 URL，防止 SSRF 攻击
+     */
+    private void validateImageUrl(String url) {
+        if (url == null || url.isBlank()) return;
+        if (!url.startsWith("https://")) {
+            throw new BusinessException("图片URL必须以https开头");
+        }
+        if (!IMAGE_URL_PATTERN.matcher(url).matches()) {
+            throw new BusinessException("不允许访问内网地址");
+        }
+    }
+
+    private static final Pattern IMAGE_URL_PATTERN = Pattern.compile(
+        "^https://(?!localhost|127\\.0\\.0\\.1|169\\.254\\.|10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.).+"
+    );
 
     private String wrapSnapshot(String graphSnapshot) {
         if (graphSnapshot == null || graphSnapshot.isBlank()) {

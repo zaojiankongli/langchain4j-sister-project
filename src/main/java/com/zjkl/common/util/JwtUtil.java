@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;
 import java.util.Date;
+import java.util.Map;
 
 @Slf4j
 @Component
@@ -31,12 +32,41 @@ public class JwtUtil {
         return createToken(user.getId(), user.getEmail(), user.getUsername(), authProperties.getAccessTokenExpiration());
     }
 
+    /**
+     * 根据用户信息直接生成 Access Token（无需查询 DB）
+     */
+    public String generateAccessToken(String userId, String email, String username) {
+        return createToken(userId, email, username, authProperties.getAccessTokenExpiration());
+    }
+
     public String generateRefreshToken(User user) {
         return createToken(user.getId(), user.getEmail(), user.getUsername(), authProperties.getRefreshTokenExpiration());
     }
 
     public String parseAccessToken(String token) {
         return parseTokenSubject(token);
+    }
+
+    /**
+     * 解析 Access Token 中的完整用户信息（userId, email, username）
+     *
+     * @return 包含 userId/email/username 的 Map，解析失败返回 null
+     */
+    public Map<String, String> parseAccessTokenClaims(String token) {
+        try {
+            Claims claims = Jwts.parser()
+                    .verifyWith(getSigningKey())
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload();
+            return Map.of(
+                "userId", claims.getSubject(),
+                "email", claims.get("email", String.class),
+                "username", claims.get("username", String.class)
+            );
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public long getAccessTokenRemainingTime(String token) {

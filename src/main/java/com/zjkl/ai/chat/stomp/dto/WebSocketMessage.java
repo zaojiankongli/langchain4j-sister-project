@@ -87,4 +87,20 @@ public class WebSocketMessage {
     public static WebSocketMessage emotionUpdate(Map<String, Object> emotionData) {
         return new WebSocketMessage(MessageType.EMOTION_UPDATE, emotionData);
     }
+
+    /**
+     * 创建桌宠表情事件
+     */
+    public static WebSocketMessage petExpression(String expression, double intensity, long durationMs) {
+        return new WebSocketMessage(MessageType.PET_EXPRESSION,
+                of("expression", expression, "intensity", intensity, "durationMs", durationMs));
+    }
+
+    /**
+     * 创建桌宠动作事件
+     */
+    public static WebSocketMessage petMotion(String motion, String priority) {
+        return new WebSocketMessage(MessageType.PET_MOTION,
+                of("motion", motion, "priority", priority));
+    }
 }

@@ -35,7 +35,13 @@ public class HttpClientUtil {
         try {
             return restClient.post()
                     .uri(url)
-                    .headers(httpHeaders -> addHeaders(httpHeaders, headers))
+                    .headers(httpHeaders -> {
+                        addHeaders(httpHeaders, headers);
+                        // POST 请求设置 JSON 内容类型
+                        if (!httpHeaders.containsKey(HttpHeaders.CONTENT_TYPE)) {
+                            httpHeaders.setContentType(MediaType.APPLICATION_JSON);
+                        }
+                    })
                     .body(body != null ? body : "")
                     .retrieve()
                     .body(String.class);
@@ -93,10 +99,6 @@ public class HttpClientUtil {
     private void addHeaders(HttpHeaders httpHeaders, Map<String, String> headers) {
         if (headers != null) {
             headers.forEach(httpHeaders::set);
-        }
-        // 默认设置 JSON 内容类型
-        if (!httpHeaders.containsKey(HttpHeaders.CONTENT_TYPE)) {
-            httpHeaders.setContentType(MediaType.APPLICATION_JSON);
         }
     }
 }

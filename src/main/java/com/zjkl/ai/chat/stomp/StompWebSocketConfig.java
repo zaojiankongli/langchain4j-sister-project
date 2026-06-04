@@ -117,11 +117,17 @@ public class StompWebSocketConfig implements WebSocketMessageBrokerConfigurer {
                 if (accessor != null && StompCommand.SUBSCRIBE.equals(accessor.getCommand())) {
                     String destination = accessor.getDestination();
                     java.security.Principal user = accessor.getUser();
-                    if (destination != null && user != null) {
-                        // 检查直接订阅解析后的目标：/queue/chat-userXXX 或 /queue/control-userXXX
-                        int userIdx = destination.indexOf("-user");
-                        if (userIdx >= 0) {
-                            String targetUserId = destination.substring(userIdx + 5);
+                    // null user 检查：未认证的 SUBSCRIBE 请求直接拒绝
+                    if (user == null) {
+                        log.warn("STOMP SUBSCRIBE 未认证拦截：destination={}", destination);
+                        throw new IllegalArgumentException(STOMP_AUTH_FAILED_MESSAGE);
+                    }
+                    if (destination != null) {
+                        // 严格匹配已知队列前缀 + "-user" + userId，防止 indexOf 误匹配中间子串
+                        java.util.regex.Pattern userDestPattern = java.util.regex.Pattern.compile("^/queue/(?:chat|control)-user(.+)$");
+                        java.util.regex.Matcher m = userDestPattern.matcher(destination);
+                        if (m.matches()) {
+                            String targetUserId = m.group(1);
                             if (!targetUserId.isEmpty() && !targetUserId.equals(user.getName())) {
                                 log.warn("STOMP SUBSCRIBE 越权拦截：userId={} 试图订阅 {}",
                                         user.getName(), destination);

@@ -15,7 +15,7 @@ public class DateFilterParser {
 
         int currentYear = LocalDate.now().getYear();
 
-        // "2026年" → 当前年范围
+        // "当前年" → 当前年范围
         if (filter.equals(currentYear + "年")) {
             return new String[]{currentYear + "-01-01", (currentYear + 1) + "-01-01"};
         }

@@ -13,7 +13,11 @@ import org.springframework.stereotype.Component;
 @Component
 public class WakeUpScorer {
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
+
+    public WakeUpScorer(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
 
     /**
      * 解析 Scorer Agent 的评分 JSON 结果

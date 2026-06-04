@@ -1,6 +1,7 @@
 package com.zjkl.ai.chat.stomp;
 
 import com.zjkl.ai.chat.stomp.dto.ChatRequest;
+import com.zjkl.common.exception.BusinessException;
 import com.zjkl.common.util.RateLimiter;
 import com.zjkl.emotion.service.ChatVoiceService;
 import com.zjkl.wakeup.tracker.WakeUpTracker;
@@ -40,6 +41,10 @@ public class ChatStompController {
         Boolean enableAudio = request.getEnableAudio();
 
         String imageUrl = request.getImageUrl();
+
+        if (imageUrl != null && imageUrl.length() > 500) {
+            throw new BusinessException("图片URL过长");
+        }
 
         // 限流：每用户 10 条/分钟
         if (!rateLimiter.tryAcquire("rate:ws-chat:" + userId, 10, 60_000)) {

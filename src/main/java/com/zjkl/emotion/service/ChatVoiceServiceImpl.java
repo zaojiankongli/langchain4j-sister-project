@@ -36,6 +36,10 @@ import java.util.concurrent.atomic.AtomicReference;
 @RequiredArgsConstructor
 public class ChatVoiceServiceImpl implements ChatVoiceService {
 
+    private static final String PET_PRIORITY_NORMAL = "normal";
+    private static final String PET_MOTION_THINKING = "thinking";
+    private static final String PET_MOTION_SPEAKING = "speaking";
+
     private final TtsStreamingService ttsStreamingService;
     private final SettingsService settingsService;
 
@@ -58,6 +62,8 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
         log.info("开始 WebSocket 语音聊天：userId={}, userInput=***, enableAudio={}", userId, enableAudio);
 
         try {
+            chatPushService.pushPetMotion(userId, PET_MOTION_THINKING, PET_PRIORITY_NORMAL);
+
             // 并行处理图片
             SisterChatService.ChatResult chatResult = sisterChatService.chatWithVoice(userInput, userId, imageUrl);
             Flux<String> llmStream = chatResult.stream();
@@ -74,8 +80,14 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
             // 使用线程安全的收集器替代 StringBuilder
             List<String> replyChunks = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
 
-            result.getReplyStream()
+            // 构建 replyStream 处理链（延迟订阅，确保 voiceParams 先完成 TTS 初始化）
+            AtomicReference<Boolean> firstChunkSent = new AtomicReference<>(false);
+            var replyChain = result.getReplyStream()
                 .concatMap(chunk -> {
+                    if (!firstChunkSent.get()) {
+                        firstChunkSent.set(true);
+                        chatPushService.pushPetMotion(userId, PET_MOTION_SPEAKING, PET_PRIORITY_NORMAL);
+                    }
                     chatPushService.pushText(userId, chunk, false);
                     replyChunks.add(chunk);
                     return Mono.empty();
@@ -167,10 +179,10 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
                     log.error("LLM 回复流错误：userId={}", userId, error);
                     chatPushService.pushError(userId, "回复生成失败，请稍后重试");
                     future.completeExceptionally(error);
-                })
-                .subscribe();
+                });
+            // replyChain 已构建但尚未订阅，等待 voiceParams 完成后再订阅
 
-            // 就绪后初始化 TTS
+            // 先订阅 voiceParams，确保 TTS synthesizer 在 replyStream 处理前已就绪
             result.getVoiceParams()
                 .doOnSuccess(params -> {
                     log.info("voice_params 已解析：userId={}, volume={}", userId, params.getVolume());
@@ -203,6 +215,11 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
                     log.error("voice_params 解析失败：userId={}", userId, error);
                     chatPushService.pushError(userId, "响应解析失败");
                 })
+                .doFinally(signal -> {
+                    // voiceParams 处理完毕（成功/失败/取消），现在订阅 replyStream
+                    log.info("voiceParams 已完成({})，开始订阅 replyStream: userId={}", signal, userId);
+                    replyChain.subscribe();
+                })
                 .subscribe();
 
             // 6. 订阅 delta_emotion（后台更新用户情绪 + 触发锚点监测 + 推送情绪到前端）
@@ -225,6 +242,7 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
                         newEmotion.getFormattedArousal(),
                         newEmotion.getFormattedDominance(),
                         moodLabel, moodDesc);
+                    chatPushService.pushPetExpression(userId, mapMoodToPetExpression(moodLabel), 0.8, 3000);
                 })
                 .doOnError(error -> {
                     log.warn("情绪更新失败：userId={}", userId, error);
@@ -238,6 +256,30 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
         }
 
         return future;
+    }
+
+    private String mapMoodToPetExpression(String moodLabel) {
+        if (moodLabel == null || moodLabel.isBlank()) {
+            return "neutral";
+        }
+
+        String normalized = moodLabel.toLowerCase();
+        if (normalized.contains("怒") || normalized.contains("烦") || normalized.contains("error")) {
+            return "error";
+        }
+        if (normalized.contains("惊") || normalized.contains("surprised")) {
+            return "surprised";
+        }
+        if (normalized.contains("想") || normalized.contains("思") || normalized.contains("thinking")) {
+            return "thinking";
+        }
+        if (normalized.contains("伤") || normalized.contains("sad") || normalized.contains("难过")) {
+            return "sad";
+        }
+        if (normalized.contains("开") || normalized.contains("喜") || normalized.contains("happy")) {
+            return "happy";
+        }
+        return "neutral";
     }
 
     /**

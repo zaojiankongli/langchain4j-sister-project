@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
@@ -29,6 +30,7 @@ public class EmotionAnchorMonitor {
     private final EmotionProperties emotionProperties;
 
     private static final int CLEANUP_HOURS = 2;
+    private static final int MAX_MONITOR_CAPACITY = 10000;
 
     private final ConcurrentHashMap<String, MonitorState> monitors = new ConcurrentHashMap<>();
 
@@ -174,7 +176,8 @@ public class EmotionAnchorMonitor {
      */
     private void endEvent(String userId, MonitorState state, double endP, double endA, String endReason) {
         LocalDateTime endTime = LocalDateTime.now();
-        boolean isPositiveEnd = endP > RETURN_THRESHOLD;
+        // 比较结束愉悦度与起始愉悦度的差值来判断正负
+        boolean isPositiveEnd = (endP - state.startPleasure) > 0;
         EmotionAnchorEvent.EndType endType = isPositiveEnd
                 ? EmotionAnchorEvent.EndType.POSITIVE
                 : EmotionAnchorEvent.EndType.NEGATIVE;
@@ -222,19 +225,39 @@ public class EmotionAnchorMonitor {
     }
 
     /**
-     * 定期清理过期状态
+     * 定期清理过期状态 + 最大容量检查
      */
     @Scheduled(fixedRate = 600000)
     public void cleanupIdleMonitors() {
         LocalDateTime threshold = LocalDateTime.now().minusHours(CLEANUP_HOURS);
         int before = monitors.size();
 
+        // 1. 清理 IDLE 且超时的用户
         monitors.entrySet().removeIf(entry -> {
             MonitorState state = entry.getValue();
             return state.status == MonitorState.Status.IDLE
                     && state.lastMsgTime != null
                     && state.lastMsgTime.isBefore(threshold);
         });
+
+        // 2. 最大容量检查：如果 map 超过阈值，按 lastMsgTime 最老的优先清除
+        if (monitors.size() > MAX_MONITOR_CAPACITY) {
+            int excess = monitors.size() - MAX_MONITOR_CAPACITY;
+            monitors.entrySet().stream()
+                    .sorted((a, b) -> {
+                        LocalDateTime timeA = a.getValue().lastMsgTime;
+                        LocalDateTime timeB = b.getValue().lastMsgTime;
+                        if (timeA == null && timeB == null) return 0;
+                        if (timeA == null) return -1;
+                        if (timeB == null) return 1;
+                        return timeA.compareTo(timeB);
+                    })
+                    .limit(excess)
+                    .map(Map.Entry::getKey)
+                    .toList()
+                    .forEach(monitors::remove);
+            log.info("monitors map 超过最大容量 {}，清除最老的 {} 条记录", MAX_MONITOR_CAPACITY, excess);
+        }
 
         int removed = before - monitors.size();
         if (removed > 0) {

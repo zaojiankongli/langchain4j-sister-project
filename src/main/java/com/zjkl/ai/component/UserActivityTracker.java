@@ -23,6 +23,9 @@ public class UserActivityTracker {
         this.redisTemplate = redisTemplate;
     }
 
+    // TODO: 将 recordActivity 中的多个 Redis 调用合并为一个 Lua 脚本，以保证原子性和减少网络往返：
+    //  当前方法执行了 5 次独立的 Redis 调用（get lastActive / set sessionStart / set lastActive / zadd / removeRangeByScore + expire），
+    //  在高并发下存在竞态风险且延迟较高。可使用 DefaultRedisScript 将上述操作封装为单次 EVAL 调用。
     public void recordActivity(String memoryId) {
         long now = System.currentTimeMillis();
 

@@ -95,14 +95,28 @@ public class ImageUrlFetcher {
 
     /**
      * 通过 HTTP GET 请求页面 HTML，提取 OG:image 或 Twitter:image
+     *
+     * DNS rebinding 防护说明：validateRemoteUrl 已对域名做 DNS 解析并校验为公网 IP，
+     * 但 URL.openConnection() 会重新解析域名，存在 TOCTOU 风险。
+     * 此处使用已验证的 IP 地址直接建立连接，绕过第二次 DNS 解析。
      */
     private String fetchOgImage(String urlStr) {
         HttpURLConnection conn = null;
         try {
             URI uri = new URI(urlStr);
             validateRemoteUrl(uri);
-            URL url = uri.toURL();
+
+            // 使用已验证的 IP 地址直接连接，防止 DNS rebinding
+            InetAddress resolvedIp = InetAddress.getByName(uri.getHost());
+            int port = uri.getPort() != -1 ? uri.getPort()
+                    : ("https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80);
+            String ipUrl = uri.getScheme() + "://" + resolvedIp.getHostAddress()
+                    + ":" + port + (uri.getRawPath() != null ? uri.getRawPath() : "/")
+                    + (uri.getRawQuery() != null ? "?" + uri.getRawQuery() : "");
+            URL url = new URI(ipUrl).toURL();
             conn = (HttpURLConnection) url.openConnection();
+            // 设置原始 Host 头，确保虚拟主机正确路由
+            conn.setRequestProperty("Host", uri.getHost());
             conn.setRequestMethod("GET");
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (compatible; ZjklBot/1.0)");
             conn.setRequestProperty("Accept", "text/html,application/xhtml+xml");

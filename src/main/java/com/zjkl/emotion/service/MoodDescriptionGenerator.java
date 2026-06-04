@@ -64,10 +64,11 @@ public class MoodDescriptionGenerator {
         if (p > 0.2) return "心情不错";
         if (p < -0.4) return "有些难过";
         if (p < -0.15) return "有点失落";
-        if (a > 0.7) return "有些紧张";
-        if (a > 0.5) return "有点紧张";
-        if (a < 0.25) return "很平静";
-        return "平静";
+        if (a > 0.5) return "有些紧张";
+        if (a > 0.2) return "有点紧张";
+        if (a < -0.5) return "很平静";
+        if (a < -0.2) return "平静";
+        return "安静";
     }
 
     public static String generateMoodDescription(EmotionalState emotion) {

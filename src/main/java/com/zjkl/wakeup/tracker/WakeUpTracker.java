@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.zjkl.wakeup.tool.UserStateTool;
 import jakarta.annotation.PostConstruct;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +24,7 @@ import java.util.concurrent.ThreadLocalRandom;
 public class WakeUpTracker {
 
     private final StringRedisTemplate redisTemplate;
+    private final UserStateTool userStateTool;
 
     private static final String RECORD_KEY_PREFIX = "wakeup:record:";
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
@@ -135,20 +137,10 @@ public class WakeUpTracker {
     }
 
     /**
-     * 获取距上次唤醒的分钟数
+     * 获取距上次唤醒的分钟数（委托给 UserStateTool，避免重复实现）
      */
-    private static final String LAST_WAKEUP_KEY_PREFIX = "user:last_wakeup:";
-
     public Integer getMinutesSinceLastWakeup(String userId) {
-        String key = LAST_WAKEUP_KEY_PREFIX + userId;
-        String value = redisTemplate.opsForValue().get(key);
-        if (value == null) return 999;
-        try {
-            long lastWakeup = Long.parseLong(value);
-            return (int) ((System.currentTimeMillis() - lastWakeup) / 60000);
-        } catch (NumberFormatException e) {
-            return 999;
-        }
+        return userStateTool.getMinutesSinceLastWakeup(userId);
     }
 
     @Data

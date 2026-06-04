@@ -34,6 +34,16 @@ public class ChatPushServiceImpl implements ChatPushService {
     }
 
     @Override
+    public void pushPetExpression(String userId, String expression, double intensity, long durationMs) {
+        connectionStateManager.pushPetExpression(userId, expression, intensity, durationMs);
+    }
+
+    @Override
+    public void pushPetMotion(String userId, String motion, String priority) {
+        connectionStateManager.pushPetMotion(userId, motion, priority);
+    }
+
+    @Override
     public void pushEmotionUpdate(String userId, double pleasure, double arousal, double dominance, String moodLabel, String moodDescription) {
         connectionStateManager.pushEmotionUpdate(userId, pleasure, arousal, dominance, moodLabel, moodDescription);
     }

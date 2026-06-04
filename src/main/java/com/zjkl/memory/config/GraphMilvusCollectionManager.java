@@ -24,6 +24,9 @@ public class GraphMilvusCollectionManager {
     private final MilvusClientV2 client;
     private final MilvusProperties milvusProperties;
 
+    /** 集合是否已就绪（启动容错，参考 MilvusCollectionManager） */
+    private volatile boolean collectionReady = false;
+
     public GraphMilvusCollectionManager(MilvusClientV2 client, MilvusProperties milvusProperties) {
         this.client = client;
         this.milvusProperties = milvusProperties;
@@ -31,9 +34,21 @@ public class GraphMilvusCollectionManager {
 
     @PostConstruct
     public void init() {
-        ensureEntityCollection();
-        ensureRelationCollection();
-        ensurePassageCollection();
+        try {
+            ensureEntityCollection();
+            ensureRelationCollection();
+            ensurePassageCollection();
+            collectionReady = true;
+        } catch (Exception e) {
+            log.error("!!! 图谱 Milvus 集合初始化失败，图谱检索将不可用: error={}",
+                    e.getMessage(), e);
+            collectionReady = false;
+        }
+    }
+
+    /** 检查集合是否已就绪 */
+    public boolean isCollectionReady() {
+        return collectionReady;
     }
 
     private void ensureEntityCollection() {
@@ -48,6 +63,7 @@ public class GraphMilvusCollectionManager {
         schema.addField(varcharField("user_id", 128, false));
         schema.addField(varcharField("text", 1024, false));
         schema.addField(varcharField("type", 64, false));
+        schema.addField(varcharField("source_ids", 2000, false));
         schema.addField(int64Field("mention_count"));
         schema.addField(int64Field("first_seen"));
         schema.addField(int64Field("last_seen"));

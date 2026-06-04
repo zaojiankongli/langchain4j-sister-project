@@ -4,8 +4,11 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.ClientHttpRequestFactory;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
+
+import java.net.http.HttpClient;
+import java.time.Duration;
 
 /**
  * RestClient 配置类
@@ -27,12 +30,15 @@ public class RestClientConfig {
     }
 
     /**
-     * 创建请求工厂，配置超时时间（可通过 application.yml 中 app.rest.* 覆盖）
+     * 创建请求工厂，使用 JdkClientHttpRequestFactory 以支持完整的 HTTP/2 和超时控制。
+     * connectTimeout 在 HttpClient 级别设置；readTimeout 在请求级别设置。
      */
     private ClientHttpRequestFactory createRequestFactory() {
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(connectTimeoutSeconds * 1000);
-        factory.setReadTimeout(readTimeoutSeconds * 1000);
+        HttpClient httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(connectTimeoutSeconds))
+                .build();
+        JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(httpClient);
+        factory.setReadTimeout(Duration.ofSeconds(readTimeoutSeconds));
         return factory;
     }
 }

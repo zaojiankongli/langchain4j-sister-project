@@ -65,20 +65,24 @@ public class PromptTemplateService {
             return template;
         }
         
-        // 先处理双花括号转义：{{var}} → 临时占位符，避免被单花括号模式误匹配
+        // 双花括号转义占位符（不会匹配单花括号正则，处理完后还原）
+        final String ESCAPE_OPEN = "\u0000LBRACE\u0000";
+        final String ESCAPE_CLOSE = "\u0000RBRACE\u0000";
+        
+        // 第一步：将 {{var}} 替换为临时占位符，避免被单花括号模式误匹配
         String processed = template;
         Matcher escapeMatcher = Pattern.compile("\\{\\{([^}]+)\\}\\}").matcher(processed);
         StringBuilder escapeResult = new StringBuilder();
         while (escapeMatcher.find()) {
             String variableName = escapeMatcher.group(1);
-            Object value = variables.getOrDefault(variableName, "{" + variableName + "}");
-            String replacement = Matcher.quoteReplacement(value.toString());
+            // 双花括号输出字面量 {var}，不做变量查找
+            String replacement = Matcher.quoteReplacement(ESCAPE_OPEN + variableName + ESCAPE_CLOSE);
             escapeMatcher.appendReplacement(escapeResult, replacement);
         }
         escapeMatcher.appendTail(escapeResult);
         processed = escapeResult.toString();
         
-        // 再处理单花括号占位符：{var}
+        // 第二步：处理单花括号占位符：{var}
         Matcher matcher = VARIABLE_PATTERN.matcher(processed);
         StringBuilder result = new StringBuilder();
         while (matcher.find()) {
@@ -94,7 +98,10 @@ public class PromptTemplateService {
         }
         matcher.appendTail(result);
         
-        return result.toString();
+        // 第三步：将占位符还原为字面量花括号
+        return result.toString()
+                .replace(ESCAPE_OPEN, "{")
+                .replace(ESCAPE_CLOSE, "}");
     }
     
     /**

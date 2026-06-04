@@ -57,7 +57,12 @@ public abstract class AbstractStreamConsumer {
     /** 日志前缀（如 "图片"、"摘要"） */
     protected abstract String getLogPrefix();
 
-    /** 处理单条消息 */
+    /**
+     * 处理单条消息
+     * <p>
+     * 注意：子类实现应保证幂等性。同一条消息可能因 Redis Stream 的 pending 恢复机制
+     * 被重复投递，子类应确保重复处理不会产生副作用（如重复写入、重复通知等）。
+     */
     protected abstract void processMessage(MapRecord<String, Object, Object> record);
 
     // ========== 生命周期 ==========

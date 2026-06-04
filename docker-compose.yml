@@ -12,7 +12,7 @@ services:
       MYSQL_USER: ${MYSQL_USER:-zjkl}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:?MYSQL_PASSWORD must be set}
     ports:
-      - "3306:3306"
+      - "127.0.0.1:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     networks:
@@ -28,14 +28,15 @@ services:
     image: redis:7-alpine
     container_name: sister-redis
     restart: unless-stopped
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redis_default_pass_2026}
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     networks:
       - sister-network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_default_pass_2026}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5
@@ -61,8 +62,8 @@ services:
     container_name: sister-minio
     restart: unless-stopped
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set}
     volumes:
       - minio_data:/minio_data
     networks:
@@ -82,7 +83,7 @@ services:
       - etcd
       - minio
     ports:
-      - "19530:19530"
+      - "127.0.0.1:19530:19530"
     volumes:
       - milvus_data:/var/lib/milvus
     networks:
@@ -96,7 +97,7 @@ services:
     container_name: sister-app
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     environment:
       # Spring profile
       SPRING_PROFILES_ACTIVE: prod
@@ -109,12 +110,12 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_DATABASE: 0
-      REDIS_PASSWORD: ""
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_default_pass_2026}
       # Milvus
       MILVUS_HOST: milvus
       MILVUS_PORT: 19530
       # JWT
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set externally}
       # App
       APP_DEFAULT_IMAGE_URL: https://placehold.co/512x512
       # DashScope / LangChain4j

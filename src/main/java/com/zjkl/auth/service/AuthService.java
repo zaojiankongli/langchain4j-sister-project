@@ -18,6 +18,7 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.List;
 import java.util.Map;
@@ -101,6 +102,9 @@ public class AuthService {
 
         String code = String.format("%06d", random.nextInt(1000000));
 
+        // 先将验证码存入 Redis，再发送邮件（确保存储成功后再发）
+        redisTemplate.opsForValue().set(CODE_PREFIX + email, code, CODE_EXPIRE_MINUTES, TimeUnit.MINUTES);
+
         SimpleMailMessage message = new SimpleMailMessage();
         message.setFrom(fromAddress);
         message.setTo(email);
@@ -113,7 +117,6 @@ public class AuthService {
             throw new BusinessException("验证码发送失败，请稍后再试");
         }
 
-        redisTemplate.opsForValue().set(CODE_PREFIX + email, code, CODE_EXPIRE_MINUTES, TimeUnit.MINUTES);
         log.info("验证码已发送至 {}", maskEmail(email));
     }
     
@@ -196,10 +199,19 @@ public class AuthService {
             throw new IllegalArgumentException("refreshToken 不能为空");
         }
 
-        String blacklistKey = TOKEN_BLACKLIST_PREFIX + refreshToken;
+        String tokenHash = sha256(refreshToken);
+        String blacklistKey = TOKEN_BLACKLIST_PREFIX + tokenHash;
         if (Boolean.TRUE.equals(redisTemplate.hasKey(blacklistKey))) {
             throw new UnauthorizedException("请重新登录");
         }
+
+        // 先将旧 refreshToken 加入黑名单，确保即使后续异常旧 token 也被禁用
+        redisTemplate.opsForValue().set(
+                blacklistKey,
+                "1",
+                REFRESH_TOKEN_EXPIRE_SECONDS,
+                TimeUnit.SECONDS
+        );
 
         String userId = jwtUtil.parseRefreshToken(refreshToken);
         if (userId == null) {
@@ -211,13 +223,6 @@ public class AuthService {
             throw new IllegalArgumentException("用户不存在");
         }
 
-        redisTemplate.opsForValue().set(
-                blacklistKey,
-                "1",
-                REFRESH_TOKEN_EXPIRE_SECONDS,
-                TimeUnit.SECONDS
-        );
-
         String newAccessToken = jwtUtil.generateAccessToken(user);
         String newRefreshToken = jwtUtil.generateRefreshToken(user);
 
@@ -228,12 +233,33 @@ public class AuthService {
         log.info("用户登出: userId={}", userId);
     }
 
-    public void logout(String userId, String refreshToken) {
+    public void logout(String userId, String refreshToken, String accessToken) {
         if (refreshToken != null && !refreshToken.isBlank()) {
-            String blacklistKey = TOKEN_BLACKLIST_PREFIX + refreshToken;
+            String blacklistKey = TOKEN_BLACKLIST_PREFIX + sha256(refreshToken);
             redisTemplate.opsForValue().set(blacklistKey, "1", REFRESH_TOKEN_EXPIRE_SECONDS, TimeUnit.SECONDS);
         }
+        if (accessToken != null && !accessToken.isBlank()) {
+            String blacklistKey = TOKEN_BLACKLIST_PREFIX + sha256(accessToken);
+            long remainingMs = jwtUtil.getAccessTokenRemainingTime(accessToken);
+            if (remainingMs > 0) {
+                redisTemplate.opsForValue().set(blacklistKey, "1", remainingMs, TimeUnit.MILLISECONDS);
+            }
+        }
         log.info("用户登出: userId={}", userId);
+    }
+
+    private static String sha256(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(input.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : hash) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new RuntimeException("SHA-256 not available", e);
+        }
     }
     
     /**

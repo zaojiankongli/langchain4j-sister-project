@@ -16,6 +16,7 @@ import org.springframework.data.redis.core.ValueOperations;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -96,7 +97,7 @@ class SettingsServiceTest {
         verify(emotionService).setUserPersonality("u2", Personality.fromPreset("lively"));
         verify(emotionService).setUserEmotionConfig("u2", 0.8, 0.2, 0.15);
         verify(redisTemplate).delete("user:settings:u2");
-        verify(redisTemplate).delete("user:personality:u2");
+        verify(redisTemplate, atLeastOnce()).delete("user:personality:u2");
         verify(emotionService).setUserPersonality("u2", Personality.gentleAndShy());
         verify(emotionService).setUserEmotionConfig("u2", 0.5, 0.1, 0.05);
         verify(settingsMapper).upsert(eq("u2"), eq(updated));

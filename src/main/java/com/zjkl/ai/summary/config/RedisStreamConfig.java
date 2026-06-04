@@ -65,8 +65,13 @@ public class RedisStreamConfig {
             redisTemplate.opsForStream().createGroup(streamKey, groupName);
             log.info("消费者组创建成功：{} for {}", groupName, streamKey);
         } catch (Exception e) {
-            // 组已存在，忽略（Redis 会抛出 RedisException）
-            log.debug("消费者组已存在：{} for {}", groupName, streamKey);
+            if (e.getMessage() != null && e.getMessage().contains("BUSYGROUP")) {
+                // 组已存在，忽略
+                log.debug("消费者组已存在：{} for {}", groupName, streamKey);
+            } else {
+                log.error("消费者组创建失败：{} for {}, error={}", groupName, streamKey, e.getMessage(), e);
+                throw e;
+            }
         }
     }
     

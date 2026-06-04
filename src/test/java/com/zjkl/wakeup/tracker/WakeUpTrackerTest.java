@@ -12,7 +12,7 @@ class WakeUpTrackerTest {
 
     @Test
     void maybeSwap_shouldKeepOriginalBestIndexAndTrackActualSentIndex() {
-        WakeUpTracker tracker = new WakeUpTracker(null);
+        WakeUpTracker tracker = new WakeUpTracker(null, null);
 
         WakeUpTracker.SwapResult result = tracker.maybeSwap(
                 List.of("A", "B", "C"),
@@ -30,7 +30,7 @@ class WakeUpTrackerTest {
 
     @Test
     void maybeSwap_shouldUseBestIndexAsActualSentIndexWhenNotSwapped() {
-        WakeUpTracker tracker = new WakeUpTracker(null);
+        WakeUpTracker tracker = new WakeUpTracker(null, null);
 
         WakeUpTracker.SwapResult result = tracker.maybeSwap(
                 List.of("A", "B", "C"),

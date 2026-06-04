@@ -41,6 +41,11 @@ public class MessageDTO {
     private String content;
 
     /**
+     * 图文消息时的文本内容（type=image 时保留文本，不丢弃）
+     */
+    private String text;
+
+    /**
      * 时间戳字符串
      */
     private String timestamp;
@@ -53,31 +58,37 @@ public class MessageDTO {
 
     /**
      * 根据 MessageContent 列表构建 type 和 content
-     * 如果有图片，返回第一张图片的 URL，type='image'
+     * 如果有图片，返回第一张图片的 URL，type='image'，同时保留文本在 text 字段
      * 否则返回文本内容，type='text'
      */
     public static MessageDTO fromEntity(String id, String role, LocalDateTime createdAt, java.util.List<MessageContent> contents) {
         String type = "text";
         String content = "";
+        String text = null;
 
         if (contents != null && !contents.isEmpty()) {
-            // 优先找图片
+            // 先提取文本内容
             for (MessageContent mc : contents) {
-                if ("image".equals(mc.getType()) && mc.getUrl() != null && !mc.getUrl().isBlank()) {
-                    type = "image";
-                    content = mc.getUrl();
+                if ("text".equals(mc.getType()) && mc.getText() != null && !mc.getText().isBlank()) {
+                    text = mc.getText();
                     break;
                 }
             }
-            // 没有图片则找文本
-            if ("text".equals(type) || content.isBlank()) {
-                for (MessageContent mc : contents) {
-                    if ("text".equals(mc.getType()) && mc.getText() != null && !mc.getText().isBlank()) {
-                        content = mc.getText();
-                        type = "text";
-                        break;
-                    }
+            // 再查找图片
+            String imageUrl = null;
+            for (MessageContent mc : contents) {
+                if ("image".equals(mc.getType()) && mc.getUrl() != null && !mc.getUrl().isBlank()) {
+                    imageUrl = mc.getUrl();
+                    break;
                 }
+            }
+            // 有图片则为图文消息：content 存图片 URL，text 存文本
+            if (imageUrl != null) {
+                type = "image";
+                content = imageUrl;
+            } else if (text != null) {
+                type = "text";
+                content = text;
             }
         }
 
@@ -95,6 +106,7 @@ public class MessageDTO {
                 .role(frontendRole)
                 .type(type)
                 .content(content)
+                .text(text)
                 .timestamp(timeStr)
                 .createdAt(createdAt)
                 .build();

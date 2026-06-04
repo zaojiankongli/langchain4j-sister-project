@@ -2,6 +2,7 @@ package com.zjkl.auth.dto;
 
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 import java.util.List;
@@ -33,5 +34,6 @@ public record CompleteProfileRequest(
     /**
      * 头像 URL
      */
+    @Pattern(regexp = "^https://.+", message = "头像URL必须以https开头")
     String avatarUrl
 ) {}

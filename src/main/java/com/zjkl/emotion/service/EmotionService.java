@@ -247,8 +247,7 @@ public class EmotionService {
             double newD = current.getDominance() + delta.getDeltaD() * s;
             current = new EmotionalState(newP, newA, newD);
 
-            // 衰减 + 回归基准
-            current = applyDecayAndRegression(current, userId);
+            // 衰减只由 EmotionDecayScheduler 定时执行，此处不再调用 applyDecayAndRegression
 
             saveUserEmotion(userId, current);
 
@@ -383,6 +382,14 @@ public class EmotionService {
 
         personalityCache.put(userId, personality);
         localCache.invalidate(userId);
+
+        // 删除 Redis 中的当前情感 hash key，使下次 getUserEmotion 基于新 personality 重新计算
+        try {
+            redisTemplate.delete(EMOTION_KEY_PREFIX + userId);
+            log.debug("已清除用户情感缓存，将基于新人格重新计算: userId={}", userId);
+        } catch (Exception e) {
+            log.warn("清除用户情感缓存失败: userId={}", userId, e);
+        }
 
         EmotionalState basePAD = personality.toBasePAD();
         log.info("用户新的基础 PAD - P: {}, A: {}, D: {}",

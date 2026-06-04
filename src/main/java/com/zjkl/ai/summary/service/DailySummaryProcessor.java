@@ -67,13 +67,20 @@ public class DailySummaryProcessor {
         }
 
         // 3. 创建并发送图片生成任务
+        LocalDateTime taskCreatedAt;
+        try {
+            taskCreatedAt = LocalDateTime.parse(createdAt);
+        } catch (Exception e) {
+            log.warn("解析任务创建时间失败，使用当前时间: createdAt={}", createdAt, e);
+            taskCreatedAt = LocalDateTime.now();
+        }
         ImageGenerationTask imageTask = ImageGenerationTask.builder()
                 .taskId(UUID.randomUUID().toString())
                 .userId(userId)
                 .title(result.title())
                 .summary(result.summary())
                 .memoryDate(LocalDate.now())
-                .createdAt(LocalDateTime.parse(createdAt))
+                .createdAt(taskCreatedAt)
                 .build();
 
         sendImageTask(imageTask);

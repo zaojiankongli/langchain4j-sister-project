@@ -33,12 +33,14 @@ import org.springframework.stereotype.Component;
 
         import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
@@ -316,19 +318,31 @@ public class WakeUpScheduler {
         String candidateMsg2 = candidates.get(1) != null ? candidates.get(1).getMessage() : null;
         String candidateMsg3 = candidates.get(2) != null ? candidates.get(2).getMessage() : null;
 
-        CompletableFuture<String> scoreFuture1 = CompletableFuture.supplyAsync(() ->
-                scorer1Agent.score(candidateMsg1, timeContext.timeOfDay(), timeContext.specialMoment(),
-                        state.moodDescription(), state.moodScore(), userId), getExecutor())
+        CompletableFuture<String> scoreFuture1 = CompletableFuture.supplyAsync(() -> {
+            if (candidateMsg1 == null) {
+                return "{\"score\":0,\"reason\":\"候选为空，跳过评分\"}";
+            }
+            return scorer1Agent.score(candidateMsg1, timeContext.timeOfDay(), timeContext.specialMoment(),
+                    state.moodDescription(), state.moodScore(), userId);
+        }, getExecutor())
                 .exceptionally(e -> { log.warn("Scorer1 失败: {}", e.getMessage()); return "{\"score\":5,\"reason\":\"评分失败\"}"; });
 
-        CompletableFuture<String> scoreFuture2 = CompletableFuture.supplyAsync(() ->
-                scorer2Agent.score(candidateMsg2, timeContext.timeOfDay(), timeContext.specialMoment(),
-                        state.moodDescription(), state.moodScore(), state.silentHours(), userId), getExecutor())
+        CompletableFuture<String> scoreFuture2 = CompletableFuture.supplyAsync(() -> {
+            if (candidateMsg2 == null) {
+                return "{\"score\":0,\"reason\":\"候选为空，跳过评分\"}";
+            }
+            return scorer2Agent.score(candidateMsg2, timeContext.timeOfDay(), timeContext.specialMoment(),
+                    state.moodDescription(), state.moodScore(), state.silentHours(), userId);
+        }, getExecutor())
                 .exceptionally(e -> { log.warn("Scorer2 失败: {}", e.getMessage()); return "{\"score\":5,\"reason\":\"评分失败\"}"; });
 
-        CompletableFuture<String> scoreFuture3 = CompletableFuture.supplyAsync(() ->
-                scorer3Agent.score(candidateMsg3, timeContext.timeOfDay(), timeContext.specialMoment(),
-                        state.moodDescription(), state.moodScore(), anchorHint, state.silentHours(), userId), getExecutor())
+        CompletableFuture<String> scoreFuture3 = CompletableFuture.supplyAsync(() -> {
+            if (candidateMsg3 == null) {
+                return "{\"score\":0,\"reason\":\"候选为空，跳过评分\"}";
+            }
+            return scorer3Agent.score(candidateMsg3, timeContext.timeOfDay(), timeContext.specialMoment(),
+                    state.moodDescription(), state.moodScore(), anchorHint, state.silentHours(), userId);
+        }, getExecutor())
                 .exceptionally(e -> { log.warn("Scorer3 失败: {}", e.getMessage()); return "{\"score\":5,\"reason\":\"评分失败\"}"; });
 
         String scoreJson1 = scoreFuture1.join();
@@ -353,7 +367,7 @@ public class WakeUpScheduler {
 
         log.info("仲裁结果：userId={}, resultLength={}", userId, lengthOf(arbiterResult));
 
-        List<String> candidateMessages = List.of(candidateMsg1, candidateMsg2, candidateMsg3);
+        List<String> candidateMessages = Arrays.asList(candidateMsg1, candidateMsg2, candidateMsg3);
         ArbiterDecision decision = arbiter.parseArbiterResult(arbiterResult, candidateMessages, timeContext);
         int bestIndex = decision.getBestIndex();
 
@@ -381,7 +395,8 @@ public class WakeUpScheduler {
 
         return 3;
         } finally {
-            redisTemplate.delete(processingKey);
+            // 设置短 TTL 而非立即删除，防止并发窗口内的重复执行
+            redisTemplate.expire(processingKey, 60, TimeUnit.SECONDS);
             if (semAcquired) {
                 wakeupConcurrency.release();
             }

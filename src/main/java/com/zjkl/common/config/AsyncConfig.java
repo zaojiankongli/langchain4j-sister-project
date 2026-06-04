@@ -9,6 +9,7 @@ import org.springframework.scheduling.annotation.AsyncConfigurer;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 
 /**
  * 异步任务线程池配置
@@ -32,23 +33,10 @@ public class AsyncConfig implements AsyncConfigurer {
     }
 
     @Override
+    @Bean(name = "asyncTaskExecutor")
     public Executor getAsyncExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(threadPoolProperties.getAsyncCorePoolSize());
-        executor.setMaxPoolSize(threadPoolProperties.getAsyncMaxPoolSize());
-        executor.setQueueCapacity(threadPoolProperties.getAsyncQueueCapacity());
-        executor.setThreadNamePrefix(threadPoolProperties.getAsyncThreadNamePrefix());
-        executor.setWaitForTasksToCompleteOnShutdown(true);
-        executor.setAwaitTerminationSeconds(30);
-        executor.setRejectedExecutionHandler(new java.util.concurrent.ThreadPoolExecutor.CallerRunsPolicy());
-        executor.initialize();
-
-        log.info("异步任务线程池初始化：core={}, max={}, queue={}",
-                threadPoolProperties.getAsyncCorePoolSize(),
-                threadPoolProperties.getAsyncMaxPoolSize(),
-                threadPoolProperties.getAsyncQueueCapacity());
-
-        return executor;
+        log.info("异步任务执行器初始化：使用虚拟线程执行器");
+        return Executors.newVirtualThreadPerTaskExecutor();
     }
 
     @Bean("imageTaskExecutor")

@@ -20,7 +20,7 @@ public class OssClientConfig {
      * 
      * @return OSS 客户端实例
      */
-    @Bean
+    @Bean(destroyMethod = "shutdown")
     public OSS ossClient() {
         return new OSSClientBuilder().build(
             ossConfig.getEndpoint(),

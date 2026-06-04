@@ -310,10 +310,10 @@ public class LlmResponseStreamParser {
                     replySink.tryEmitError(new IllegalStateException("LLM 流结束但 reply 未闭合"));
                 } else {
                     log.info("LLM 流完成，phase: {}", state[0]);
+                    replySink.tryEmitComplete();
                 }
                 voiceParamsSink.tryEmitValue(DEFAULT_VOICE_PARAMS);
                 deltaSink.tryEmitValue(DEFAULT_DELTA_EMOTION);
-                replySink.tryEmitComplete();
             })
             .doOnError(error -> {
                 log.error("LLM 流错误", error);

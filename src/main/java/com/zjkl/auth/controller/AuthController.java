@@ -11,6 +11,8 @@ import com.zjkl.common.Result;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
+import java.security.MessageDigest;
+import java.util.HexFormat;
 import java.util.Map;
 
 /**
@@ -64,9 +66,10 @@ public class AuthController {
 
     @PostMapping("/refresh")
     public Result<Map<String, Object>> refresh(@RequestBody @Valid RefreshTokenRequest request) {
-        // 限流：每客户端每分钟最多 3 次刷新（使用 token 前缀作为 key，避免 hashCode 碰撞）
+        // 限流：每客户端每分钟最多 3 次刷新（使用 token hash 作为 key，避免碰撞）
         String token = request.refreshToken();
-        String rateKey = "rate:refresh:" + token.substring(0, Math.min(token.length(), 20));
+        String tokenHash = hashToken(token);
+        String rateKey = "rate:refresh:" + tokenHash;
         if (!rateLimiter.tryAcquire(rateKey, REFRESH_MAX, REFRESH_WINDOW_MS)) {
             return Result.error(429, "刷新过于频繁，请稍后再试");
         }
@@ -78,7 +81,8 @@ public class AuthController {
     public Result<?> logout(@RequestBody(required = false) Map<String, String> params) {
         String userId = userContext.getUserId();
         String refreshToken = params != null ? params.get("refreshToken") : null;
-        authService.logout(userId, refreshToken);
+        String accessToken = params != null ? params.get("accessToken") : null;
+        authService.logout(userId, refreshToken, accessToken);
         return Result.success();
     }
 
@@ -94,5 +98,19 @@ public class AuthController {
         }
         authService.completeProfile(userId, request);
         return Result.success();
+    }
+
+    /**
+     * 对 token 做 SHA-256 摘要，取前 16 位十六进制作为限流 key
+     */
+    private static String hashToken(String token) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] digest = md.digest(token.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest, 0, 8);
+        } catch (Exception e) {
+            // fallback: 取前 20 字符
+            return token.substring(0, Math.min(token.length(), 20));
+        }
     }
 }

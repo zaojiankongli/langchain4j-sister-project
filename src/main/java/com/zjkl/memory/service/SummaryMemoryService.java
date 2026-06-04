@@ -49,6 +49,13 @@ public class SummaryMemoryService {
         public static MemoryBlockResult empty() { return new MemoryBlockResult("", 0.0); }
     }
 
+    /**
+     * 混合检索内部结果：包含记忆文本列表和 embedding 向量（供 topScore 查询复用，避免二次 embedding）
+     */
+    private record HybridSearchResult(List<String> memories, List<Float> embeddingVector) {
+        static HybridSearchResult empty() { return new HybridSearchResult(List.of(), List.of()); }
+    }
+
     // ========== 依赖注入 ==========
     private final StringRedisTemplate stringRedisTemplate;
     private final MilvusClientV2 milvusClientV2;
@@ -157,6 +164,13 @@ public class SummaryMemoryService {
      * @return 压缩后的记忆文本列表（1-3 条）
      */
     public List<String> hybridSearchMemories(String userId, String query, int limit) {
+        return hybridSearchInternal(userId, query, limit).memories();
+    }
+
+    /**
+     * 混合检索内部实现：同时返回记忆文本列表和 embedding 向量，供 topScore 查询复用
+     */
+    private HybridSearchResult hybridSearchInternal(String userId, String query, int limit) {
         try {
             // 1. dense embedding
             long embedStart = System.currentTimeMillis();
@@ -199,15 +213,16 @@ public class SummaryMemoryService {
             List<List<SearchResp.SearchResult>> searchResults = searchResp.getSearchResults();
 
             if (searchResults.isEmpty() || searchResults.get(0).isEmpty()) {
-                return List.of();
+                return HybridSearchResult.empty();
             }
 
             // 4. 后处理：阈值过滤 + 去重 + 压缩
-            return postProcess(searchResults.get(0), userId, RRF_SCORE_THRESHOLD, limit);
+            List<String> memories = postProcess(searchResults.get(0), userId, RRF_SCORE_THRESHOLD, limit);
+            return new HybridSearchResult(memories, denseList);
 
         } catch (Exception e) {
             log.error("混合检索失败: userId={}, query={}", userId, query, e);
-            return List.of();
+            return HybridSearchResult.empty();
         }
     }
 
@@ -284,29 +299,45 @@ public class SummaryMemoryService {
      * 带过滤条件 + 检索评分的记忆块构建（用于跨路 RAG 融合排序）
      */
     public MemoryBlockResult buildMemoryBlockWithScore(String userId, String query, MemorySearchFilters filters) {
-        List<String> memories = hybridSearchMemories(userId, query, filters, MAX_MEMORIES * RETRIEVAL_MULTIPLIER);
+        // 使用内部方法一次性获取记忆列表和 embedding，避免二次 embedding 调用
+        HybridSearchResult searchResult = hybridSearchInternal(userId,
+                filters != null && filters.topicHint() != null ? query + " " + filters.topicHint() : query,
+                MAX_MEMORIES * RETRIEVAL_MULTIPLIER);
+        List<String> memories = new ArrayList<>(searchResult.memories());
+
+        // 追加 date/sentiment 过滤（与 hybridSearchMemories(filters) 保持一致）
+        if (!memories.isEmpty() && filters != null && !filters.isEmpty()) {
+            memories = memories.stream()
+                    .filter(r -> matchesDateHint(r, filters.dateHint()))
+                    .filter(r -> matchesSentimentHint(r, filters.sentimentHint()))
+                    .limit(MAX_MEMORIES)
+                    .collect(Collectors.toList());
+        }
+
         if (memories.isEmpty()) {
             return MemoryBlockResult.empty();
         }
-        // 再次检索获取 top score（轻量：仅 1 条，不做后处理）
+
+        // 复用已有的 embedding 获取 top score，避免二次调用 embeddingModel.embed()
         double topScore = 0.0;
-        try {
-            Embedding embedding = embeddingModel.embed(query).content();
-            List<Float> vecList = toFloatList(embedding.vector());
-            String userFilter = MilvusQueryUtil.userFilter(userId);
-            SearchReq scoreReq = SearchReq.builder()
-                    .collectionName(milvusCollectionName)
-                    .data(Collections.singletonList(new FloatVec(vecList)))
-                    .topK(1)
-                    .filter(userFilter)
-                    .build();
-            SearchResp scoreResp = milvusClientV2.search(scoreReq);
-            if (scoreResp.getSearchResults() != null && !scoreResp.getSearchResults().isEmpty()
-                    && !scoreResp.getSearchResults().get(0).isEmpty()) {
-                topScore = scoreResp.getSearchResults().get(0).get(0).getScore();
+        List<Float> embeddingVector = searchResult.embeddingVector();
+        if (!embeddingVector.isEmpty()) {
+            try {
+                String userFilter = MilvusQueryUtil.userFilter(userId);
+                SearchReq scoreReq = SearchReq.builder()
+                        .collectionName(milvusCollectionName)
+                        .data(Collections.singletonList(new FloatVec(embeddingVector)))
+                        .topK(1)
+                        .filter(userFilter)
+                        .build();
+                SearchResp scoreResp = milvusClientV2.search(scoreReq);
+                if (scoreResp.getSearchResults() != null && !scoreResp.getSearchResults().isEmpty()
+                        && !scoreResp.getSearchResults().get(0).isEmpty()) {
+                    topScore = scoreResp.getSearchResults().get(0).get(0).getScore();
+                }
+            } catch (Exception e) {
+                log.debug("记忆 topScore 获取失败，使用默认 0", e);
             }
-        } catch (Exception e) {
-            log.debug("记忆 topScore 获取失败，使用默认 0", e);
         }
 
         String footer = "\n\n用这些记忆自然地融入回复，仿佛你真的记住了这些事。不要生硬地引用\"我记得之前...\"——让记忆成为你回应的底色。";

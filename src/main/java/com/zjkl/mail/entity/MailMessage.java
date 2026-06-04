@@ -11,6 +11,9 @@ import java.time.format.DateTimeFormatter;
  */
 @Data
 public class MailMessage {
+
+    private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy.MM.dd");
+
     private String id;
     private String userId;
     private String tag;
@@ -25,6 +28,6 @@ public class MailMessage {
      */
     @JsonProperty("date")
     public String getDate() {
-        return createdAt != null ? createdAt.format(DateTimeFormatter.ofPattern("yyyy.MM.dd")) : null;
+        return createdAt != null ? createdAt.format(DATE_FORMATTER) : null;
     }
 }

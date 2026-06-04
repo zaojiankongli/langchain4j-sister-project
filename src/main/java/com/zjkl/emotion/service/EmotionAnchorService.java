@@ -41,10 +41,21 @@ public class EmotionAnchorService {
         anchorMonitor.setOnTrigger(this::handleAnchorTriggered);
         anchorMonitor.setOnEnd(this::handleAnchorEnded);
 
-        // 服务重启后，只关闭超过最大持续时长的残留锚点事件
+        // 服务重启后，关闭超过最大持续时长的残留锚点事件
         int closed = anchorMapper.closeStaleEvents(emotionProperties.getAnchorMaxDurationMinutes());
         if (closed > 0) {
             log.info("已关闭 {} 个超时遗留的未结束锚点事件", closed);
+        }
+
+        // 从 DB 查询未关闭的事件来重建 activeEventIds 映射
+        List<EmotionAnchorEvent> openEvents = anchorMapper.selectOpenEvents();
+        for (EmotionAnchorEvent event : openEvents) {
+            if (event.getUserId() != null && event.getId() != null) {
+                activeEventIds.put(event.getUserId(), event.getId());
+            }
+        }
+        if (!openEvents.isEmpty()) {
+            log.info("已重建 activeEventIds 映射 - 恢复 {} 个进行中的锚点事件", openEvents.size());
         }
 
         log.info("情绪锚点服务初始化完成 - triggerThreshold={}, returnThreshold={}, silenceHours={}",

@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -43,7 +44,7 @@ public class EmotionAnchorSemanticService {
      */
     public void generateSemanticFields(EmotionAnchorEvent event) {
         String userId = event.getUserId();
-        String cacheKey = "anchor:summary:" + userId + ":" + LocalDate.now();
+        String cacheKey = "anchor:summary:" + userId + ":" + LocalDate.now(ZoneId.of("Asia/Shanghai"));
         try {
             String cached = stringRedisTemplate.opsForValue().get(cacheKey);
             if (cached != null) {
@@ -217,8 +218,31 @@ public class EmotionAnchorSemanticService {
         if (colonIdx < 0) return null;
         int valueStart = json.indexOf('"', colonIdx);
         if (valueStart < 0) return null;
-        int valueEnd = json.indexOf('"', valueStart + 1);
-        if (valueEnd < 0) return null;
-        return json.substring(valueStart + 1, valueEnd);
+
+        // 从 valueStart+1 开始逐字符扫描，正确处理转义引号
+        StringBuilder sb = new StringBuilder();
+        for (int i = valueStart + 1; i < json.length(); i++) {
+            char c = json.charAt(i);
+            if (c == '\\' && i + 1 < json.length()) {
+                char next = json.charAt(i + 1);
+                if (next == '"' || next == '\\') {
+                    sb.append(next);
+                    i++; // 跳过被转义的字符
+                    continue;
+                }
+                sb.append(c);
+                continue;
+            }
+            if (c == '"') {
+                // 找到未转义的闭合引号
+                return sb.toString();
+            }
+            sb.append(c);
+        }
+
+        // 未找到闭合引号，手工解析失败，返回默认值
+        log.warn("extractField 手工解析失败，未找到闭合引号: field={}, json片段={}", field,
+                json.substring(valueStart, Math.min(valueStart + 100, json.length())));
+        return null;
     }
 }

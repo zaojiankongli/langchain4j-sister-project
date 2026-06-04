@@ -154,11 +154,18 @@ public class PeekCallbackService {
             } else {
                 audioBuffer = voiceSynthesisService.synthesize(content, emotionService.getUserEmotion(userId));
             }
-            byte[] audioData = new byte[audioBuffer.remaining()];
-            if (audioData.length > 0) {
-                audioBuffer.get(audioData);
+
+            byte[] audioData;
+            if (audioBuffer == null) {
+                log.warn("TTS synthesis returned null for user {}, skipping audio", userId);
+                audioData = new byte[0];
+            } else {
+                audioData = new byte[audioBuffer.remaining()];
+                if (audioData.length > 0) {
+                    audioBuffer.get(audioData);
+                }
+                log.info("peek TTS 合成完成：userId={}, audioSize={} bytes", userId, audioData.length);
             }
-            log.info("peek TTS 合成完成：userId={}, audioSize={} bytes", userId, audioData.length);
 
             // 5. 持久化消息
             try {

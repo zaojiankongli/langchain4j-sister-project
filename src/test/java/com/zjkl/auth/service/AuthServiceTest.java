@@ -19,6 +19,7 @@ import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.core.env.Environment;
 
+import java.security.MessageDigest;
 import java.util.Map;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -179,7 +180,7 @@ class AuthServiceTest {
         testUser.setId(userId);
         testUser.setEmail(TEST_EMAIL);
 
-        when(redisTemplate.hasKey("auth:token:blacklist:" + refreshToken)).thenReturn(false);
+        when(redisTemplate.hasKey("auth:token:blacklist:" + sha256(refreshToken))).thenReturn(false);
         when(jwtUtil.parseRefreshToken(refreshToken)).thenReturn(userId);
         when(userMapper.findById(userId)).thenReturn(testUser);
         when(jwtUtil.generateAccessToken(testUser)).thenReturn("new-access-token");
@@ -193,7 +194,7 @@ class AuthServiceTest {
         assertEquals("new-access-token", result.get("accessToken"));
         assertEquals("new-refresh-token", result.get("refreshToken"));
 
-        verify(redisTemplate).hasKey("auth:token:blacklist:" + refreshToken);
+        verify(redisTemplate).hasKey("auth:token:blacklist:" + sha256(refreshToken));
         verify(jwtUtil).parseRefreshToken(refreshToken);
         verify(userMapper).findById(userId);
     }
@@ -205,7 +206,7 @@ class AuthServiceTest {
         testUser.setId(TEST_USER_ID);
         testUser.setEmail(TEST_EMAIL);
 
-        when(redisTemplate.hasKey("auth:token:blacklist:" + refreshToken)).thenReturn(false);
+        when(redisTemplate.hasKey("auth:token:blacklist:" + sha256(refreshToken))).thenReturn(false);
         when(jwtUtil.parseRefreshToken(refreshToken)).thenReturn(TEST_USER_ID);
         when(userMapper.findById(TEST_USER_ID)).thenReturn(testUser);
         when(jwtUtil.generateAccessToken(testUser)).thenReturn("new-access-token");
@@ -214,7 +215,7 @@ class AuthServiceTest {
         authService.refreshToken(refreshToken);
 
         verify(valueOperations).set(
-                eq("auth:token:blacklist:" + refreshToken),
+                eq("auth:token:blacklist:" + sha256(refreshToken)),
                 eq("1"),
                 eq(7L * 24 * 3600),
                 eq(TimeUnit.SECONDS)
@@ -228,14 +229,28 @@ class AuthServiceTest {
         String refreshToken = "valid-refresh-token";
 
         // Act
-        authService.logout(userId, refreshToken);
+        authService.logout(userId, refreshToken, null);
 
         // Assert
         verify(valueOperations).set(
-                eq("auth:token:blacklist:" + refreshToken),
+                eq("auth:token:blacklist:" + sha256(refreshToken)),
                 eq("1"),
                 eq(7L * 24 * 3600),
                 eq(TimeUnit.SECONDS)
         );
+    }
+
+    private static String sha256(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(input.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : hash) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 }

@@ -17,7 +17,11 @@ import java.util.List;
 @Component
 public class WakeUpArbiter {
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper;
+
+    public WakeUpArbiter(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
+    }
 
     /**
      * 解析 Arbiter Agent 的仲裁 JSON 结果

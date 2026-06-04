@@ -2,6 +2,7 @@ package com.zjkl.user.controller;
 
 import com.zjkl.common.Result;
 import com.zjkl.common.context.UserContext;
+import com.zjkl.common.util.RateLimiter;
 import com.zjkl.user.service.InterestTagGenerateService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
@@ -20,6 +21,7 @@ public class InterestTagController {
 
     private final InterestTagGenerateService interestTagGenerateService;
     private final UserContext userContext;
+    private final RateLimiter rateLimiter;
 
     /**
      * 手动触发兴趣标签生成（测试用）
@@ -31,6 +33,10 @@ public class InterestTagController {
         String userId = userContext.getUserId();
         if (userId == null || userId.isEmpty()) {
             return Result.error(401, "未认证用户无法生成标签");
+        }
+        // 限流：每用户每小时最多 1 次
+        if (!rateLimiter.tryAcquire("interest:tag:" + userId, 1, 3600_000L)) {
+            return Result.error(429, "操作过于频繁，请一小时后再试");
         }
         List<String> tags = interestTagGenerateService.generateTags(userId);
         return Result.success(Map.of(

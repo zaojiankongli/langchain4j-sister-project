@@ -12,7 +12,7 @@ public record MemorySearchFilters(
     /** 情感提示词，如 "开心的"、"难过的" — 用于 metadata.emotion_label 匹配 */
     String sentimentHint
 ) {
-    public static MemorySearchFilters EMPTY = new MemorySearchFilters(null, null, null);
+    public static final MemorySearchFilters EMPTY = new MemorySearchFilters(null, null, null);
 
     public boolean isEmpty() {
         return dateHint == null && topicHint == null && sentimentHint == null;
