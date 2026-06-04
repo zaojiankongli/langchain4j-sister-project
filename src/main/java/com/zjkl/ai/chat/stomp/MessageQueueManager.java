@@ -50,13 +50,15 @@ public class MessageQueueManager {
     }
 
     private boolean offerWithCapacityCheck(BlockingQueue<WebSocketMessage> queue, WebSocketMessage message, String userId) {
-        if (queue.remainingCapacity() == 0) {
-            log.warn("消息队列已满，丢弃最老消息：userId={}", userId);
-            queue.poll();
-        }
+        // M16: 先 offer，失败再 poll + 重试，避免 check-then-act 竞态
         boolean success = queue.offer(message);
         if (!success) {
-            log.error("消息入队失败：userId={}", userId);
+            log.warn("消息队列已满，丢弃最老消息：userId={}", userId);
+            queue.poll();
+            success = queue.offer(message);
+        }
+        if (!success) {
+            log.error("消息入队失败（重试后仍满）：userId={}", userId);
         } else {
             log.debug("消息已入队：userId={}, type={}, queueSize={}", userId, message.getType(), queue.size());
         }

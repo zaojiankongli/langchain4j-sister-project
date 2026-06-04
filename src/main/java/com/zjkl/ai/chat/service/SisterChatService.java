@@ -34,7 +34,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executors;
 import java.util.regex.Pattern;
 
 /**
@@ -161,13 +160,14 @@ public class SisterChatService {
             }
             RouterResult route = ragRouter.analyzeQuery(userInput, recentMessages);
 
-            // 双路 RAG 并行执行（虚拟线程），单路时仅执行对应路
-            try (var vThreadExecutor = Executors.newVirtualThreadPerTaskExecutor()) {
+            // 双路 RAG 并行执行（共享 asyncExecutor），单路时仅执行对应路
+            // M4: 使用注入的共享 executor，避免每次请求创建 ExecutorService
+            {
                 // Memory RAG 异步执行
                 final CompletableFuture<MemoryBlockResult> memoryFuture = route.needMemorySearch()
                     ? CompletableFuture.supplyAsync(
                         () -> summaryMemoryService.buildMemoryBlockWithScore(memoryId, userInput, route.toFilters()),
-                        vThreadExecutor)
+                        asyncExecutor)
                     : CompletableFuture.completedFuture(MemoryBlockResult.empty());
 
                 // Graph RAG 异步执行（snapshot 从 Redis 取，graphBlock 需要 LLM 调用）
@@ -175,9 +175,9 @@ public class SisterChatService {
                 final CompletableFuture<GraphResult> graphFuture;
                 if (route.needGraphSearch()) {
                     snapshotFuture = CompletableFuture.supplyAsync(
-                        () -> graphSnapshotService.getSnapshot(memoryId), vThreadExecutor);
+                        () -> graphSnapshotService.getSnapshot(memoryId), asyncExecutor);
                     graphFuture = CompletableFuture.supplyAsync(
-                        () -> graphQueryService.buildGraphBlock(memoryId, userInput), vThreadExecutor);
+                        () -> graphQueryService.buildGraphBlock(memoryId, userInput), asyncExecutor);
                 } else {
                     snapshotFuture = CompletableFuture.completedFuture("");
                     graphFuture = CompletableFuture.completedFuture(GraphResult.empty());

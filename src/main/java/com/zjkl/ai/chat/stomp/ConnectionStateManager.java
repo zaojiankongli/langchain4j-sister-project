@@ -292,8 +292,19 @@ public class ConnectionStateManager {
                 }
             }
         } finally {
-            log.debug("发送线程退出：queueKey={}", queueKey);
             senderThreads.remove(queueKey);
+            if (shuttingDown) {
+                log.debug("发送线程正常退出（关闭中）：queueKey={}", queueKey);
+            } else {
+                // M19: 异常退出时延迟重启，避免快速循环
+                log.warn("发送线程意外退出，将在 2s 后重启：queueKey={}", queueKey);
+                cleanupScheduler.schedule(() -> {
+                    if (!shuttingDown && queueManager.hasQueue(queueKey)) {
+                        log.info("重启发送线程：queueKey={}", queueKey);
+                        ensureSenderStarted(queueKey);
+                    }
+                }, 2, TimeUnit.SECONDS);
+            }
         }
     }
 
