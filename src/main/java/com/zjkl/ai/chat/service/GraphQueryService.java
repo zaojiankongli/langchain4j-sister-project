@@ -217,7 +217,10 @@ public class GraphQueryService {
                 relationFilter,
                 List.of("id", "text", "subject", "predicate", "object", "relation_type", "confidence", "timestamp")
         )) {
-            merged.put(relation.get("id").toString(), relation);
+            Object relationId = relation.get("id");
+            if (relationId != null) {
+                merged.put(relationId.toString(), relation);
+            }
         }
 
         Embedding embedding = embeddingModel.embed(question).content();

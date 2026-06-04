@@ -88,7 +88,7 @@ public class OssObjectKeyGenerator {
             return "jpg";
         }
         int lastDot = filename.lastIndexOf(".");
-        if (lastDot < 0) {
+        if (lastDot < 0 || lastDot == filename.length() - 1) {
             return "jpg";
         }
         return filename.substring(lastDot + 1).toLowerCase();

@@ -58,23 +58,6 @@ public class RecommendationController {
     }
 
     /**
-     * 获取当前用户的今日推荐（通过路径参数，与 UserContext 校验一致性）
-     * GET /ai/recom/user/{userId}
-     */
-    @GetMapping("/user/{userId}")
-    public Result<List<UserRecommendation>> getUserRecommendations(@PathVariable String userId) {
-        String currentUserId = userContext.getUserId();
-        if (currentUserId == null) {
-            return Result.unauthorized("请先登录");
-        }
-        if (!currentUserId.equals(userId)) {
-            return Result.error(403, "无权访问其他用户的推荐");
-        }
-        List<UserRecommendation> recommendations = recommendationService.getTodayRecommendations(userId);
-        return Result.success(recommendations);
-    }
-
-    /**
      * 标记推荐为已点击（仅限当前用户自己的推荐）
      * POST /ai/recom/click?id=xxx
      */

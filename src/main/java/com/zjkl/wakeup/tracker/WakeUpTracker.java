@@ -1,6 +1,5 @@
 package com.zjkl.wakeup.tracker;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zjkl.wakeup.tool.UserStateTool;
 import lombok.Data;
@@ -51,6 +50,52 @@ public class WakeUpTracker {
             "redis.call('SET', key, arr, 'EX', ttl)\n" +
             "return 1";
     private static final DefaultRedisScript<Long> ATOMIC_APPEND_SCRIPT = new DefaultRedisScript<>(ATOMIC_APPEND_LUA, Long.class);
+
+    /**
+     * Lua script for atomic markUserReplied.
+     * Scans forward through the JSON array, tracking each record's start position.
+     * For every "userReplied":false occurrence, checks the record's timestamp against
+     * the reply window and flips the flag if within range — all in a single atomic EVAL.
+     * KEYS[1] = record key, ARGV[1] = reply window millis, ARGV[2] = current time millis, ARGV[3] = TTL days.
+     */
+    private static final String MARK_REPLIED_LUA =
+            "local key = KEYS[1]\n" +
+            "local windowMs = tonumber(ARGV[1])\n" +
+            "local now = tonumber(ARGV[2])\n" +
+            "local ttlDays = tonumber(ARGV[3])\n" +
+            "local json = redis.call('GET', key)\n" +
+            "if not json then return 0 end\n" +
+            "local searchStr = '\"userReplied\":false'\n" +
+            "local tsPrefix = '\"timestamp\":'\n" +
+            "local searchLen = #searchStr\n" +
+            "local jsonLen = #json\n" +
+            "local searchPos = 1\n" +
+            "local recordStart = nil\n" +
+            "while searchPos <= jsonLen do\n" +
+            "  recordStart = string.find(json, '{', searchPos, true)\n" +
+            "  if not recordStart then break end\n" +
+            "  local nextRecStart = string.find(json, '{', recordStart + 1, true)\n" +
+            "  local recEnd = (nextRecStart and nextRecStart - 1) or jsonLen\n" +
+            "  local found = string.find(json, searchStr, recordStart, true)\n" +
+            "  if found and found <= recEnd then\n" +
+            "    local tsPos = string.find(json, tsPrefix, recordStart, true)\n" +
+            "    if tsPos and tsPos < found then\n" +
+            "      local tsEnd = string.find(json, ',', tsPos + #tsPrefix) or string.find(json, '}', tsPos + #tsPrefix)\n" +
+            "      if tsEnd then\n" +
+            "        local ts = tonumber(string.sub(json, tsPos + #tsPrefix, tsEnd - 1))\n" +
+            "        if ts and (now - ts) < windowMs then\n" +
+            "          local updated = string.sub(json, 1, found - 1) .. '\"userReplied\":true' .. string.sub(json, found + searchLen)\n" +
+            "          redis.call('SET', key, updated, 'EX', ttlDays * 86400)\n" +
+            "          return 1\n" +
+            "        end\n" +
+            "      end\n" +
+            "    end\n" +
+            "  end\n" +
+            "  searchPos = recEnd + 1\n" +
+            "end\n" +
+            "return 0";
+    private static final DefaultRedisScript<Long> MARK_REPLIED_SCRIPT = new DefaultRedisScript<>(MARK_REPLIED_LUA, Long.class);
+
     private static final long RECORD_TTL_SECONDS = Duration.ofDays(7).toSeconds();
 
     public SwapResult maybeSwap(List<String> candidates, int[] scores, int bestIndex) {
@@ -113,25 +158,15 @@ public class WakeUpTracker {
     public void markUserReplied(String userId) {
         try {
             String key = RECORD_KEY_PREFIX + userId + ":" + LocalDate.now().format(DATE_FMT);
-            String existing = redisTemplate.opsForValue().get(key);
-            if (existing == null) return;
+            long windowMs = REPLY_WINDOW_MINUTES * 60 * 1000;
+            long nowMs = System.currentTimeMillis();
 
-            List<WakeUpRecord> records = objectMapper.readValue(existing,
-                    objectMapper.getTypeFactory().constructCollectionType(List.class, WakeUpRecord.class));
-
-            long now = System.currentTimeMillis();
-            boolean updated = false;
-            for (int i = records.size() - 1; i >= 0; i--) {
-                WakeUpRecord record = records.get(i);
-                if (!record.isUserReplied() &&
-                        (now - record.getTimestamp()) < REPLY_WINDOW_MINUTES * 60 * 1000) {
-                    record.setUserReplied(true);
-                    updated = true;
-                    break;
-                }
-            }
-            if (updated) {
-                redisTemplate.opsForValue().set(key, objectMapper.writeValueAsString(records), Duration.ofDays(7));
+            Long result = redisTemplate.execute(MARK_REPLIED_SCRIPT,
+                    Collections.singletonList(key),
+                    String.valueOf(windowMs),
+                    String.valueOf(nowMs),
+                    "7");
+            if (result != null && result == 1L) {
                 log.debug("标记用户已回复唤醒消息: userId={}", userId);
             }
         } catch (Exception e) {

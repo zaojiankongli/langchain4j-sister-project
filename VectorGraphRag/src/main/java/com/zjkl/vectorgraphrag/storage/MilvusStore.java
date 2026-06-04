@@ -1,6 +1,5 @@
 package com.zjkl.vectorgraphrag.storage;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.zjkl.vectorgraphrag.config.VectorGraphRagSettings;
@@ -42,7 +41,6 @@ public class MilvusStore {
     private final VectorGraphRagSettings settings;
     private final EmbeddingClient embeddingClient;
     private final MilvusClientV2 client;
-    private final Gson gson;
 
     private final String entityCollection;
     private final String relationCollection;
@@ -51,7 +49,6 @@ public class MilvusStore {
     public MilvusStore(VectorGraphRagSettings settings, EmbeddingClient embeddingClient) {
         this.settings = settings;
         this.embeddingClient = embeddingClient;
-        this.gson = new Gson();
 
         ConnectConfig.ConnectConfigBuilder builder = ConnectConfig.builder()
                 .uri(settings.getMilvusUri());

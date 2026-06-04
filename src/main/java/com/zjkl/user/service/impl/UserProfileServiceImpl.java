@@ -16,6 +16,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import jakarta.annotation.PreDestroy;
+
 import java.io.IOException;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -98,17 +100,22 @@ public class UserProfileServiceImpl implements UserProfileService {
         vo.setCreatedAt(user.getCreatedAt());
         vo.setUpdatedAt(user.getUpdatedAt());
         
-        // 2-5. 并行执行无依赖的查询（虚拟线程 + CompletableFuture）
+        // 2-5. 并行执行无依赖的查询（虚拟线程 + CompletableFuture），单查询失败时降级为 null
         CompletableFuture<UserProfileVO.LevelInfo> levelFuture = CompletableFuture.supplyAsync(
-                () -> userProfileMapper.findLevelInfo(userId), virtualExecutor);
+                () -> userProfileMapper.findLevelInfo(userId), virtualExecutor)
+                .exceptionally(e -> { log.warn("获取等级信息失败: userId={}", userId, e); return null; });
         CompletableFuture<UserProfileVO.EmotionInfo> emotionFuture = CompletableFuture.supplyAsync(
-                () -> userProfileMapper.findLatestEmotion(userId), virtualExecutor);
+                () -> userProfileMapper.findLatestEmotion(userId), virtualExecutor)
+                .exceptionally(e -> { log.warn("获取情绪信息失败: userId={}", userId, e); return null; });
         CompletableFuture<List<String>> tagsFuture = CompletableFuture.supplyAsync(
-                () -> userProfileMapper.findInterestTags(userId), virtualExecutor);
+                () -> userProfileMapper.findInterestTags(userId), virtualExecutor)
+                .exceptionally(e -> { log.warn("获取兴趣标签失败: userId={}", userId, e); return List.of(); });
         CompletableFuture<Integer> countFuture = CompletableFuture.supplyAsync(
-                () -> userProfileMapper.countMessages(userId), virtualExecutor);
+                () -> userProfileMapper.countMessages(userId), virtualExecutor)
+                .exceptionally(e -> { log.warn("获取消息计数失败: userId={}", userId, e); return 0; });
         CompletableFuture<LocalDate> firstDateFuture = CompletableFuture.supplyAsync(
-                () -> userProfileMapper.findFirstChatDate(userId), virtualExecutor);
+                () -> userProfileMapper.findFirstChatDate(userId), virtualExecutor)
+                .exceptionally(e -> { log.warn("获取首次聊天日期失败: userId={}", userId, e); return null; });
 
         CompletableFuture.allOf(levelFuture, emotionFuture, tagsFuture, countFuture, firstDateFuture).join();
 
@@ -154,6 +161,11 @@ public class UserProfileServiceImpl implements UserProfileService {
         
         log.info("用户 {} 资料获取完成", userId);
         return vo;
+    }
+
+    @PreDestroy
+    void shutdown() {
+        virtualExecutor.shutdown();
     }
     
     @Override

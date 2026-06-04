@@ -113,23 +113,33 @@ public class Graph {
         List<String> entityIds = safeGetList(data, "entity_ids");
         List<String> relationIds = safeGetList(data, "relation_ids");
 
-        // Cascade: remove passage reference from entities
-        for (String eid : entityIds) {
-            List<Map<String, Object>> entities = store.getEntitiesByIds(List.of(eid));
-            if (!entities.isEmpty()) {
-                List<String> pids = safeGetList(entities.get(0), "passage_ids");
+        // Cascade: remove passage reference from entities (batch fetch)
+        if (!entityIds.isEmpty()) {
+            List<Map<String, Object>> allEntities = store.getEntitiesByIds(entityIds);
+            Map<String, Map<String, Object>> entityMap = new HashMap<>();
+            for (Map<String, Object> ent : allEntities) {
+                String eid = safeGet(ent, "id");
+                if (!eid.isEmpty()) entityMap.put(eid, ent);
+            }
+            for (Map.Entry<String, Map<String, Object>> entry : entityMap.entrySet()) {
+                List<String> pids = safeGetList(entry.getValue(), "passage_ids");
                 pids.remove(passageId);
-                store.upsertEntity(eid, null, null, null, pids);
+                store.upsertEntity(entry.getKey(), null, null, null, pids);
             }
         }
 
-        // Cascade: remove passage reference from relations
-        for (String rid : relationIds) {
-            List<Map<String, Object>> rels = store.getRelationsByIds(List.of(rid));
-            if (!rels.isEmpty()) {
-                List<String> pids = safeGetList(rels.get(0), "passage_ids");
+        // Cascade: remove passage reference from relations (batch fetch)
+        if (!relationIds.isEmpty()) {
+            List<Map<String, Object>> allRelations = store.getRelationsByIds(relationIds);
+            Map<String, Map<String, Object>> relationMap = new HashMap<>();
+            for (Map<String, Object> rel : allRelations) {
+                String rid = safeGet(rel, "id");
+                if (!rid.isEmpty()) relationMap.put(rid, rel);
+            }
+            for (Map.Entry<String, Map<String, Object>> entry : relationMap.entrySet()) {
+                List<String> pids = safeGetList(entry.getValue(), "passage_ids");
                 pids.remove(passageId);
-                store.upsertRelation(rid, null, null, null, pids, null, null, null);
+                store.upsertRelation(entry.getKey(), null, null, null, pids, null, null, null);
             }
         }
 
@@ -147,7 +157,7 @@ public class Graph {
 
         if (relationTextToId.containsKey(relationText)) {
             String existingId = relationTextToId.get(relationText);
-            if (passageIds != null && !passageIds.isEmpty()) {
+            if (existingId != null && passageIds != null && !passageIds.isEmpty()) {
                 List<Map<String, Object>> existing = store.getRelationsByIds(List.of(existingId));
                 if (!existing.isEmpty()) {
                     List<String> currentPids = safeGetList(existing.get(0), "passage_ids");
@@ -179,15 +189,15 @@ public class Graph {
         store.insertRelations(List.of(relationText), List.of(relationId),
                 List.of(embedding), List.of(metadata), false);
 
-        relationTextToId.put(relationText, relationId);
-        return relationId;
+        String canonical = relationTextToId.putIfAbsent(relationText, relationId);
+        return canonical != null ? canonical : relationId;
     }
 
     private String createEntity(String name, List<String> relationIds, List<String> passageIds) {
         String normalized = normalizePhrase(name);
         if (entityNameToId.containsKey(normalized)) {
             String existingId = entityNameToId.get(normalized);
-            if (relationIds != null || passageIds != null) {
+            if (existingId != null && (relationIds != null || passageIds != null)) {
                 List<Map<String, Object>> existing = store.getEntitiesByIds(List.of(existingId));
                 if (!existing.isEmpty()) {
                     List<String> currentRels = safeGetList(existing.get(0), "relation_ids");
@@ -214,8 +224,8 @@ public class Graph {
         store.insertEntities(List.of(normalized), List.of(entityId),
                 List.of(embedding), metadatas, false);
 
-        entityNameToId.put(normalized, entityId);
-        return entityId;
+        String canonical = entityNameToId.putIfAbsent(normalized, entityId);
+        return canonical != null ? canonical : entityId;
     }
 
     // ==================== SubGraph Creation ====================

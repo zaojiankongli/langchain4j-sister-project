@@ -30,7 +30,7 @@ public class MailService {
     private static final String MAIL_CACHE_KEY_PREFIX = "user:mails:";
     private static final Duration REDIS_TTL = Duration.ofMinutes(5);
     private static final String WELCOME_FLAG_KEY_PREFIX = "mail:welcome:";
-    private static final Duration WELCOME_FLAG_TTL = Duration.ofHours(1);
+    private static final Duration WELCOME_FLAG_TTL = Duration.ofDays(1);
 
     private final MailMessageMapper mailMapper;
     private final StringRedisTemplate redisTemplate;
@@ -58,12 +58,16 @@ public class MailService {
             Boolean isFirstTime = redisTemplate.opsForValue().setIfAbsent(welcomeKey, "1", WELCOME_FLAG_TTL);
             if (Boolean.TRUE.equals(isFirstTime)) {
                 mailMapper.insertWelcomeMails(userId);
+                // Invalidate cache that might have been populated by a concurrent getMails
+                redisTemplate.delete(MAIL_CACHE_KEY_PREFIX + userId);
             }
             mails = mailMapper.selectByUserId(userId);
         }
 
-        // 3. 回写 Redis
-        saveToRedis(userId, mails);
+        // 3. 回写 Redis（跳过空结果 + SETNX 防止覆盖 addMail() 的缓存失效）
+        if (mails != null && !mails.isEmpty()) {
+            saveToRedisIfAbsent(userId, mails);
+        }
         return mails;
     }
 
@@ -116,6 +120,23 @@ public class MailService {
             redisTemplate.opsForValue().set(MAIL_CACHE_KEY_PREFIX + userId, json, REDIS_TTL);
         } catch (Exception e) {
             log.warn("写入 Redis 邮件缓存失败: userId={}", userId, e);
+        }
+    }
+
+    /**
+     * SETNX-based cache write: only populates if the key does not already exist.
+     * Prevents overwriting a cache invalidation triggered by a concurrent addMail().
+     */
+    private void saveToRedisIfAbsent(String userId, List<MailMessage> mails) {
+        try {
+            String json = objectMapper.writeValueAsString(mails);
+            Boolean set = redisTemplate.opsForValue().setIfAbsent(MAIL_CACHE_KEY_PREFIX + userId, json, REDIS_TTL);
+            if (Boolean.FALSE.equals(set)) {
+                // Key already exists — a concurrent operation may have re-populated or invalidated it; leave as-is
+                log.debug("Redis 邮件缓存已存在，跳过 SETNX 写入: userId={}", userId);
+            }
+        } catch (Exception e) {
+            log.warn("写入 Redis 邮件缓存失败 (SETNX): userId={}", userId, e);
         }
     }
 }

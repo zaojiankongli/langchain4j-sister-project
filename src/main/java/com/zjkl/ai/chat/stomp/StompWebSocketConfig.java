@@ -1,6 +1,7 @@
 package com.zjkl.ai.chat.stomp;
 
 import com.zjkl.common.config.properties.WebSocketProperties;
+import com.zjkl.common.util.HashUtil;
 import com.zjkl.common.util.JwtUtil;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Configuration;
@@ -89,7 +90,8 @@ public class StompWebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
                     try {
                         // 检查 access token 是否已被吊销（黑名单）
-                        if (Boolean.TRUE.equals(redisTemplate.hasKey(TOKEN_BLACKLIST_PREFIX + token))) {
+                        String tokenHash = HashUtil.sha256Hex(token);
+                        if (Boolean.TRUE.equals(redisTemplate.hasKey(TOKEN_BLACKLIST_PREFIX + tokenHash))) {
                             log.warn("STOMP CONNECT 认证失败：Token 已被吊销");
                             throw new IllegalArgumentException(STOMP_AUTH_FAILED_MESSAGE);
                         }
@@ -131,12 +133,18 @@ public class StompWebSocketConfig implements WebSocketMessageBrokerConfigurer {
                         //    Spring 会将 /user/queue/* 解析为 /queue/*-user{userId}
                         if (destination.startsWith("/user/")) {
                             String[] parts = destination.split("/");
-                            if (parts.length >= 4) {
-                                // /user/{userId}/queue/... 或 /user/{userId}/topic/...
+                            if (parts.length == 4) {
+                                // /user/queue/... 或 /user/topic/...（标准 Spring STOMP 简写，仅限当前用户）
                                 String embedded = parts[2];
-                                if (("queue".equals(embedded) || "topic".equals(embedded))) {
+                                if ("queue".equals(embedded) || "topic".equals(embedded)) {
                                     allowed = true;
-                                } else if (embedded.equals(user.getName())) {
+                                }
+                            } else if (parts.length >= 5) {
+                                // /user/{userId}/queue/... 或 /user/{userId}/topic/...（含显式 userId）
+                                String embeddedUserId = parts[2];
+                                String embedded = parts[3];
+                                if (("queue".equals(embedded) || "topic".equals(embedded))
+                                        && embeddedUserId.equals(user.getName())) {
                                     allowed = true;
                                 }
                             }

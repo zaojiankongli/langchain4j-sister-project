@@ -164,7 +164,7 @@ public class PeekScheduler {
         if (current > peekProperties.getMaxConcurrentRequests()) {
             redisTemplate.delete(requestLockKey);
             log.warn("peek 全局速率限制，跳过：userId={}", userId);
-            return 1;
+            return 0;
         }
 
         String redisKey = null;

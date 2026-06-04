@@ -148,7 +148,11 @@ public class EmotionAnchorSemanticService {
 
     void applySemanticFields(EmotionAnchorEvent event, JsonNode jsonNode) {
         setIfPresent(event, "eventTitle", jsonNode, event::setEventTitle);
-        setIfPresent(event, "triggerBehavior", jsonNode, event::setTriggerReason);
+        setIfPresent(event, "triggerBehavior", jsonNode, value -> {
+            // 保留原始技术触发原因，拼接 AI 语义行为描述
+            String original = event.getTriggerReason();
+            event.setTriggerReason(original != null ? original + " | " + value : value);
+        });
         setIfPresent(event, "highlightTraits", jsonNode, event::setHighlightTraits);
         setIfPresent(event, "summary", jsonNode, event::setSummary);
         setIfPresent(event, "endReason", jsonNode, event::setEndReason);
@@ -165,7 +169,12 @@ public class EmotionAnchorSemanticService {
 
     void applySemanticFieldsFromText(EmotionAnchorEvent event, String json) {
         setIfPresent(event, extractField(json, "eventTitle"), event::setEventTitle);
-        setIfPresent(event, extractField(json, "triggerBehavior"), event::setTriggerReason);
+        String triggerBehavior = extractField(json, "triggerBehavior");
+        if (triggerBehavior != null && !triggerBehavior.isBlank()) {
+            // 保留原始技术触发原因，拼接 AI 语义行为描述
+            String original = event.getTriggerReason();
+            event.setTriggerReason(original != null ? original + " | " + triggerBehavior : triggerBehavior);
+        }
         setIfPresent(event, extractField(json, "highlightTraits"), event::setHighlightTraits);
         setIfPresent(event, extractField(json, "summary"), event::setSummary);
         setIfPresent(event, extractField(json, "endReason"), event::setEndReason);

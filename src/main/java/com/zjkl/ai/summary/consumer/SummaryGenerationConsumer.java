@@ -73,7 +73,7 @@ public class SummaryGenerationConsumer extends AbstractStreamConsumer {
         RLock lock = redissonClient.getLock("daily-summary-lock:" + taskId);
         boolean locked = false;
         try {
-            locked = lock.tryLock(1, 30, TimeUnit.SECONDS);
+            locked = lock.tryLock(1, 120, TimeUnit.SECONDS);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             log.warn("获取摘要锁被中断：taskId={}", taskId);

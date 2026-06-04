@@ -8,6 +8,7 @@ import com.zjkl.user.domain.User;
 import com.zjkl.user.mapper.UserProfileMapper;
 import com.zjkl.user.service.InterestTagGenerateService;
 import dev.langchain4j.agentic.UntypedAgent;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
@@ -113,6 +114,11 @@ public class InterestTagGenerateServiceImpl implements InterestTagGenerateServic
             log.error("用户 {} 标签生成失败", userId, e);
             throw new RuntimeException("标签生成失败: " + userId, e);
         }
+    }
+
+    @PreDestroy
+    void shutdown() {
+        virtualExecutor.shutdown();
     }
 
     /**

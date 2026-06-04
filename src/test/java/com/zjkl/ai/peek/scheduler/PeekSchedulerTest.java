@@ -117,7 +117,7 @@ class PeekSchedulerTest {
 
         int result = (int) ReflectionTestUtils.invokeMethod(scheduler, "processUserPeek", "u1", timeContext);
 
-        assertEquals(1, result);
+        assertEquals(0, result);
         verify(redisTemplate).delete("peek:request-lock:u1");
         verify(chatPushService, never()).pushPeekRequest(eq("u1"), anyString());
     }

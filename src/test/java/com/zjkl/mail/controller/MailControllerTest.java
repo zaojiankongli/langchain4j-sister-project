@@ -2,7 +2,6 @@ package com.zjkl.mail.controller;
 
 import com.zjkl.common.Result;
 import com.zjkl.common.context.UserContext;
-import com.zjkl.common.util.RateLimiter;
 import com.zjkl.mail.service.MailService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,14 +23,11 @@ class MailControllerTest {
     @Mock
     private UserContext userContext;
 
-    @Mock
-    private RateLimiter rateLimiter;
-
     private MailController mailController;
 
     @BeforeEach
     void setUp() {
-        mailController = new MailController(mailService, userContext, rateLimiter);
+        mailController = new MailController(mailService, userContext);
     }
 
     @Test

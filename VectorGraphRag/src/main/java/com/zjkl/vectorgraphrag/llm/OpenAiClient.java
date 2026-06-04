@@ -61,7 +61,7 @@ public class OpenAiClient {
         }
         messages.add(buildMessage("user", userPrompt));
 
-        String response = executeChat(messages, true);
+        String response = executeChat(messages);
 
         String content = extractContentFromResponse(response);
 
@@ -92,7 +92,7 @@ public class OpenAiClient {
             messages.add(buildMessage(msg.get("role"), msg.get("content")));
         }
 
-        String response = executeChat(messages, false);
+        String response = executeChat(messages);
 
         String content = extractContentFromResponse(response);
 
@@ -157,7 +157,7 @@ public class OpenAiClient {
      * Note: response_format is intentionally NOT set here for Qwen compatibility.
      * JSON output is guided via prompt instructions in each extractor/reranker.
      */
-    private String executeChat(JsonArray messages, boolean responseJson) {
+    private String executeChat(JsonArray messages) {
         JsonObject body = new JsonObject();
         body.addProperty("model", settings.getLlmModel());
         body.addProperty("temperature", settings.getLlmTemperature());

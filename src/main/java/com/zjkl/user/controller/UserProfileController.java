@@ -69,7 +69,8 @@ public class UserProfileController {
         if (userId == null) {
             return Result.unauthorized("请先登录");
         }
-        log.info("用户 {} 更新基本信息: username={}, gender={}", userId, username, gender);
+        log.info("用户 {} 更新基本信息: username={}, gender={}", userId,
+                username != null ? username.replaceAll("[\\r\\n]", "") : null, gender);
         userProfileService.updateBasic(userId, username, gender);
         return Result.success();
     }

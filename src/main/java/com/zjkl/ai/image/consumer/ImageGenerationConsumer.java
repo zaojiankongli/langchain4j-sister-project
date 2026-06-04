@@ -91,6 +91,7 @@ public class ImageGenerationConsumer extends AbstractStreamConsumer {
                 try {
                     if (throwable != null) {
                         log.error("图片生成最终失败（含降级），记忆未入库：taskId={}, userId={}", taskId, userId, throwable);
+                        acknowledge(recordId);
                         return;
                     }
                     if (!running.get()) {

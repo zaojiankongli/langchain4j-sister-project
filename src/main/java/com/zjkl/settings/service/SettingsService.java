@@ -81,7 +81,7 @@ public class SettingsService {
     /**
      * 保存用户配置（MySQL + Redis + Caffeine）
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void saveSettings(String userId, UserSettings settings) {
         // 1. MySQL 持久化
         settingsMapper.upsert(userId, settings);
@@ -100,7 +100,7 @@ public class SettingsService {
      * 注意：@Transactional 只覆盖 MySQL 操作。Redis 写入不在事务范围内，
      * 失败时通过 restoreNonTransactionalState() 进行补偿回滚。
      */
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public void saveSettingsWithPersonality(String userId, UserSettings settings) {
         UserSettings previousSettings = settingsMapper.findByUserId(userId);
         try {

@@ -7,6 +7,8 @@ import com.zjkl.user.service.InterestTagGenerateService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
+import jakarta.annotation.PreDestroy;
+
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -49,6 +51,11 @@ public class InterestTagController {
                 // 已在 service 层记录日志
             }
         }, tagExecutor);
-        return Result.error(202, "标签生成任务已提交，请稍后查看");
+        return Result.success(Map.of("status", "accepted", "message", "标签生成任务已提交，请稍后查看"));
+    }
+
+    @PreDestroy
+    void shutdown() {
+        tagExecutor.shutdown();
     }
 }

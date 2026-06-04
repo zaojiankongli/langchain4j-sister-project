@@ -381,7 +381,7 @@ public class GraphEntityService {
         rewriteRelations(userId, keepText, removeText);
         milvusClientV2.delete(DeleteReq.builder()
                 .collectionName(milvusProperties.getGraphEntityCollectionName())
-                .filter("id == \"" + remove.get("id") + "\"")
+                .filter("id == \"" + MilvusQueryUtil.escape(remove.get("id").toString()) + "\"")
                 .build());
     }
 

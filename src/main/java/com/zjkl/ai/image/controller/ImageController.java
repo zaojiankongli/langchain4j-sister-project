@@ -84,7 +84,7 @@ public class ImageController {
      * SSRF 防护：校验 URL 必须使用 HTTPS 且目标地址不能是内网 IP。
      */
     private void validateRemoteUrl(String url) {
-        if (url == null || !url.matches("^https://.*")) {
+        if (url == null || !url.matches("^https://.+")) {
             throw new IllegalArgumentException("URL must use HTTPS");
         }
         try {

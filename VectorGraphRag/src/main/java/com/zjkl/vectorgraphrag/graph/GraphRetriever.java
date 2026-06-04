@@ -143,14 +143,12 @@ public class GraphRetriever {
             if (filteredExpandedIds.size() <= threshold) {
                 // No eviction needed
                 expandedIds = filteredExpandedIds;
+                Map<String, String> relTextLookup = new HashMap<>();
+                for (SubGraphRelation r : subgraph.getRelations()) {
+                    relTextLookup.put(r.getId(), r.getText());
+                }
                 expandedTexts = filteredExpandedIds.stream()
-                        .map(rid -> {
-                            SubGraphRelation rel = null;
-                            for (SubGraphRelation r : subgraph.getRelations()) {
-                                if (r.getId().equals(rid)) { rel = r; break; }
-                            }
-                            return rel != null ? rel.getText() : "";
-                        })
+                        .map(rid -> relTextLookup.getOrDefault(rid, ""))
                         .collect(Collectors.toList());
             } else {
                 // Eviction: use vector search to filter

@@ -24,17 +24,20 @@ public class Triplet {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (!(o instanceof Triplet triplet)) return false;
-        return subject.equalsIgnoreCase(triplet.subject)
-                && predicate.equalsIgnoreCase(triplet.predicate)
-                && object.equalsIgnoreCase(triplet.object);
+        return Objects.equals(subject != null ? subject.toLowerCase() : null,
+                              triplet.subject != null ? triplet.subject.toLowerCase() : null)
+            && Objects.equals(predicate != null ? predicate.toLowerCase() : null,
+                              triplet.predicate != null ? triplet.predicate.toLowerCase() : null)
+            && Objects.equals(object != null ? object.toLowerCase() : null,
+                              triplet.object != null ? triplet.object.toLowerCase() : null);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(
-                subject.toLowerCase(),
-                predicate.toLowerCase(),
-                object.toLowerCase()
+                subject != null ? subject.toLowerCase() : null,
+                predicate != null ? predicate.toLowerCase() : null,
+                object != null ? object.toLowerCase() : null
         );
     }
 }

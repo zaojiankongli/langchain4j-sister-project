@@ -205,9 +205,9 @@ public class SubGraph {
         List<Map<String, Object>> results = store.getRelationsByIds(toFetch);
         for (Map<String, Object> r : results) {
             String text = safeGet(r, "text");
-            String subject = r.getOrDefault("subject", "").toString();
-            String predicate = r.getOrDefault("predicate", "").toString();
-            String obj = r.getOrDefault("object", "").toString();
+            String subject = safeGet(r, "subject");
+            String predicate = safeGet(r, "predicate");
+            String obj = safeGet(r, "object");
 
             // Fallback parsing
             if (subject.isEmpty() && predicate.isEmpty() && obj.isEmpty()) {

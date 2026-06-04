@@ -24,11 +24,18 @@ public class EmbeddingClient {
     }
 
     public int getDimension() {
-        if (dimension == null) {
-            List<Float> test = embed("test");
-            dimension = test.size();
+        Integer d = dimension;
+        if (d == null) {
+            synchronized (this) {
+                d = dimension;
+                if (d == null) {
+                    List<Float> test = embed("test");
+                    d = test.size();
+                    dimension = d;
+                }
+            }
         }
-        return dimension;
+        return d;
     }
 
     public List<Float> embed(String text) {

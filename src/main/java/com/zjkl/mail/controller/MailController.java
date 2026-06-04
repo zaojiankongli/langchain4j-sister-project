@@ -2,7 +2,6 @@ package com.zjkl.mail.controller;
 
 import com.zjkl.common.context.UserContext;
 import com.zjkl.common.Result;
-import com.zjkl.common.util.RateLimiter;
 import com.zjkl.mail.entity.MailMessage;
 import com.zjkl.mail.service.MailService;
 import lombok.RequiredArgsConstructor;
@@ -22,7 +21,6 @@ public class MailController {
 
     private final MailService mailService;
     private final UserContext userContext;
-    private final RateLimiter rateLimiter;
 
     /**
      * 获取当前用户信件列表

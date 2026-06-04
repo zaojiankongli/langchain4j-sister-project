@@ -62,7 +62,7 @@ class SummaryGenerationConsumerTest {
         when(record.getValue()).thenReturn(value);
         when(setOperations.isMember(anyString(), anyString())).thenReturn(false);
         when(redissonClient.getLock("daily-summary-lock:12345")).thenReturn(lock);
-        when(lock.tryLock(1, 30, TimeUnit.SECONDS)).thenReturn(true);
+        when(lock.tryLock(1, 120, TimeUnit.SECONDS)).thenReturn(true);
         when(lock.isHeldByCurrentThread()).thenReturn(true);
         when(redisTemplate.opsForStream()).thenReturn(streamOperations);
 
@@ -89,7 +89,7 @@ class SummaryGenerationConsumerTest {
         when(record.getValue()).thenReturn(value);
         when(setOperations.isMember(anyString(), anyString())).thenReturn(false);
         when(redissonClient.getLock("daily-summary-lock:12345")).thenReturn(lock);
-        when(lock.tryLock(1, 30, TimeUnit.SECONDS)).thenReturn(false);
+        when(lock.tryLock(1, 120, TimeUnit.SECONDS)).thenReturn(false);
 
         consumer.processMessage(record);
 

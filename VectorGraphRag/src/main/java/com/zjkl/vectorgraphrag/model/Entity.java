@@ -21,11 +21,12 @@ public class Entity {
     public boolean equals(Object o) {
         if (this == o) return true;
         if (!(o instanceof Entity entity)) return false;
-        return name.equalsIgnoreCase(entity.name);
+        return Objects.equals(name != null ? name.toLowerCase() : null,
+                              entity.name != null ? entity.name.toLowerCase() : null);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(name.toLowerCase());
+        return Objects.hash(name != null ? name.toLowerCase() : null);
     }
 }

@@ -70,7 +70,7 @@ class SummaryGenerationConsumerDeadLetterTest {
         when(record.getValue()).thenReturn(value);
         when(setOperations.isMember(anyString(), anyString())).thenReturn(false);
         when(redissonClient.getLock("daily-summary-lock:task-1")).thenReturn(lock);
-        when(lock.tryLock(1, 30, TimeUnit.SECONDS)).thenReturn(true);
+        when(lock.tryLock(1, 120, TimeUnit.SECONDS)).thenReturn(true);
         when(lock.isHeldByCurrentThread()).thenReturn(true);
         when(valueOperations.increment("daily-summary:retry:task-1")).thenReturn(3L);
 

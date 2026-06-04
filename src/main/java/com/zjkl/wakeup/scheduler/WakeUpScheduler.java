@@ -31,7 +31,7 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-        import java.nio.ByteBuffer;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -42,7 +42,6 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Supplier;
 
 /**
  * 主动唤醒调度 — Agentic 架构：
@@ -166,6 +165,7 @@ public class WakeUpScheduler {
             return 0;
         }
 
+        boolean processed = false;
         try {
 
             // === 1. 过滤条件 ===
@@ -205,7 +205,10 @@ public class WakeUpScheduler {
                 return 1;
             }
 
-        // === 2. 构建上下文 ===
+            // All filter checks passed — real work starts here
+            processed = true;
+
+            // === 2. 构建上下文 ===
         UserStateTool.UserStateSnapshot state = userStateTool.buildStateSnapshot(
                 userId, timeContext, isDnd, silentHours, minutesSinceLastWakeup);
         String anchorHint = promptBuilder.buildAnchorHint(state);
@@ -395,8 +398,10 @@ public class WakeUpScheduler {
 
         return 3;
         } finally {
-            // 设置短 TTL 而非立即删除，防止并发窗口内的重复执行
-            redisTemplate.expire(processingKey, 60, TimeUnit.SECONDS);
+            // 仅在实际执行了处理流程时缩短 TTL；早退（DND/冷却等）保留完整 TTL 防止重复处理
+            if (processed) {
+                redisTemplate.expire(processingKey, 60, TimeUnit.SECONDS);
+            }
             if (semAcquired) {
                 wakeupConcurrency.release();
             }

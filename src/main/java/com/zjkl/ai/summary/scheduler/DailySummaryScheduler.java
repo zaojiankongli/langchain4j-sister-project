@@ -43,7 +43,6 @@ public class DailySummaryScheduler {
      * cron 表达式：秒 分 时 日 月 周
      * 0 0 0 * * ? = 每天 00:00:00 执行
      */
-   /* @Scheduled(cron = "0/60 * * * * ?")*/
     @Scheduled(cron = "0 0 0 * * ?")
     public void generateDailySummary() {
         log.info("========== 开始执行每日摘要生成任务 ==========");

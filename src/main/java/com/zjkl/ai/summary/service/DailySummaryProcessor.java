@@ -79,7 +79,7 @@ public class DailySummaryProcessor {
                 .userId(userId)
                 .title(result.title())
                 .summary(result.summary())
-                .memoryDate(LocalDate.now())
+                .memoryDate(LocalDate.now().minusDays(1))
                 .createdAt(taskCreatedAt)
                 .build();
 
