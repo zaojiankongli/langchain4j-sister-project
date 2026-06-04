@@ -34,6 +34,11 @@ public class ChatPushServiceImpl implements ChatPushService {
     }
 
     @Override
+    public void pushEmotionUpdate(String userId, double pleasure, double arousal, double dominance, String moodLabel, String moodDescription) {
+        connectionStateManager.pushEmotionUpdate(userId, pleasure, arousal, dominance, moodLabel, moodDescription);
+    }
+
+    @Override
     public void pushSystem(String userId, String content) {
         connectionStateManager.pushSystem(userId, content);
     }
@@ -66,6 +71,7 @@ public class ChatPushServiceImpl implements ChatPushService {
 
     @Override
     public void onUserDisconnected(String userId) {
+        heartbeatChecker.clearActiveTime(userId);
         connectionStateManager.onUserDisconnected(userId);
     }
 

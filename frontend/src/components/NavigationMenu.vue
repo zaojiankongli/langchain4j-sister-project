@@ -1,12 +1,12 @@
 <template>
-  <transition-group name="menu-pop">
-    <div v-if="visible" key="radial-menu" class="radial-menu-container">
+  <transition name="menu-pop">
+    <div v-if="visible" class="radial-menu-container">
       <div
         v-for="(item, index) in navItems"
         :key="item.path"
         class="menu-bubble"
         :class="{ 'active-bubble': activeTab === item.path }"
-        :style="getBubbleStyle(index)"
+        :style="bubbleStyles[index]"
         @click.stop="$emit('navigate', item)"
       >
         <div class="bubble-inner">
@@ -14,7 +14,7 @@
         </div>
       </div>
     </div>
-  </transition-group>
+  </transition>
 </template>
 
 <script setup>
@@ -31,18 +31,20 @@ const navItems = [
   { name: '灵魂的颜色', shortName: '设置', path: 'emotion' },
   { name: '成长轨迹', shortName: '轨迹', path: 'relation' },
   { name: '为你推荐', shortName: '推荐', path: 'action' },
+  { name: '灵魂调谐', shortName: '调谐', path: 'settings' },
 ]
 
-const getBubbleStyle = (index) => {
-  const total = navItems.length
-  const angle = 135 + (index * (225 - 135) / (total - 1))
+// 预计算气泡位置样式（navItems 是静态的，避免每次渲染创建新对象）
+const RADIUS = 240
+const TOTAL = navItems.length
+const bubbleStyles = navItems.map((_, index) => {
+  const angle = 135 + (index * (225 - 135) / (TOTAL - 1))
   const radian = (angle * Math.PI) / 180
-  const radius = 240
   return {
-    transform: `translate(${Math.cos(radian) * radius}px, ${Math.sin(radian) * radius}px)`,
+    transform: `translate(${Math.cos(radian) * RADIUS}px, ${Math.sin(radian) * RADIUS}px)`,
     transitionDelay: `${index * 50}ms`
   }
-}
+})
 </script>
 
 <style scoped>
@@ -95,7 +97,16 @@ const getBubbleStyle = (index) => {
   transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
+.menu-pop-leave-active {
+  transition: all 0.3s cubic-bezier(0.6, 0, 0.4, 1);
+}
+
 .menu-pop-enter-from {
+  opacity: 0;
+  transform: scale(0.5);
+}
+
+.menu-pop-leave-to {
   opacity: 0;
   transform: scale(0.5);
 }

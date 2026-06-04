@@ -29,11 +29,11 @@ public class DeltaEmotion {
         return new DeltaEmotion(SHY_P * intensity, SHY_A * intensity, SHY_D * intensity);
     }
 
-    public DeltaEmotion clamp() {
-        this.deltaP = clamp(this.deltaP);
-        this.deltaA = clamp(this.deltaA);
-        this.deltaD = clamp(this.deltaD);
-        return this;
+    /**
+     * 返回一个新的 DeltaEmotion，各分量限制在 [-1, 1] 范围内
+     */
+    public DeltaEmotion clamped() {
+        return new DeltaEmotion(clamp(this.deltaP), clamp(this.deltaA), clamp(this.deltaD));
     }
 
     private static Double clamp(Double value) {

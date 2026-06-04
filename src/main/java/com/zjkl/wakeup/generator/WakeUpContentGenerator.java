@@ -43,7 +43,7 @@ public class WakeUpContentGenerator {
             VoiceSynthesisParam vp = parseVoiceParams(node.path("voiceParams"));
             return new GeneratorOutput(message, vp);
         } catch (Exception e) {
-            log.warn("解析 Generator JSON 失败: {}", raw, e);
+            log.warn("解析 Generator JSON 失败: rawLength={}", raw != null ? raw.length() : 0, e);
             return null;
         }
     }

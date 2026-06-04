@@ -4,13 +4,14 @@
  */
 
 import { STORAGE_KEYS } from '@/config/storage'
+import { safeGet, safeSet, safeRemove, safeGetJSON } from '@/utils/storage'
 
 /**
  * 获取访问令牌
  * @returns {string|null}
  */
 export function getAccessToken() {
-  return localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN);
+  return safeGet(STORAGE_KEYS.ACCESS_TOKEN);
 }
 
 /**
@@ -20,10 +21,10 @@ export function getAccessToken() {
  * @param {Object} user - 用户信息
  */
 export function setToken(accessToken, refreshToken, user) {
-  localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, accessToken);
-  localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken);
+  safeSet(STORAGE_KEYS.ACCESS_TOKEN, accessToken);
+  safeSet(STORAGE_KEYS.REFRESH_TOKEN, refreshToken);
   if (user) {
-    localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user));
+    safeSetJSON(STORAGE_KEYS.USER, user);
   }
 }
 
@@ -31,9 +32,9 @@ export function setToken(accessToken, refreshToken, user) {
  * 清除所有认证信息（退出登录）
  */
 export function clearToken() {
-  localStorage.removeItem(STORAGE_KEYS.ACCESS_TOKEN);
-  localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN);
-  localStorage.removeItem(STORAGE_KEYS.USER);
+  safeRemove(STORAGE_KEYS.ACCESS_TOKEN);
+  safeRemove(STORAGE_KEYS.REFRESH_TOKEN);
+  safeRemove(STORAGE_KEYS.USER);
 }
 
 /**
@@ -41,25 +42,20 @@ export function clearToken() {
  * @returns {string|null}
  */
 export function getUserId() {
-  const userStr = localStorage.getItem(STORAGE_KEYS.USER);
-  if (userStr) {
-    try {
-      const user = JSON.parse(userStr);
-      if (user && (user.id || user.userId)) {
-        return user.id || user.userId;
-      }
-    } catch {
-    }
+  const userData = safeGetJSON(STORAGE_KEYS.USER)
+  if (userData && (userData.id || userData.userId)) {
+    return userData.id || userData.userId;
   }
 
-  const token = getAccessToken();
-  if (token) {
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]));
-      return payload.sub || payload.userId || payload.id;
-    } catch {
-    }
-  }
+   const token = getAccessToken();
+   if (token) {
+     try {
+       const payload = JSON.parse(atob(token.split('.')[1]));
+       return payload.sub || payload.userId || payload.id;
+     } catch (error) {
+       console.warn('解析token payload失败:', error, token)
+     }
+   }
 
   return null;
 }

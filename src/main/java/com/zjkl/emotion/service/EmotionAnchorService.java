@@ -1,5 +1,6 @@
 package com.zjkl.emotion.service;
 
+import com.zjkl.common.config.properties.EmotionProperties;
 import com.zjkl.emotion.mapper.EmotionAnchorMapper;
 import com.zjkl.emotion.model.EmotionalState;
 import com.zjkl.emotion.model.EmotionAnchorEvent;
@@ -31,6 +32,7 @@ public class EmotionAnchorService {
     private final EmotionAnchorMonitor anchorMonitor;
     private final EmotionAnchorSemanticService semanticService;
     private final ApplicationEventPublisher eventPublisher;
+    private final EmotionProperties emotionProperties;
 
     private final ConcurrentHashMap<String, Long> activeEventIds = new ConcurrentHashMap<>();
 
@@ -38,6 +40,12 @@ public class EmotionAnchorService {
     public void init() {
         anchorMonitor.setOnTrigger(this::handleAnchorTriggered);
         anchorMonitor.setOnEnd(this::handleAnchorEnded);
+
+        // 服务重启后，只关闭超过最大持续时长的残留锚点事件
+        int closed = anchorMapper.closeStaleEvents(emotionProperties.getAnchorMaxDurationMinutes());
+        if (closed > 0) {
+            log.info("已关闭 {} 个超时遗留的未结束锚点事件", closed);
+        }
 
         log.info("情绪锚点服务初始化完成 - triggerThreshold={}, returnThreshold={}, silenceHours={}",
                 EmotionAnchorMonitor.TRIGGER_THRESHOLD,
@@ -91,20 +99,16 @@ public class EmotionAnchorService {
     }
 
     /**
-     * 触发：INSERT
+     * 触发：INSERT（同步执行，确保 activeEventIds 在 handleAnchorEnded 之前写入）
+     * 异常向上抛出，由调用方（EmotionAnchorMonitor）处理
      */
-    @Async
     public void handleAnchorTriggered(EmotionAnchorEvent event) {
-        try {
-            event.setCreatedAt(LocalDateTime.now());
-            anchorMapper.insert(event);
-            activeEventIds.put(event.getUserId(), event.getId());
-            log.info("锚点事件已持久化(trigger) - id={}, userId={}, deltaP={}",
-                    event.getId(), event.getUserId(), event.getDeltaPleasure());
-            eventPublisher.publishEvent(new AnchorTriggeredEvent(event.getUserId(), event, LocalDateTime.now()));
-        } catch (Exception e) {
-            log.error("锚点事件持久化失败(trigger) - userId={}", event.getUserId(), e);
-        }
+        event.setCreatedAt(LocalDateTime.now());
+        anchorMapper.insert(event);
+        activeEventIds.put(event.getUserId(), event.getId());
+        log.info("锚点事件已持久化(trigger) - id={}, userId={}, deltaP={}",
+                event.getId(), event.getUserId(), event.getDeltaPleasure());
+        eventPublisher.publishEvent(new AnchorTriggeredEvent(event.getUserId(), event, LocalDateTime.now()));
     }
 
     /**

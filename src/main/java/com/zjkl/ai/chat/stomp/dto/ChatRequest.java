@@ -1,5 +1,6 @@
 package com.zjkl.ai.chat.stomp.dto;
 
+import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -16,6 +17,7 @@ public class ChatRequest {
     /**
      * 用户输入文本
      */
+    @Size(max = 200, message = "消息文本不能超过200个字符")
     private String text;
     
     /**
@@ -26,5 +28,6 @@ public class ChatRequest {
     /**
      * 图片 URL（可选，聊天时发送的图片）
      */
+    @Size(max = 500, message = "图片URL过长")
     private String imageUrl;
 }

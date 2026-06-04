@@ -17,7 +17,7 @@
         LIMIT #{offset}, #{limit}
     </select>
 
-    <select id="selectByUserIdNoLimit" resultType="com.zjkl.emotion.model.UserEmotionRecord">
+    <select id="selectByUserIdLargeBatch" resultType="com.zjkl.emotion.model.UserEmotionRecord">
         SELECT id, user_id AS userId, pleasure, arousal, dominance,
                mood_description AS moodDescription, ai_type AS aiType, created_at AS createdAt
         FROM user_emotions

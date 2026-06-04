@@ -1,6 +1,8 @@
 package com.zjkl.ai.chat.stomp;
 
 import com.zjkl.ai.chat.stomp.dto.WebSocketMessage;
+import com.zjkl.common.config.properties.ThreadPoolProperties;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -15,30 +17,28 @@ import java.util.concurrent.locks.ReentrantLock;
  */
 @Component
 @Slf4j
+@RequiredArgsConstructor
 public class MessageQueueManager {
 
+    private final ThreadPoolProperties threadPoolProperties;
     private final ConcurrentHashMap<String, BlockingQueue<WebSocketMessage>> userQueues = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, ReentrantLock> userLocks = new ConcurrentHashMap<>();
-    private static final int QUEUE_CAPACITY = 100;
     public static final String CONTROL_SUFFIX = "_control";
 
     /**
      * 确保用户的聊天队列和控制队列都存在
      */
     public void ensureQueuesExist(String userId) {
-        userQueues.computeIfAbsent(userId, k -> new LinkedBlockingQueue<>(QUEUE_CAPACITY));
-        userQueues.computeIfAbsent(userId + CONTROL_SUFFIX, k -> new LinkedBlockingQueue<>(QUEUE_CAPACITY));
+        userQueues.computeIfAbsent(userId, k -> newMessageQueue());
+        userQueues.computeIfAbsent(userId + CONTROL_SUFFIX, k -> newMessageQueue());
     }
 
     /**
      * 向用户的聊天队列放入消息
      */
     public boolean offerToChatQueue(String userId, WebSocketMessage message) {
-        BlockingQueue<WebSocketMessage> queue = userQueues.get(userId);
-        if (queue == null) {
-            ensureQueuesExist(userId);
-            queue = userQueues.get(userId);
-        }
+        BlockingQueue<WebSocketMessage> queue = userQueues.computeIfAbsent(
+                userId, k -> newMessageQueue());
         return offerWithCapacityCheck(queue, message, userId);
     }
 
@@ -47,7 +47,7 @@ public class MessageQueueManager {
      */
     public boolean offerToControlQueue(String userId, WebSocketMessage message) {
         BlockingQueue<WebSocketMessage> queue = userQueues.computeIfAbsent(
-                userId + CONTROL_SUFFIX, k -> new LinkedBlockingQueue<>(QUEUE_CAPACITY));
+                userId + CONTROL_SUFFIX, k -> newMessageQueue());
         return offerWithCapacityCheck(queue, message, userId);
     }
 
@@ -63,6 +63,10 @@ public class MessageQueueManager {
             log.debug("消息已入队：userId={}, type={}, queueSize={}", userId, message.getType(), queue.size());
         }
         return success;
+    }
+
+    private BlockingQueue<WebSocketMessage> newMessageQueue() {
+        return new LinkedBlockingQueue<>(threadPoolProperties.getWebsocketSenderQueueCapacity());
     }
 
     /**
@@ -90,6 +94,13 @@ public class MessageQueueManager {
             return size;
         }
         return 0;
+    }
+
+    /**
+     * 移除用户锁（断开连接清理时调用，防止内存泄漏）
+     */
+    public void removeLock(String userId) {
+        userLocks.remove(userId);
     }
 
     /**

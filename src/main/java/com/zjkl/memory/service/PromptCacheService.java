@@ -75,7 +75,7 @@ public class PromptCacheService {
                 
                 // 存入 Redis
                 String redisKey = REDIS_KEY_PREFIX + key;
-        stringRedisTemplate.opsForValue().set(redisKey, content, Duration.ofSeconds(appProperties.getPromptCacheTtl()));
+                stringRedisTemplate.opsForValue().set(redisKey, content, Duration.ofSeconds(appProperties.getPromptCacheTtl()));
                 
                 // 存入本地缓存
                 localCache.put(key, content);
@@ -90,8 +90,8 @@ public class PromptCacheService {
             log.info("Prompt 模板预加载完成，共加载 {} 个模板", count);
             
         } catch (IOException e) {
-            log.error("Prompt 模板预加载失败", e);
-            throw new RuntimeException("Prompt 模板预加载失败", e);
+            log.error("Prompt 模板预加载失败，将降级为懒加载模式（首次调用时逐个读取文件）", e);
+            // 不抛异常：允许应用启动，依赖 getTemplate 的懒加载兜底
         }
     }
     

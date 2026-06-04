@@ -3,12 +3,24 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import vueDevTools from 'vite-plugin-vue-devtools'
+import viteCompression from 'vite-plugin-compression'
 
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    // sockjs-client 在浏览器中依赖 Node.js global 对象
+    global: 'globalThis',
+  },
   plugins: [
     vue(),
-    vueDevTools(),
+    ...(process.env.NODE_ENV === 'development' ? [vueDevTools()] : []),
+    // 生产构建启用 brotli/gzip 压缩
+    viteCompression({
+      algorithm: 'brotliCompress',
+      threshold: 1024,
+      deleteOriginFile: false,
+      verbose: false,
+    }),
   ],
   resolve: {
     alias: {

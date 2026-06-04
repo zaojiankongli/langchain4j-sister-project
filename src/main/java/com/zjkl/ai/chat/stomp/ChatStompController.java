@@ -1,6 +1,7 @@
 package com.zjkl.ai.chat.stomp;
 
 import com.zjkl.ai.chat.stomp.dto.ChatRequest;
+import com.zjkl.common.util.RateLimiter;
 import com.zjkl.emotion.service.ChatVoiceService;
 import com.zjkl.wakeup.tracker.WakeUpTracker;
 import lombok.RequiredArgsConstructor;
@@ -25,6 +26,7 @@ public class ChatStompController {
     private final ChatVoiceService chatVoiceService;
     private final ChatPushService chatPushService;
     private final WakeUpTracker wakeUpTracker;
+    private final RateLimiter rateLimiter;
 
     /**
      * 处理聊天消息
@@ -37,19 +39,33 @@ public class ChatStompController {
         String text = request.getText();
         Boolean enableAudio = request.getEnableAudio();
 
-        if (text == null || text.isEmpty()) {
-            chatPushService.pushError(userId, "消息内容不能为空");
+        String imageUrl = request.getImageUrl();
+
+        // 限流：每用户 10 条/分钟
+        if (!rateLimiter.tryAcquire("rate:ws-chat:" + userId, 10, 60_000)) {
+            chatPushService.pushError(userId, "消息发送过于频繁，请稍后再试");
             return;
         }
 
-        log.info("收到聊天消息：userId={}, text={}, enableAudio={}, imageUrl={}", userId, text, enableAudio, request.getImageUrl());
+        // 允许仅有图片的请求（text 为空但 imageUrl 存在）
+        if ((text == null || text.isEmpty()) && (imageUrl == null || imageUrl.isEmpty())) {
+            chatPushService.pushError(userId, "消息内容不能为空");
+            return;
+        }
+        if (text != null && text.length() > 200) {
+            chatPushService.pushError(userId, "消息文本不能超过200个字符");
+            return;
+        }
+        if (text == null) text = "";
+
+        log.info("收到聊天消息：userId={}, text=***, enableAudio={}", userId, enableAudio);
 
         wakeUpTracker.markUserReplied(userId);
 
-        chatVoiceService.chatWithVoice(userId, text, enableAudio, request.getImageUrl())
+        chatVoiceService.chatWithVoice(userId, text, enableAudio, imageUrl)
                 .exceptionally(error -> {
                     log.error("聊天处理失败：userId={}", userId, error);
-                    chatPushService.pushError(userId, "处理失败：" + error.getMessage());
+                    chatPushService.pushError(userId, "处理失败，请稍后重试");
                     return null;
                 });
     }

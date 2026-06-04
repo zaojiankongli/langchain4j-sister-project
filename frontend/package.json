@@ -23,7 +23,9 @@
     "eslint": "^10.4.0",
     "eslint-plugin-vue": "^10.9.1",
     "prettier": "^3.8.3",
+    "sharp": "^0.34.5",
     "vite": "^7.3.1",
+    "vite-plugin-compression": "^0.5.1",
     "vite-plugin-vue-devtools": "^8.0.7"
   },
   "engines": {

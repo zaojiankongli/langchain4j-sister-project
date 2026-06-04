@@ -27,9 +27,10 @@
 
       <div v-for="(record, index) in emotionRecords"
            :key="record.id"
+           v-memo="[record.id, record.pleasure, record.arousal, record.dominance, record.mood_description, record.created_at]"
            class="flow-node"
            :class="'stagger-' + ((index % 4) + 2)"
-           @click="handleNodeClick(record)">
+>
 
         <div class="trigger-side">
           <div class="status-monitor-box">
@@ -40,7 +41,9 @@
               </div>
               <div class="stat-track bi-directional">
                 <div class="center-mark"></div>
-                <div class="stat-fill" :style="getBiDirectionalStyle(record.pleasure, 'P')"></div>
+                <div class="stat-fill"
+                     :class="[_getBidiClass('P', (parseFloat(record.pleasure)||0) >= 0), _getBidiAlign(record.pleasure)]"
+                     :style="{ width: _getBidiWidth(record.pleasure) }"></div>
               </div>
             </div>
 
@@ -61,7 +64,9 @@
               </div>
               <div class="stat-track bi-directional">
                 <div class="center-mark"></div>
-                <div class="stat-fill" :style="getBiDirectionalStyle(record.dominance, 'D')"></div>
+                <div class="stat-fill"
+                     :class="[_getBidiClass('D', (parseFloat(record.dominance)||0) >= 0), _getBidiAlign(record.dominance)]"
+                     :style="{ width: _getBidiWidth(record.dominance) }"></div>
               </div>
             </div>
           </div>
@@ -87,7 +92,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 import request from '@/utils/request'
 import { getUserId } from '@/utils/auth'
 import { API } from '@/config/api'
@@ -95,6 +100,9 @@ import { API } from '@/config/api'
 const emotionRecords = ref([])
 const loading = ref(false)
 const error = ref('')
+
+let _isMounted = true
+onBeforeUnmount(() => { _isMounted = false })
 
 // 获取历史数据
 const fetchHistory = async () => {
@@ -104,49 +112,39 @@ const fetchHistory = async () => {
   error.value = ''
   try {
     const res = await request.get(API.EMOTION_HISTORY(userId))
+    if (!_isMounted) return
     if (res.code === 200 && res.data) {
       emotionRecords.value = res.data
     } else {
       error.value = '情绪数据格式异常'
     }
   } catch (e) {
+    if (!_isMounted) return
     error.value = e?.response?.data?.message || e?.message || '加载情绪数据失败'
   } finally {
-    loading.value = false
+    if (_isMounted) loading.value = false
   }
 }
 
 /**
- * 计算双向进度条样式 (P 和 D 专用)
- * 逻辑：数值为正向右长，数值为负向左长，以 50% 为中心。
+ * 双向进度条辅助：返回 CSS 类名而非内联对象，避免模板中每个记录逐次创建新对象
+ * P（愉悦度）正向暖蓝，D（支配度）正向青绿，负向统一淡红
  */
-const getBiDirectionalStyle = (val, type) => {
-  const num = parseFloat(val) || 0;
-  const absVal = Math.abs(num);
-  const isPositive = num >= 0;
-
-  // 颜色映射：P 正向偏暖蓝，D 正向偏青绿，负向统一偏淡红
-  let activeColor = isPositive ? 'rgba(124, 156, 255, 0.8)' : 'rgba(248, 113, 113, 0.8)';
-  if (type === 'D' && isPositive) activeColor = 'rgba(110, 220, 190, 0.8)';
-
-  return {
-    width: `${(absVal / 1.0) * 50}%`, // 相对于半轴的比例
-    left: isPositive ? '50%' : 'auto',
-    right: !isPositive ? '50%' : 'auto',
-    background: isPositive
-        ? `linear-gradient(90deg, rgba(255,255,255,0.1), ${activeColor})`
-        : `linear-gradient(-90deg, rgba(255,255,255,0.1), ${activeColor})`,
-    boxShadow: `0 0 8px ${activeColor.replace('0.8', '0.3')}`
-  };
-};
+const _getBidiClass = (type, isPositive) => {
+  if (type === 'D') return isPositive ? 'fill-d-positive' : 'fill-negative'
+  return isPositive ? 'fill-p-positive' : 'fill-negative'
+}
+const _getBidiWidth = (val) => `${(Math.abs(parseFloat(val) || 0) / 1.0) * 50}%`
+const _getBidiAlign = (val) => (parseFloat(val) || 0) >= 0 ? 'bidi-right' : 'bidi-left'
 
 const formatTime = (timeStr) => {
-  if (!timeStr) return '';
-  return timeStr.split(' ')[1] || timeStr; // 仅展示时间部分增加简洁感
-};
-
-const handleNodeClick = (record) => {
-  // Record detail click — reserved for future detail modal
+   if (!timeStr) return '';
+   // 后端 LocalDateTime 序列化为 ISO 格式 "2026-06-02T14:30:00"
+   const isoParts = timeStr.split('T');
+   if (isoParts.length > 1) return isoParts[1].substring(0, 5);
+   // 兼容旧版空格分隔格式
+   const legacyParts = timeStr.split(' ');
+   return legacyParts.length > 1 ? legacyParts[1] : timeStr;
 };
 
 onMounted(() => {
@@ -277,6 +275,24 @@ onMounted(() => {
   position: absolute;
   height: 100%;
   transition: all 1.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 双向进度条填充方向 */
+.bidi-right { left: 50%; right: auto; }
+.bidi-left  { left: auto; right: 50%; }
+
+/* 双向进度条颜色：P 正向暖蓝，D 正向青绿，负向统一淡红 */
+.fill-p-positive {
+  background: linear-gradient(90deg, rgba(255,255,255,0.1), rgba(124,156,255,0.8));
+  box-shadow: 0 0 8px rgba(124,156,255,0.3);
+}
+.fill-d-positive {
+  background: linear-gradient(90deg, rgba(255,255,255,0.1), rgba(110,220,190,0.8));
+  box-shadow: 0 0 8px rgba(110,220,190,0.3);
+}
+.fill-negative {
+  background: linear-gradient(-90deg, rgba(255,255,255,0.1), rgba(248,113,113,0.8));
+  box-shadow: 0 0 8px rgba(248,113,113,0.3);
 }
 
 .arousal-glow {

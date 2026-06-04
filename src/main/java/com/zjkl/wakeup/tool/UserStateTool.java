@@ -177,8 +177,7 @@ public class UserStateTool {
     /** 记录唤醒 */
     public void recordWakeUp(String userId) {
         String key = LAST_WAKEUP_KEY_PREFIX + userId;
-        redisTemplate.opsForValue().set(key, String.valueOf(System.currentTimeMillis()));
-        redisTemplate.expire(key, Duration.ofDays(EMOTION_EXPIRE_DAYS));
+        redisTemplate.opsForValue().set(key, String.valueOf(System.currentTimeMillis()), Duration.ofDays(EMOTION_EXPIRE_DAYS));
         log.debug("记录唤醒时间：userId={}", userId);
     }
 
@@ -186,8 +185,7 @@ public class UserStateTool {
     public void setDoNotDisturb(String userId, boolean enabled) {
         String key = DND_KEY_PREFIX + userId;
         if (enabled) {
-            redisTemplate.opsForValue().set(key, "1");
-            redisTemplate.expire(key, Duration.ofDays(EMOTION_EXPIRE_DAYS));
+            redisTemplate.opsForValue().set(key, "1", Duration.ofDays(EMOTION_EXPIRE_DAYS));
         } else {
             redisTemplate.delete(key);
         }

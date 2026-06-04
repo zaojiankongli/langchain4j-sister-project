@@ -2,9 +2,9 @@ package com.zjkl.ai.chat.stomp;
 
 import com.zjkl.ai.chat.stomp.dto.MessageType;
 import com.zjkl.ai.chat.stomp.dto.WebSocketMessage;
+import com.zjkl.common.config.properties.ThreadPoolProperties;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Component;
@@ -22,25 +22,39 @@ import java.util.concurrent.TimeUnit;
  */
 @Component
 @Slf4j
-@RequiredArgsConstructor
 public class ConnectionStateManager {
 
     private final SimpMessagingTemplate messagingTemplate;
     private final MessageQueueManager queueManager;
     private final ConnectionStateRegistry stateRegistry;
+    private final ThreadPoolProperties threadPoolProperties;
 
     private final ConcurrentHashMap<String, Thread> senderThreads = new ConcurrentHashMap<>();
 
     private volatile boolean shuttingDown = false;
 
-    private final ScheduledExecutorService senderExecutor = Executors.newScheduledThreadPool(
-            10,
-            r -> {
-                Thread t = Thread.ofVirtual().unstarted(r);
-                t.setName("sender-" + r.hashCode());
-                return t;
-            }
-    );
+    /** 用于断开连接后延迟清理的调度线程池 */
+    private final ScheduledExecutorService cleanupScheduler;
+
+    public ConnectionStateManager(SimpMessagingTemplate messagingTemplate,
+                                  MessageQueueManager queueManager,
+                                  ConnectionStateRegistry stateRegistry,
+                                  ThreadPoolProperties threadPoolProperties) {
+        this.messagingTemplate = messagingTemplate;
+        this.queueManager = queueManager;
+        this.stateRegistry = stateRegistry;
+        this.threadPoolProperties = threadPoolProperties;
+
+        // 可配置的调度线程池（默认 2 核，通过 application.yml 调整）
+        this.cleanupScheduler = Executors.newScheduledThreadPool(
+                threadPoolProperties.getWebsocketSenderCoreSize(),
+                r -> {
+                    Thread t = Thread.ofVirtual().unstarted(r);
+                    t.setName("ws-cleanup-" + r.hashCode());
+                    return t;
+                }
+        );
+    }
 
     private static final String CHAT_DESTINATION = "/queue/chat";
     private static final String CONTROL_DESTINATION = "/queue/control";
@@ -56,13 +70,13 @@ public class ConnectionStateManager {
         log.info("ConnectionStateManager 关闭中...");
         shuttingDown = true;
 
-        senderExecutor.shutdown();
+        cleanupScheduler.shutdown();
         try {
-            if (!senderExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
-                senderExecutor.shutdownNow();
+            if (!cleanupScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
+                cleanupScheduler.shutdownNow();
             }
         } catch (InterruptedException e) {
-            senderExecutor.shutdownNow();
+            cleanupScheduler.shutdownNow();
             Thread.currentThread().interrupt();
         }
 
@@ -88,6 +102,18 @@ public class ConnectionStateManager {
 
     public void pushText(String userId, String content, boolean isComplete) {
         WebSocketMessage message = WebSocketMessage.text(content, isComplete);
+        enqueueMessage(userId, message);
+    }
+
+    public void pushEmotionUpdate(String userId, double pleasure, double arousal, double dominance, String moodLabel, String moodDescription) {
+        Map<String, Object> emotionData = Map.of(
+            "pleasure", pleasure,
+            "arousal", arousal,
+            "dominance", dominance,
+            "moodLabel", moodLabel,
+            "moodDescription", moodDescription
+        );
+        WebSocketMessage message = WebSocketMessage.emotionUpdate(emotionData);
         enqueueMessage(userId, message);
     }
 
@@ -124,32 +150,34 @@ public class ConnectionStateManager {
     }
 
     public void onUserConnected(String userId) {
-        log.info("用户连接：userId={}", userId);
+        log.debug("用户连接：userId={}", userId);
         stateRegistry.setConnected(userId);
         queueManager.ensureQueuesExist(userId);
         ensureSenderStarted(userId);
     }
 
     public void onUserDisconnected(String userId) {
-        log.info("用户断开连接：userId={}", userId);
+        log.debug("用户断开连接：userId={}", userId);
         stateRegistry.setDisconnected(userId);
-        senderExecutor.schedule(() -> {
+        cleanupScheduler.schedule(() -> {
             if (!stateRegistry.isConnected(userId)) {
                 queueManager.clearAndRemoveQueue(userId);
+                queueManager.clearAndRemoveQueue(userId + MessageQueueManager.CONTROL_SUFFIX);
                 Thread thread = senderThreads.remove(userId);
                 if (thread != null && thread.isAlive()) {
                     thread.interrupt();
                 }
+                Thread controlThread = senderThreads.remove(userId + MessageQueueManager.CONTROL_SUFFIX);
+                if (controlThread != null && controlThread.isAlive()) {
+                    controlThread.interrupt();
+                }
+                stateRegistry.removeUser(userId);
+                queueManager.removeLock(userId);
                 log.debug("队列已清理：userId={}", userId);
             } else {
                 log.debug("用户已重新连接，跳过清理：userId={}", userId);
             }
         }, 5, TimeUnit.SECONDS);
-    }
-
-    public void updateActiveTime(String userId) {
-        // This method is kept for interface compatibility but does nothing in ConnectionStateManager
-        // The actual lastActiveTime management is moved to HeartbeatChecker
     }
 
     // ==================== 内部方法 ====================
@@ -210,14 +238,14 @@ public class ConnectionStateManager {
                     break;
                 }
 
-                log.info("senderLoop 获取到消息: queueKey={}, type={}", queueKey, message.getType());
+                log.debug("senderLoop 获取到消息: queueKey={}, type={}", queueKey, message.getType());
 
                 var lock = queueManager.getLock(userId);
                 boolean sendSuccess = false;
                 lock.lock();
                 try {
                     if (!stateRegistry.isConnected(userId)) {
-                        log.info("用户已断开，丢弃消息: userId={}", userId);
+                        log.debug("用户已断开，丢弃消息: userId={}", userId);
                         sendSuccess = true;
                         continue;
                     }
@@ -251,8 +279,8 @@ public class ConnectionStateManager {
     }
 
     private void sendMessage(String userId, String destination, WebSocketMessage message) {
-        log.info("发送消息: userId={}, destination={}, type={}", userId, destination, message.getType());
+        log.debug("发送消息: userId={}, destination={}, type={}", userId, destination, message.getType());
         messagingTemplate.convertAndSendToUser(userId, destination, message);
-        log.info("消息已发送: userId={}, destination={}, type={}", userId, destination, message.getType());
+        log.debug("消息已发送: userId={}, destination={}, type={}", userId, destination, message.getType());
     }
 }

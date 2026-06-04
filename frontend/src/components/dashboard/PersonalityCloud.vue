@@ -5,94 +5,161 @@
       <h3 class="header-title">维度调整 // DIMENSION TUNING</h3>
     </div>
 
-    <div class="settings-grid">
+    <!-- Loading state -->
+    <div v-if="loading" class="state-container">
+      <div class="loading-bar"></div>
+      <p class="state-text">正在加载设置数据...</p>
+    </div>
+
+    <!-- Error state -->
+    <div v-else-if="loadError" class="state-container error">
+      <span class="error-icon">⚠</span>
+      <p class="error-text">{{ loadError }}</p>
+      <button class="retry-btn" @click="settingsStore.init()">重新连接</button>
+    </div>
+
+    <!-- Settings grid -->
+    <div v-else class="settings-grid">
       <section class="parameter-card">
         <div class="card-glow"></div>
         <div class="card-content">
           <div class="param-info">
             <span class="param-label">感知灵敏度</span>
-            <span class="param-value">{{ settings.sensitivity }}%</span>
+            <span class="param-value">{{ displaySettings.sensitivity }}</span>
           </div>
           <div class="slider-wrapper">
             <input
                 type="range"
-                v-model="settings.sensitivity"
+                min="0"
+                max="1"
+                step="0.05"
+                v-model.number="displaySettings.sensitivity"
                 class="cyber-slider"
             >
-            <div class="slider-track-glow" :style="{ width: settings.sensitivity + '%' }"></div>
+            <div class="slider-track-glow" :style="{ width: (displaySettings.sensitivity * 100) + '%' }"></div>
           </div>
           <p class="param-desc">决定 AI 对用户情绪波动的捕捉精度。</p>
         </div>
       </section>
 
       <section class="parameter-card">
+        <div class="card-glow"></div>
         <div class="card-content">
           <div class="param-info">
-            <span class="param-label">记忆处理模式</span>
+            <span class="param-label">情绪衰减率</span>
+            <span class="param-value">{{ displaySettings.decayRate }}</span>
           </div>
-          <div class="toggle-group">
-            <div
-                v-for="mode in ['即时', '深层', '永恒']"
-                :key="mode"
-                class="toggle-item"
-                :class="{ active: settings.memoryMode === mode }"
-                @click="settings.memoryMode = mode"
+          <div class="slider-wrapper">
+            <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                v-model.number="displaySettings.decayRate"
+                class="cyber-slider"
             >
-              {{ mode }}
-            </div>
+            <div class="slider-track-glow" :style="{ width: (displaySettings.decayRate * 100) + '%' }"></div>
           </div>
-          <p class="param-desc">调整对话历史在长期性格塑造中的影响力。</p>
+          <p class="param-desc">情绪强度随时间的自然衰减速度。</p>
         </div>
       </section>
 
       <section class="parameter-card">
+        <div class="card-glow"></div>
         <div class="card-content">
           <div class="param-info">
-            <span class="param-label">环境光同步</span>
-            <div class="cyber-switch"
-                 :class="{ on: settings.lightSync }"
-                 @click="settings.lightSync = !settings.lightSync">
-              <div class="switch-handle"></div>
-            </div>
+            <span class="param-label">回归基线速度</span>
+            <span class="param-value">{{ displaySettings.regressionRate }}</span>
           </div>
-          <p class="param-desc">允许 AI 根据现实世界的昼夜更替调整其内在色调。</p>
+          <div class="slider-wrapper">
+            <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                v-model.number="displaySettings.regressionRate"
+                class="cyber-slider"
+            >
+            <div class="slider-track-glow" :style="{ width: (displaySettings.regressionRate * 100) + '%' }"></div>
+          </div>
+          <p class="param-desc">情绪刺激后的回归常态速度。</p>
         </div>
       </section>
     </div>
 
     <div class="settings-footer">
-      <button class="save-btn" @click="handleSave">写入灵魂核心</button>
+      <button class="save-btn" @click="handleSave" :disabled="saving">
+        {{ saving ? '同步中...' : '写入灵魂核心' }}
+      </button>
+      <p v-if="saveMsg" class="save-msg">{{ saveMsg }}</p>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
-import { STORAGE_KEYS } from '@/config/storage'
+import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useSettingsStore } from '@/stores/settings'
+import { useUiStore } from '@/stores/ui'
 
-const STORAGE_KEY = STORAGE_KEYS.PERSONALITY_SETTINGS
+const settingsStore = useSettingsStore()
+const uiStore = useUiStore()
 
-const settings = ref({
-  sensitivity: 75,
-  memoryMode: '深层',
-  lightSync: true
+// Local form for editing
+const displaySettings = ref({
+  sensitivity: 0.5,
+  decayRate: 0.1,
+  regressionRate: 0.05,
 })
+
+const saving = ref(false)
+const saveMsg = ref('')
+const loadError = ref('')
+const loading = ref(true)
+let _isMounted = true
+onBeforeUnmount(() => { _isMounted = false })
+
+// Combined watch for settings, loading, and errors
+watch([() => settingsStore.settings, () => settingsStore.loading, () => settingsStore.error], ([settings, loadingVal, errorVal]) => {
+  if (settings) {
+    // 增量更新：不替换整个 displaySettings 对象，只更新具体字段
+    // 避免触发 slider-track-glow 等依赖 .value 引用变化的 :style 重渲染
+    displaySettings.value.sensitivity = settings.sensitivity ?? 0.5
+    displaySettings.value.decayRate = settings.decayRate ?? 0.1
+    displaySettings.value.regressionRate = settings.regressionRate ?? 0.05
+    loadError.value = ''
+    loading.value = false
+  }
+  loading.value = loadingVal
+  if (errorVal) {
+    loadError.value = errorVal
+    loading.value = false
+  }
+}, { immediate: true })
+
+const handleSave = async () => {
+  saving.value = true
+  saveMsg.value = ''
+  try {
+    const current = settingsStore.settings || {}
+    const merged = { ...current, ...displaySettings.value }
+    const success = await settingsStore.saveSettings(merged)
+    if (!_isMounted) return
+    if (success) {
+      uiStore.success('灵魂参数已同步')
+    } else {
+      saveMsg.value = settingsStore.error || '同步失败'
+    }
+  } catch (e) {
+    if (!_isMounted) return
+    saveMsg.value = e?.message || '同步失败'
+  } finally {
+    if (_isMounted) saving.value = false
+  }
+}
 
 onMounted(() => {
-  const saved = localStorage.getItem(STORAGE_KEY)
-  if (saved) {
-    try {
-      settings.value = { ...settings.value, ...JSON.parse(saved) }
-    } catch (e) {
-      // ignore
-    }
-  }
+  settingsStore.init()
 })
-
-const handleSave = () => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings.value))
-  // 参数已同步
-}
 </script>
 
 <style scoped>
@@ -225,4 +292,53 @@ const handleSave = () => {
   letter-spacing: 2px; cursor: pointer; transition: 0.3s;
 }
 .save-btn:hover { background: white; color: black; }
+.save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.save-btn:disabled:hover { background: transparent; color: white; }
+
+.save-msg {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #ff6b6b;
+  text-align: center;
+}
+
+/* Loading & error states */
+.state-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  gap: 16px;
+  color: rgba(255,255,255,0.6);
+  font-size: 13px;
+}
+.state-container.error { color: #ff6b6b; }
+.state-text { margin: 0; }
+.error-icon { font-size: 28px; }
+.error-text { color: #ff6b6b; margin: 0; }
+.loading-bar {
+  width: 36px; height: 36px;
+  border: 2px solid rgba(255,255,255,0.1);
+  border-top-color: #5eead4;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.retry-btn {
+  margin-top: 8px;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,0.2);
+  color: white;
+  padding: 8px 20px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: 0.3s;
+}
+.retry-btn:hover {
+  background: rgba(255,255,255,0.1);
+  border-color: rgba(255,255,255,0.4);
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>

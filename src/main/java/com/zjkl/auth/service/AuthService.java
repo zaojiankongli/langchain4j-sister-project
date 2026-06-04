@@ -3,6 +3,7 @@ package com.zjkl.auth.service;
 import com.zjkl.auth.dto.CompleteProfileRequest;
 import com.zjkl.auth.dto.LoginRequest;
 import com.zjkl.auth.exception.UnauthorizedException;
+import com.zjkl.common.exception.BusinessException;
 import com.zjkl.common.util.JwtUtil;
 import com.zjkl.user.domain.User;
 import com.zjkl.user.mapper.UserMapper;
@@ -17,9 +18,11 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import static java.util.Map.of;
@@ -47,14 +50,23 @@ public class AuthService {
         "    return 0 " +
         "end";
 
+    private static final String COMPARE_AND_DELETE_LOCK_SCRIPT =
+        "local val = redis.call('get', KEYS[1]) " +
+        "if val == ARGV[1] then " +
+        "    return redis.call('del', KEYS[1]) " +
+        "else " +
+        "    return 0 " +
+        "end";
+
     private final UserMapper userMapper;
     private final JwtUtil jwtUtil;
     private final StringRedisTemplate redisTemplate;
     private final JavaMailSender mailSender;
     private final UserProfileManageService userProfileManageService;
-    private final Random random = new Random();
+    private final Random random = new SecureRandom();
     private final String fromAddress;
     private final DefaultRedisScript<Long> verifyAndDelScript;
+    private final DefaultRedisScript<Long> compareAndDeleteLockScript;
     
     public AuthService(UserMapper userMapper, JwtUtil jwtUtil, 
                        StringRedisTemplate redisTemplate,
@@ -67,7 +79,16 @@ public class AuthService {
         this.mailSender = mailSender;
         this.fromAddress = env.getProperty("spring.mail.username");
         this.verifyAndDelScript = new DefaultRedisScript<>(VERIFY_AND_DEL_SCRIPT, Long.class);
+        this.compareAndDeleteLockScript = new DefaultRedisScript<>(COMPARE_AND_DELETE_LOCK_SCRIPT, Long.class);
         this.userProfileManageService = userProfileManageService;
+    }
+
+    /** 邮箱脱敏：a***@example.com */
+    private static String maskEmail(String email) {
+        if (email == null || !email.contains("@")) return "***";
+        int at = email.indexOf('@');
+        if (at <= 1) return email.charAt(0) + "***" + email.substring(at);
+        return email.charAt(0) + "***" + email.substring(at);
     }
     
     /**
@@ -85,10 +106,15 @@ public class AuthService {
         message.setTo(email);
         message.setSubject("知微 Zeeva - 验证码");
         message.setText("您的验证码是：" + code + "\n\n验证码 " + CODE_EXPIRE_MINUTES + " 分钟内有效，请勿泄露给他人。");
-        mailSender.send(message);
+        try {
+            mailSender.send(message);
+        } catch (Exception e) {
+            log.error("验证码邮件发送失败: email={}", maskEmail(email), e);
+            throw new BusinessException("验证码发送失败，请稍后再试");
+        }
 
         redisTemplate.opsForValue().set(CODE_PREFIX + email, code, CODE_EXPIRE_MINUTES, TimeUnit.MINUTES);
-        log.info("验证码已发送至 {}", email);
+        log.info("验证码已发送至 {}", maskEmail(email));
     }
     
     /**
@@ -119,7 +145,8 @@ public class AuthService {
 
         // 2. 分布式锁防止并发注册同一邮箱
         String lockKey = "auth:login:lock:" + email;
-        Boolean locked = redisTemplate.opsForValue().setIfAbsent(lockKey, "1", 10, TimeUnit.SECONDS);
+        String lockToken = UUID.randomUUID().toString();
+        Boolean locked = redisTemplate.opsForValue().setIfAbsent(lockKey, lockToken, 10, TimeUnit.SECONDS);
         if (Boolean.FALSE.equals(locked)) {
             throw new IllegalArgumentException("操作过于频繁，请稍后重试");
         }
@@ -132,13 +159,13 @@ public class AuthService {
                 String tempUsername = (username != null && !username.isBlank()) ? username.trim() : email.substring(0, email.indexOf('@'));
                 user = userProfileManageService.createUser(email, tempUsername);
                 isNewUser = true;
-                log.info("新用户注册成功：email={}, userId={}, username={}", email, user.getId(), user.getUsername());
+                log.info("新用户注册成功：email={}, userId={}, username={}", maskEmail(email), user.getId(), user.getUsername());
             } else {
                 if (username != null && !username.isBlank() && !username.equals(user.getUsername())) {
                     user.setUsername(username.trim());
                     userMapper.update(user);
                 }
-                log.info("用户登录成功：email={}, userId={}", email, user.getId());
+                log.info("用户登录成功：email={}, userId={}", maskEmail(email), user.getId());
             }
 
             // 4. 更新最后活跃时间
@@ -157,7 +184,7 @@ public class AuthService {
                 "isNewUser", isNewUser
             );
         } finally {
-            redisTemplate.delete(lockKey);
+            redisTemplate.execute(compareAndDeleteLockScript, List.of(lockKey), lockToken);
         }
     }
     
@@ -171,18 +198,25 @@ public class AuthService {
 
         String blacklistKey = TOKEN_BLACKLIST_PREFIX + refreshToken;
         if (Boolean.TRUE.equals(redisTemplate.hasKey(blacklistKey))) {
-            throw new UnauthorizedException("refreshToken 已失效，请重新登录");
+            throw new UnauthorizedException("请重新登录");
         }
 
         String userId = jwtUtil.parseRefreshToken(refreshToken);
         if (userId == null) {
-            throw new UnauthorizedException("refreshToken 已过期或无效");
+            throw new UnauthorizedException("请重新登录");
         }
 
         User user = userMapper.findById(userId);
         if (user == null) {
             throw new IllegalArgumentException("用户不存在");
         }
+
+        redisTemplate.opsForValue().set(
+                blacklistKey,
+                "1",
+                REFRESH_TOKEN_EXPIRE_SECONDS,
+                TimeUnit.SECONDS
+        );
 
         String newAccessToken = jwtUtil.generateAccessToken(user);
         String newRefreshToken = jwtUtil.generateRefreshToken(user);

@@ -58,16 +58,15 @@ public class MoodDescriptionGenerator {
     }
 
     public static String generateMoodLabel(double p, double a, double d) {
-        if (d < -0.5) return "极度害羞";
-        if (d < -0.3) return "有些害羞";
-        if (p > 0.5) return "非常开心";
+        if (d < -0.5) return "有些害羞";
+        if (d < -0.3) return "有点害羞";
+        if (p > 0.5) return "很开心";
         if (p > 0.2) return "心情不错";
-        if (p < -0.4) return "很难过";
+        if (p < -0.4) return "有些难过";
         if (p < -0.15) return "有点失落";
-        if (a > 0.5) return "非常紧张";
-        if (a > 0.2) return "有些紧张";
-        if (a < -0.5) return "非常平静";
-        if (a < -0.2) return "比较放松";
+        if (a > 0.7) return "有些紧张";
+        if (a > 0.5) return "有点紧张";
+        if (a < 0.25) return "很平静";
         return "平静";
     }
 

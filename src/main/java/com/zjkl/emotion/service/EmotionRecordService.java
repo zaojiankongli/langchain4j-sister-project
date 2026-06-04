@@ -2,6 +2,7 @@ package com.zjkl.emotion.service;
 
 import com.zjkl.ai.chat.entity.ConverMessage;
 import com.zjkl.ai.chat.service.ConverMessageService;
+import com.zjkl.ai.prompt.service.PromptTemplateService;
 import com.zjkl.emotion.assistant.EmotionReasonAgent;
 import com.zjkl.emotion.mapper.UserEmotionMapper;
 import com.zjkl.emotion.model.EmotionalState;
@@ -15,6 +16,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -27,12 +29,14 @@ import java.util.stream.Collectors;
 public class EmotionRecordService {
 
     private static final int CHAT_HISTORY_HOURS = 4;
+    private static final int CHAT_HISTORY_MESSAGE_LIMIT = 100;
     private static final int MAX_CHAT_LENGTH = 2000;
 
     private final EmotionService emotionService;
     private final EmotionReasonAgent emotionReasonAgent;
     private final ConverMessageService converMessageService;
     private final UserEmotionMapper userEmotionMapper;
+    private final PromptTemplateService promptTemplateService;
 
     /**
      * 异步记录用户情绪快照
@@ -84,27 +88,32 @@ public class EmotionRecordService {
      */
     private String queryChatHistory(String userId) {
         LocalDateTime startTime = LocalDateTime.now().minusHours(CHAT_HISTORY_HOURS);
-        List<ConverMessage> messages = converMessageService.getByTimeRange(
-                userId, startTime, LocalDateTime.now());
+        List<ConverMessage> messages = converMessageService.getLatestByTimeRange(
+                userId, startTime, LocalDateTime.now(), CHAT_HISTORY_MESSAGE_LIMIT);
 
         if (messages.isEmpty()) {
             return "暂无聊天记录";
         }
 
-        String history = messages.stream()
-                .map(msg -> {
-                    String role = "user".equals(msg.getRole()) ? "哥哥/姐姐" : "妹妹(早空)";
-                    String text = msg.getContents().stream()
-                            .filter(c -> "text".equals(c.getType()))
-                            .map(c -> c.getText())
-                            .collect(Collectors.joining(" "));
-                    return role + ": " + text;
-                })
-                .collect(Collectors.joining("\n"));
+        StringBuilder history = new StringBuilder(Math.min(MAX_CHAT_LENGTH + 32, 4096));
+        for (ConverMessage msg : messages) {
+            String role = "user".equals(msg.getRole()) ? "哥哥/姐姐" : "妹妹(早空)";
+            String text = msg.getContents().stream()
+                    .filter(c -> "text".equals(c.getType()))
+                    .map(c -> c.getText())
+                    .collect(Collectors.joining(" "));
 
-        return history.length() > MAX_CHAT_LENGTH
-                ? history.substring(0, MAX_CHAT_LENGTH) + "..."
-                : history;
+            if (!history.isEmpty()) {
+                history.append('\n');
+            }
+            history.append(role).append(": ").append(text);
+
+            if (history.length() >= MAX_CHAT_LENGTH) {
+                return history.substring(0, MAX_CHAT_LENGTH) + "...";
+            }
+        }
+
+        return history.toString();
     }
 
     /**
@@ -115,7 +124,16 @@ public class EmotionRecordService {
         try {
             String time = LocalDateTime.now().format(DateTimeFormatter.ofPattern("HH:mm"));
 
+            // 渲染 characterCore（角色身份 + 动态情绪参数）
+            String characterCore = promptTemplateService.render("character/core", Map.of(
+                "pleasure", String.format("%.3f", emotion.getPleasure()),
+                "arousal", String.format("%.3f", emotion.getArousal()),
+                "dominance", String.format("%.3f", emotion.getDominance()),
+                "moodLabel", moodLabel != null ? moodLabel : ""
+            ));
+
             return emotionReasonAgent.generateReason(
+                    characterCore,
                     time,
                     moodLabel,
                     String.format("%.3f", emotion.getPleasure()),

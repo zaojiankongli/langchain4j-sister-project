@@ -72,8 +72,8 @@ public class TtsStreamingService {
 
         } catch (Exception e) {
             log.error("SpeechSynthesizer 初始化失败：userId={}", userId, e);
-            chatPushService.pushError(userId, "语音服务初始化失败：" + e.getMessage());
-            return null;
+            chatPushService.pushError(userId, "语音服务初始化失败，请稍后重试");
+            throw new RuntimeException("语音合成初始化失败", e);
         }
     }
 

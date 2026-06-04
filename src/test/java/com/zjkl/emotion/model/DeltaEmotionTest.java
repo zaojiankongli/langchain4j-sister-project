@@ -57,19 +57,21 @@ class DeltaEmotionTest {
     @Test
     void clampBoundsValues() {
         DeltaEmotion delta = new DeltaEmotion(2.0, -2.0, 1.5);
-        delta.clamp();
-        assertEquals(1.0, delta.getDeltaP());
-        assertEquals(-1.0, delta.getDeltaA());
-        assertEquals(1.0, delta.getDeltaD());
+        DeltaEmotion clamped = delta.clamped();
+        assertEquals(1.0, clamped.getDeltaP());
+        assertEquals(-1.0, clamped.getDeltaA());
+        assertEquals(1.0, clamped.getDeltaD());
+        // 原对象不变
+        assertEquals(2.0, delta.getDeltaP());
     }
 
     @Test
     void clampHandlesNullValues() {
         DeltaEmotion delta = new DeltaEmotion(null, null, null);
-        delta.clamp();
-        assertEquals(0.0, delta.getDeltaP());
-        assertEquals(0.0, delta.getDeltaA());
-        assertEquals(0.0, delta.getDeltaD());
+        DeltaEmotion clamped = delta.clamped();
+        assertEquals(0.0, clamped.getDeltaP());
+        assertEquals(0.0, clamped.getDeltaA());
+        assertEquals(0.0, clamped.getDeltaD());
     }
 
     @Test

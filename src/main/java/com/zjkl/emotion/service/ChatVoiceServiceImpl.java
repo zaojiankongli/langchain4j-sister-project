@@ -8,6 +8,7 @@ import com.zjkl.emotion.model.EmotionalState;
 
 import com.zjkl.emotion.model.VoiceParams;
 import com.zjkl.emotion.util.AudioBuffer;
+import com.zjkl.settings.service.SettingsService;
 import com.zjkl.emotion.util.LlmResponseStreamParser;
 import com.zjkl.ai.chat.stomp.ChatPushService;
 import dev.langchain4j.memory.chat.ChatMemoryProvider;
@@ -22,6 +23,7 @@ import reactor.core.publisher.Mono;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
@@ -35,6 +37,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public class ChatVoiceServiceImpl implements ChatVoiceService {
 
     private final TtsStreamingService ttsStreamingService;
+    private final SettingsService settingsService;
 
     private final EmotionService emotionService;
     private final EmotionAnchorService anchorService;
@@ -43,6 +46,7 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
     private final ChatMemoryProvider redisChatMemoryProvider;
     private final ConverMessageService converMessageService;
     private final LlmResponseStreamParser parser;
+    private final Executor asyncExecutor;
 
     /**
      * 语音聊天
@@ -51,7 +55,7 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
     public CompletableFuture<Void> chatWithVoice(String userId, String userInput, Boolean enableAudio, String imageUrl) {
         CompletableFuture<Void> future = new CompletableFuture<>();
 
-        log.info("开始 WebSocket 语音聊天：userId={}, userInput={}, enableAudio={}, imageUrl={}", userId, userInput, enableAudio, imageUrl);
+        log.info("开始 WebSocket 语音聊天：userId={}, userInput=***, enableAudio={}", userId, enableAudio);
 
         try {
             // 并行处理图片
@@ -90,7 +94,7 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
                     // 发送完成信号给前端
                     chatPushService.pushText(userId, "", true);
 
-                    CompletableFuture.runAsync(() -> saveMemory(userId, userInput, imageUrl, imageDescFuture, fullReply));
+                    CompletableFuture.runAsync(() -> saveMemory(userId, userInput, imageUrl, imageDescFuture, fullReply), asyncExecutor);
 
                     SpeechSynthesizer synthesizer = synthesizerRef.get();
                     log.info("=== TTS 调试 === userId={}, enableAudio={}, synthesizer={}", userId, enableAudio, synthesizer);
@@ -113,7 +117,7 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
                             } finally {
                                 ttsStreamingService.closeSynthesizer(synthesizer);
                             }
-                        }).orTimeout(30, TimeUnit.SECONDS).exceptionally(ex -> {
+                        }, asyncExecutor).orTimeout(30, TimeUnit.SECONDS).exceptionally(ex -> {
                             log.error("TTS 合成超时或失败：userId={}", userId, ex);
                             ttsError.set(ex instanceof TimeoutException
                                     ? new TimeoutException("语音合成超时（30s）") : ex);
@@ -147,7 +151,7 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
                                 log.error("音频播放失败：userId={}", userId, e);
                                 future.completeExceptionally(e);
                             }
-                        }).orTimeout(60, TimeUnit.SECONDS).exceptionally(ex -> {
+                        }, asyncExecutor).orTimeout(60, TimeUnit.SECONDS).exceptionally(ex -> {
                             log.error("音频播放超时或失败：userId={}", userId, ex);
                             future.completeExceptionally(ex instanceof TimeoutException
                                     ? new TimeoutException("音频播放超时（60s）") : ex);
@@ -160,7 +164,7 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
                 })
                 .doOnError(error -> {
                     log.error("LLM 回复流错误：userId={}", userId, error);
-                    chatPushService.pushError(userId, "LLM 回复流错误：" + error.getMessage());
+                    chatPushService.pushError(userId, "回复生成失败，请稍后重试");
                     future.completeExceptionally(error);
                 })
                 .subscribe();
@@ -171,10 +175,26 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
                     log.info("voice_params 已解析：userId={}, volume={}", userId, params.getVolume());
 
                     if (Boolean.TRUE.equals(enableAudio)) {
-                        SpeechSynthesizer synthesizer = ttsStreamingService.initTtsSynthesizer(userId, params, audioBuffer);
-                        if (synthesizer != null) {
-                            synthesizerRef.set(synthesizer);
-                            log.info("TTS 已就绪：userId={}", userId);
+                        // === 读取用户 TTS 设置 ===
+                        var settings = settingsService.getSettings(userId);
+                        if (!settings.isTtsEnabled()) {
+                            log.info("用户已关闭 TTS，跳过语音合成：userId={}", userId);
+                        } else {
+                            // 应用用户音量/语速设置
+                            int adjustedVolume = (int) Math.round(params.getVolume() * settings.getTtsVolume());
+                            adjustedVolume = Math.max(0, Math.min(100, adjustedVolume));
+                            VoiceParams adjustedParams = new VoiceParams(
+                                adjustedVolume,
+                                (float) settings.getTtsSpeed(),
+                                params.getPitchRate(),
+                                params.getInstruction()
+                            );
+                            SpeechSynthesizer synthesizer = ttsStreamingService.initTtsSynthesizer(userId, adjustedParams, audioBuffer);
+                            if (synthesizer != null) {
+                                synthesizerRef.set(synthesizer);
+                                log.info("TTS 已就绪（应用用户设置）：userId={}, adjustedVolume={}, adjustedSpeed={}",
+                                    userId, adjustedVolume, settings.getTtsSpeed());
+                            }
                         }
                     }
                 })
@@ -184,7 +204,7 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
                 })
                 .subscribe();
 
-            // 6. 订阅 delta_emotion（后台更新用户情绪 + 触发锚点监测）
+            // 6. 订阅 delta_emotion（后台更新用户情绪 + 触发锚点监测 + 推送情绪到前端）
             result.getDeltaEmotion()
                 .doOnSuccess(delta -> {
                     // 获取更新前的情绪状态
@@ -195,6 +215,15 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
                         userId, newEmotion.getPleasure(), newEmotion.getArousal(), newEmotion.getDominance());
                     // 触发锚点监测（同时更新最后消息时间）
                     anchorService.onEmotionChange(userId, oldEmotion, newEmotion);
+
+                    // 推送情绪状态到前端（实时 mood 指示器）
+                    String moodLabel = MoodDescriptionGenerator.generateMoodLabel(newEmotion);
+                    String moodDesc = MoodDescriptionGenerator.generateMoodDescription(newEmotion);
+                    chatPushService.pushEmotionUpdate(userId,
+                        newEmotion.getFormattedPleasure(),
+                        newEmotion.getFormattedArousal(),
+                        newEmotion.getFormattedDominance(),
+                        moodLabel, moodDesc);
                 })
                 .doOnError(error -> {
                     log.warn("情绪更新失败：userId={}", userId, error);

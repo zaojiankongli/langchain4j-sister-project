@@ -1,6 +1,8 @@
 package com.zjkl.user.service;
 
 import com.zjkl.auth.dto.CompleteProfileRequest;
+import com.zjkl.settings.model.UserSettings;
+import com.zjkl.settings.service.SettingsService;
 import com.zjkl.user.domain.User;
 import com.zjkl.user.mapper.UserMapper;
 import org.slf4j.Logger;
@@ -23,9 +25,11 @@ public class UserProfileManageService {
     private static final Logger log = LoggerFactory.getLogger(UserProfileManageService.class);
 
     private final UserMapper userMapper;
+    private final SettingsService settingsService;
 
-    public UserProfileManageService(UserMapper userMapper) {
+    public UserProfileManageService(UserMapper userMapper, SettingsService settingsService) {
         this.userMapper = userMapper;
+        this.settingsService = settingsService;
     }
 
     /**
@@ -58,7 +62,8 @@ public class UserProfileManageService {
             try {
                 user.setBirthday(LocalDate.parse(request.birthday()));
             } catch (Exception e) {
-                // ignore invalid values
+                log.warn("生日格式无效: userId={}, birthday={}", userId, request.birthday());
+                throw new IllegalArgumentException("生日格式无效，请使用 yyyy-MM-dd");
             }
         }
         if (request.aiType() != null) {
@@ -81,6 +86,7 @@ public class UserProfileManageService {
     /**
      * 创建新用户
      */
+    @Transactional(rollbackFor = Exception.class)
     public User createUser(String email, String username) {
         User user = new User();
         user.setId(generateUserId());
@@ -89,21 +95,27 @@ public class UserProfileManageService {
         user.setCreatedAt(LocalDateTime.now());
         user.setUpdatedAt(LocalDateTime.now());
         userMapper.insert(user);
+
+        // 为新用户创建默认配置
+        try {
+            settingsService.saveSettings(user.getId(), new UserSettings());
+            log.info("已为用户创建默认配置: userId={}", user.getId());
+        } catch (Exception e) {
+            log.error("创建用户默认配置失败: userId={}", user.getId(), e);
+            // 不阻止注册流程，settings 查询时会返回默认值兜底
+        }
+
         return user;
     }
 
     /**
-     * 生成 12 位用户 ID
+     * 生成 UUID 用户 ID（去连字符，32位）
+     * <p>
+     * 注意：数据库 schema 已从 varchar(12) 升级为 varchar(64)，
+     * 现在可以直接使用完整的 UUID 而不用担心截断。
      */
     private String generateUserId() {
-        int maxRetries = 3;
-        for (int i = 0; i < maxRetries; i++) {
-            String id = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
-            if (userMapper.findById(id) == null) {
-                return id;
-            }
-        }
-        throw new RuntimeException("无法生成唯一用户 ID，请稍后重试");
+        return UUID.randomUUID().toString().replace("-", "");
     }
 
     /**

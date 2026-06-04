@@ -86,7 +86,7 @@ public class UserProfileVO {
     private String moodDescription;
     
     /**
-     * 等级信息（用于 Mapper 结果映射）
+     * 等级信息（用于 Mapper 结果映射 / 前端 levelInfo 嵌套对象）
      */
     @Data
     public static class LevelInfo {
@@ -95,9 +95,23 @@ public class UserProfileVO {
         private Integer levelUpExp;
         private Integer totalExp;
     }
+
+    /**
+     * 前端 useUserStore 期望 data.levelInfo 为嵌套对象，此处将拍平字段包装回去
+     */
+    @JsonProperty("levelInfo")
+    public LevelInfo getLevelInfo() {
+        if (currentLevel == null) return null;
+        LevelInfo info = new LevelInfo();
+        info.setCurrentLevel(this.currentLevel);
+        info.setCurrentExp(this.currentExp);
+        info.setLevelUpExp(this.levelUpExp);
+        info.setTotalExp(this.totalExp);
+        return info;
+    }
     
     /**
-     * 情绪信息（用于 Mapper 结果映射）
+     * 情绪信息（用于 Mapper 结果映射 / 前端 latestEmotion 嵌套对象）
      */
     @Data
     public static class EmotionInfo {
@@ -105,5 +119,19 @@ public class UserProfileVO {
         private Double arousal;
         private Double dominance;
         private String moodDescription;
+    }
+
+    /**
+     * 前端 useUserStore 期望 data.latestEmotion 为嵌套对象
+     */
+    @JsonProperty("latestEmotion")
+    public EmotionInfo getLatestEmotion() {
+        if (pleasure == null) return null;
+        EmotionInfo info = new EmotionInfo();
+        info.setPleasure(this.pleasure);
+        info.setArousal(this.arousal);
+        info.setDominance(this.dominance);
+        info.setMoodDescription(this.moodDescription);
+        return info;
     }
 }

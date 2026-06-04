@@ -31,6 +31,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class EmotionAnchorSemanticService {
 
+    static final int CONTEXT_MESSAGE_LIMIT = 20;
+
     private final QwenChatModel qwenChatModel;
     private final ConverMessageService converMessageService;
     private final StringRedisTemplate stringRedisTemplate;
@@ -57,13 +59,11 @@ public class EmotionAnchorSemanticService {
             List<ConverMessage> messages = List.of();
             if (event.getStartTime() != null) {
                 java.time.LocalDateTime endTime = event.getEndTime() != null ? event.getEndTime() : java.time.LocalDateTime.now();
-                messages = converMessageService.getByTimeRange(
-                        event.getUserId(), event.getStartTime(), endTime);
+                messages = converMessageService.getLatestByTimeRange(
+                        event.getUserId(), event.getStartTime(), endTime, CONTEXT_MESSAGE_LIMIT);
             }
 
-            List<ConverMessage> contextMessages = messages.size() > 20
-                    ? messages.subList(messages.size() - 20, messages.size())
-                    : messages;
+            List<ConverMessage> contextMessages = messages;
             String chatContext = contextMessages.isEmpty()
                     ? "无对话记录"
                     : contextMessages.stream()
@@ -80,6 +80,10 @@ public class EmotionAnchorSemanticService {
                             UserMessage.from(prompt))
                     .build());
 
+            if (response == null || response.aiMessage() == null || response.aiMessage().text() == null) {
+                log.warn("情绪分析 LLM 返回为空，跳过语义分析");
+                return;
+            }
             String result = response.aiMessage().text().trim();
 
             try {

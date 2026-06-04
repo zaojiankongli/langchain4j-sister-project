@@ -1,10 +1,15 @@
 <template>
   <div class="subspace-memory">
-    <div class="page-header animate-sitewide-enter">
-      <div class="title-group">
-        <h3 class="greeting-title">记忆回路与情绪锚点</h3>
-      </div>
+    <div v-if="loading" class="state-container">
+      <div class="loading-spinner"></div>
+      <p class="loading-text">正在加载记忆数据...</p>
     </div>
+    <div v-else>
+      <div class="page-header animate-sitewide-enter">
+        <div class="title-group">
+          <h3 class="greeting-title">记忆回路与情绪锚点</h3>
+        </div>
+      </div>
 
     <div class="filter-bar animate-sitewide-enter delay-100">
       <div class="filter-tabs">
@@ -50,6 +55,7 @@
             <div
                 v-for="(item, index) in displayList"
                 :key="item.id"
+                v-memo="[item.id, item.content, item.imageUrl, item.date]"
                 class="memory-card"
                 @click="openMemory(item)"
                 :style="{ '--delay': index * 0.08 + 's' }"
@@ -57,7 +63,19 @@
               <div class="memory-date">{{ formatCardDate(item) }}</div>
 
               <div v-if="currentTab === 'journal'" class="memory-content-mini journal-style">
-                <div v-if="item.imageUrl" class="mini-cover" :style="{ backgroundImage: `url(${item.imageUrl})` }"></div>
+                <div class="mini-cover-wrapper">
+                  <template v-if="item.imageUrl">
+                    <img :src="item.imageUrl"
+                         class="mini-cover"
+                         alt=""
+                         loading="lazy"
+                         @error="onImageError($event, item)"
+                    >
+                  </template>
+                  <div v-else class="mini-cover-placeholder">
+                    <span class="placeholder-icon">✧</span>
+                  </div>
+                </div>
                 <div class="journal-text-area">
                   <div class="mini-quote">{{ item.title || '无主题日记' }}</div>
                   <div class="mini-desc">{{ item.content }}</div>
@@ -106,8 +124,8 @@
 
     <teleport to="body">
       <transition name="modal-fade">
-        <div v-if="currentMemory" class="memory-modal-overlay" @click.self="closeMemory">
-          <div class="memory-modal-window">
+        <div v-if="currentMemory" class="memory-modal-overlay" @click="closeMemory">
+          <div class="memory-modal-window" @click.stop>
             <div class="modal-close-btn" @click="closeMemory">✕</div>
 
             <div class="modal-header">
@@ -169,11 +187,12 @@
         </div>
       </transition>
     </teleport>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, onBeforeUnmount, watch } from 'vue';
 import { API } from '@/config/api';
 import request from '@/utils/request';
 
@@ -200,6 +219,9 @@ const selectFilter = (option) => {
 
 const closeFilter = () => { isFilterOpen.value = false; };
 
+let _isMounted = true
+onBeforeUnmount(() => { _isMounted = false })
+
 onMounted(() => {
   window.addEventListener('click', closeFilter);
   fetchData(); //  初始化加载
@@ -209,13 +231,17 @@ onUnmounted(() => {
   window.removeEventListener('click', closeFilter);
 });
 
-/* 切换 tab 自动请求 */
+/* 切换 tab 自动请求（组件活跃时才执行） */
+let _isFetchingData = false
 watch(currentTab, () => {
+  if (_isFetchingData) return
   fetchData();
 });
 
 /* ---------------- 数据请求 ---------------- */
 const fetchData = async () => {
+  if (_isFetchingData) return // 防并发
+  _isFetchingData = true
   loading.value = true;
 
   try {
@@ -229,19 +255,25 @@ const fetchData = async () => {
 
     if (currentTab.value === 'anchor') {
       res = await request.get(API.ANCHOR_LIST, { params });
+      if (!_isMounted) return
 
-      anchorList.value = res?.data?.data || res?.data || [];
+      anchorList.value = res?.data?.data ?? res?.data ?? [];
 
     } else {
       res = await request.get(API.MEMORY_LIST, { params });
+      if (!_isMounted) return
 
-      journalList.value = res?.data?.data || res?.data || [];
+      journalList.value = res?.data?.data ?? res?.data ?? [];
     }
 
   } catch (e) {
+    if (!_isMounted) return
     console.error('Failed to fetch memory data:', e);
   } finally {
-    loading.value = false;
+    if (_isMounted) {
+      loading.value = false;
+    }
+    _isFetchingData = false
   }
 };
 
@@ -252,19 +284,36 @@ const displayList = computed(() =>
         : anchorList.value
 );
 
+/* ---------------- 图片加载失败兜底 ---------------- */
+function onImageError(event, item) {
+  const img = event.target
+  img.style.display = 'none'
+  // 在 img 后面插入占位元素
+  const wrapper = img.closest('.mini-cover-wrapper')
+  if (wrapper && !wrapper.querySelector('.mini-cover-fallback')) {
+    const fallback = document.createElement('div')
+    fallback.className = 'mini-cover-fallback'
+    fallback.innerHTML = '<span class="placeholder-icon">✧</span>'
+    wrapper.appendChild(fallback)
+  }
+}
+
 /* ---------------- 工具函数 ---------------- */
 const formatCardDate = (item) => {
-  if (item.memory_date) return item.memory_date;
-  if (item.start_time) return item.start_time.split(' ')[0];
+  // MemoryVO 返回 date（日记日期）或 startTime（锚点开始时间，ISO 格式）
+  if (item.date) return item.date;
+  if (item.startTime) return item.startTime.substring(0, 10);
   return '';
 };
 
 const formatModalDate = (item) => {
-  if (item.memory_date) return item.memory_date;
+  if (item.date) return item.date;
 
-  if (item.start_time && item.end_time) {
-    return `${item.start_time} to ${item.end_time.split(' ')[1]}`;
+  if (item.startTime && item.endTime) {
+    return `${item.startTime.substring(0, 10)} ${item.startTime.substring(11, 16)} - ${item.endTime.substring(11, 16)}`;
   }
+
+  if (item.startTime) return item.startTime.substring(0, 16);
 
   return '';
 };
@@ -325,13 +374,33 @@ const getDeltaColor = (val) => {
 .memory-content-mini { background: rgba(255, 255, 255, 0.02); border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.05); transition: all 0.3s ease; overflow: hidden; }
 .memory-card:hover .memory-content-mini { background: rgba(255, 255, 255, 0.05); transform: translateX(5px); }
 
-/* --- 日记卡片 16:9 缩略图 --- */
-.mini-cover {
+/* --- 日记卡片图片容器 --- */
+.mini-cover-wrapper {
   margin: -1px -1px 0 -1px; /* 抵消 border */
-  aspect-ratio: 16 / 9; /* 强制 16:9 */
-  background-size: cover;
-  background-position: center;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  position: relative;
+  background: rgba(255,255,255,0.02);
   border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.mini-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover; /* 1K 方图适配 16:9 容器，裁切上下 */
+  display: block;
+}
+.mini-cover-placeholder,
+.mini-cover-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(255,255,255,0.02), rgba(255,255,255,0.05));
+}
+.placeholder-icon {
+  font-size: 28px;
+  color: rgba(255,255,255,0.12);
 }
 .journal-text-area { padding: 18px; }
 .mini-quote { font-size: 15px; color: #fff; font-weight: 500; margin-bottom: 10px; }
@@ -409,13 +478,46 @@ const getDeltaColor = (val) => {
 .fade-slide-enter-active, .fade-slide-leave-active { transition: all 0.3s; }
 .fade-slide-enter-from, .fade-slide-leave-to { opacity: 0; transform: translateY(-10px); }
 .memory-list-enter-active { transition: all 0.6s ease; transition-delay: var(--delay); }
+.memory-list-leave-active { transition: all 0.3s ease; }
+.memory-list-move { transition: all 0.4s ease; }
 .memory-list-enter-from { opacity: 0; transform: translateX(-15px); }
+.memory-list-leave-to { opacity: 0; transform: translateX(15px); }
 .page-switch-enter-active, .page-switch-leave-active { transition: all 0.4s ease; }
 .page-switch-enter-from { opacity: 0; transform: translateY(5px); }
 .page-switch-leave-to { opacity: 0; transform: translateY(-5px); }
-.modal-fade-enter-active, .modal-fade-leave-active { transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+.modal-fade-enter-active { transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+.modal-fade-leave-active { transition: all 0.3s cubic-bezier(0.6, 0, 0.4, 1); }
 .modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
 .modal-fade-enter-from .memory-modal-window { transform: scale(0.96) translateY(20px); }
 .animate-sitewide-enter { animation: fadeInDown 0.8s ease forwards; }
 @keyframes fadeInDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Loading state styles */
+.loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgba(255,255,255,0.1);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.loading-text {
+  font-size: 13px;
+  color: rgba(255,255,255,0.5);
+  letter-spacing: 1px;
+  margin-top: 12px;
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Container for loading state */
+.state-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  text-align: center;
+}
 </style>

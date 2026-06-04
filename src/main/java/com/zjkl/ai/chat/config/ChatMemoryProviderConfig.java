@@ -10,11 +10,15 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 public class ChatMemoryProviderConfig {
+
+    /** 聊天记忆窗口大小（消息条数），200 条过大浪费 token，40 条≈20 轮对话足够 */
+    private static final int MAX_MESSAGES = 40;
+
     @Bean
     public ChatMemoryProvider redisChatMemoryProvider(RedisChatMemoryStore redisChatMemoryStore){
         return memoryId -> MessageWindowChatMemory.builder()
                         .chatMemoryStore(redisChatMemoryStore)
-                        .maxMessages(200)
+                        .maxMessages(MAX_MESSAGES)
                         .id(memoryId.toString())
                         .build();
     }

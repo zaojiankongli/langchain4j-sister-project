@@ -25,10 +25,9 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, reactive } from 'vue'
-import axios from 'axios'
-
-const WEATHER_API_KEY = import.meta.env.VITE_WEATHER_API_KEY || ''
+import { ref, onMounted, onUnmounted, onBeforeUnmount, reactive } from 'vue'
+import request from '@/utils/request'
+import { useUiStore } from '@/stores/ui'
 
 const timeStr = ref('')
 const dateStr = ref('')
@@ -41,8 +40,9 @@ const weatherInfo = reactive({
   icon: '☁️',
   moodText: '正在连接感知...'
 })
+const uiStore = useUiStore()
 
-// 情绪映射（可根据你的"妹相随"风格扩展）
+// 情绪映射
 const moodConfig = {
   '晴': '是适合出去走走的一天',
   '多云': '云朵厚厚的，适合发呆',
@@ -52,26 +52,7 @@ const moodConfig = {
   'default': '今天也要加油呀'
 }
 
-const weatherCodeMap = {
-  thunderstorm: '⛈️', drizzle: '🌦️', rain: '🌧️',
-  snow: '🌨️', mist: '🌫️', smoke: '🌫️', haze: '🌫️',
-  dust: '🌫️', fog: '🌫️', sand: '🌫️', ash: '🌫️',
-  squall: '💨', tornado: '🌪️', clear: '☀️', clouds: '☁️'
-}
-
-const getWeatherIcon = (id) => {
-  // OpenWeatherMap codes
-  if (id >= 200 && id < 300) return weatherCodeMap.thunderstorm
-  if (id >= 300 && id < 400) return weatherCodeMap.drizzle
-  if (id >= 500 && id < 600) return weatherCodeMap.rain
-  if (id >= 600 && id < 700) return weatherCodeMap.snow
-  if (id >= 700 && id < 800) return weatherCodeMap.mist
-  if (id === 800) return weatherCodeMap.clear
-  if (id > 800) return weatherCodeMap.clouds
-  return '☁️'
-}
-
-// WMO weather code to icon mapping (used by Open-Meteo)
+// WMO weather code to icon
 const wmoWeatherIcons = {
   0: '☀️', 1: '☀️', 2: '⛅', 3: '☁️',
   45: '🌫️', 48: '🌫️',
@@ -114,37 +95,21 @@ const updateTime = () => {
   weekStr.value = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][now.getDay()]
 }
 
-const fetchWeatherByCoords = async (lat, lon) => {
-  const res = await axios.get('https://api.openweathermap.org/data/2.5/weather', {
-    params: { lat, lon, appid: WEATHER_API_KEY, units: 'metric', lang: 'zh_cn' },
-    timeout: 8000
-  })
-  return res.data
-}
+let timeTimer = null
+let _isMounted = true
 
-const fetchLocationByIP = async () => {
-  const res = await axios.get('https://ip-api.com/json/', {
-    params: { fields: 'status,city,lat,lon' },
-    timeout: 5000
-  })
-  return res.data
-}
+onBeforeUnmount(() => { _isMounted = false })
 
-const fetchWeatherFromOpenMeteo = async (lat, lon) => {
-  const res = await axios.get('https://api.open-meteo.com/v1/forecast', {
-    params: { latitude: lat, longitude: lon, current_weather: true, timezone: 'auto' },
-    timeout: 8000
-  })
-  return res.data
-}
-
-const applyWeather = (data) => {
-  if (data && data.cod === 200) {
-    weatherInfo.city = data.name
-    weatherInfo.temp = Math.round(data.main.temp)
-    weatherInfo.desc = data.weather[0].description
-    weatherInfo.icon = getWeatherIcon(data.weather[0].id)
-    weatherInfo.moodText = getMoodText(weatherInfo.desc)
+const fetchOpenMeteo = async (lat, lon) => {
+  try {
+    const res = await request.get('https://api.open-meteo.com/v1/forecast', {
+      params: { latitude: lat, longitude: lon, current_weather: true, timezone: 'auto' },
+      timeout: 8000
+    })
+    return res
+  } catch (e) {
+    console.warn('StatusPanel fetchOpenMeteo:', e)
+    return null
   }
 }
 
@@ -161,57 +126,89 @@ const applyOpenMeteoWeather = (data, cityName) => {
   return false
 }
 
+const CACHE_KEY = 'zeeva-weather-cache'
+const CACHE_TTL = 1000 * 60 * 30 // 30 分钟
+
+function loadCache() {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY)
+    if (!raw) return false
+    const cache = JSON.parse(raw)
+    if (Date.now() - cache.timestamp > CACHE_TTL) {
+      localStorage.removeItem(CACHE_KEY)
+      return false
+    }
+    Object.assign(weatherInfo, cache.data)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function saveCache() {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      timestamp: Date.now(),
+      data: { ...weatherInfo }
+    }))
+  } catch { /* quota exceeded */ }
+}
+
 const fetchWeather = async () => {
-  try {
-    // 优先：浏览器定位 → OpenWeatherMap (需要 API key)
-    if (navigator.geolocation) {
-      const data = await new Promise((resolve) => {
-        navigator.geolocation.getCurrentPosition(
-            ({ coords }) => resolve(fetchWeatherByCoords(coords.latitude, coords.longitude)),
-            () => resolve(null),
-            { timeout: 5000 }
-        )
-      })
-      if (data && data.cod === 200) { applyWeather(data); return }
-    }
-  } catch {
-    // OpenWeatherMap 失败，走兜底
-  }
+  // 缓存命中直接返回
+  if (loadCache()) return
 
-  // 兜底：ip-api.com 获取位置 → Open-Meteo 获取真实天气
-  try {
-    const ipData = await fetchLocationByIP()
-    if (ipData && ipData.status === 'success' && ipData.lat && ipData.lon) {
-      const meteoData = await fetchWeatherFromOpenMeteo(ipData.lat, ipData.lon)
-      if (applyOpenMeteoWeather(meteoData, ipData.city)) return
-    }
-  } catch {
-    // 兜底也失败
-  }
+   // 策略 1：浏览器定位 → Open-Meteo（无需 API key）
+   if (navigator.geolocation) {
+     try {
+       const pos = await new Promise((resolve, reject) => {
+         navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 })
+       })
+       if (!_isMounted) return
+       const meteoData = await fetchOpenMeteo(pos.coords.latitude, pos.coords.longitude)
+       if (!_isMounted) return
+       if (applyOpenMeteoWeather(meteoData, '')) { saveCache(); return }
+     } catch {
+       if (!_isMounted) return
+       uiStore.error('获取地理位置失败，将尝试其他方式获取天气')
+     }
+   }
 
+   // 策略 2：ip-api.com → Open-Meteo
+   try {
+     const res = await request.get('https://ip-api.com/json/', {
+       params: { fields: 'status,city,lat,lon' },
+       timeout: 5000
+     })
+     if (!_isMounted) return
+     if (res && res.status === 'success' && res.lat && res.lon) {
+       const meteoData = await fetchOpenMeteo(res.lat, res.lon)
+       if (!_isMounted) return
+       if (applyOpenMeteoWeather(meteoData, res.city)) { saveCache(); return }
+     }
+   } catch {
+     if (!_isMounted) return
+     uiStore.error('获取网络位置失败，将使用默认天气信息')
+   }
+
+  // 全部失败
+  if (!_isMounted) return
   weatherInfo.temp = '--'
-  weatherInfo.desc = '天气查询失败'
+  weatherInfo.desc = ''
   weatherInfo.city = ''
   weatherInfo.moodText = '断开了和外界的联系呢...'
 }
 
-let timeTimer = null
-let weatherTimer = null
-
 /**
- * 可见性变化时暂停/恢复定时器，避免后台标签页浪费资源
+ * 可见性变化时暂停/恢复时间定时器
  */
 const handleVisibilityChange = () => {
   if (document.hidden) {
     clearInterval(timeTimer)
-    clearInterval(weatherTimer)
     timeTimer = null
-    weatherTimer = null
   } else if (!timeTimer) {
     updateTime()
-    fetchWeather()
     timeTimer = setInterval(updateTime, 1000)
-    weatherTimer = setInterval(fetchWeather, 1000 * 60 * 30)
   }
 }
 
@@ -220,13 +217,11 @@ onMounted(() => {
   fetchWeather()
 
   timeTimer = setInterval(updateTime, 1000)
-  weatherTimer = setInterval(fetchWeather, 1000 * 60 * 30)
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
 onUnmounted(() => {
   clearInterval(timeTimer)
-  clearInterval(weatherTimer)
   document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>

@@ -33,6 +33,7 @@
               <div
                   v-for="mail in mailList"
                   :key="mail.id"
+                  v-memo="[mail.id, mail.is_read, mail.subject, mail.excerpt, mail.tag, mail.date]"
                   class="mail-card"
                   :class="{ 'is-read': mail.is_read }"
                   @click="markAsRead(mail)"
@@ -56,13 +57,18 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import request from '@/utils/request'
-import { useAuthStore } from '@/stores/auth'
+import { API } from '@/config/api'
+import { useUiStore } from '@/stores/ui'
+
+let _isMounted = true
+onBeforeUnmount(() => { _isMounted = false })
 
 // --- 状态定义 ---
 const isOverlayOpen = ref(false)
 const mailList = ref([])
+const uiStore = useUiStore()
 
 // --- 计算属性 ---
 // 1. 是否有未读消息（决定外层大红点和"一键已读"按钮显示）
@@ -78,19 +84,19 @@ const latestMessage = computed(() => {
 
 // --- 方法：对接后端 ---
 
-// 1. 初始化获取邮件列表
+// 1. 初始化获取邮件列表（后端从 UserContext 获取当前用户）
 const fetchMails = async () => {
   try {
-    const userId = useAuthStore().userId
-    if (!userId) return
-    const res = await request.get(API.MAIL_LIST(userId))
+    const res = await request.get(API.MAIL_LIST)
+    if (!_isMounted) return
     if (res.code === 200 && Array.isArray(res.data)) {
       mailList.value = res.data
     }
   } catch (error) {
+    if (!_isMounted) return
     console.error("邮件加载失败", error)
+    uiStore.error('邮件加载失败，请稍后重试')
   }
-    }
 }
 
 // 2. 单条标记已读
@@ -101,7 +107,7 @@ const markAsRead = async (mail) => {
     await request.post(API.MAIL_READ(mail.id))
     mail.is_read = true
   } catch {
-    // 静默失败
+    uiStore.error('标记已读失败，请稍后重试')
   }
 }
 
@@ -113,7 +119,7 @@ const markAllAsRead = async () => {
       mail.is_read = true
     })
   } catch {
-    // 静默失败
+    uiStore.error('全部标记为已读失败，请稍后重试')
   }
 }
 
@@ -276,7 +282,6 @@ onMounted(() => {
   position: relative;
   overflow: hidden;
 }
-
 .mail-card:hover {
   box-shadow: 0 20px 40px rgba(0,0,0,0.05);
   transform: translateY(-5px);

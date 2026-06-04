@@ -54,17 +54,22 @@
       >
         <div class="card-glass-glow"></div>
 
-        <div class="card-cover">
-          <img v-if="item.cover" :src="item.cover" :alt="item.title">
+        <div class="card-cover" :data-broken="item._imgBroken ? '' : undefined">
+          <img v-if="(item.imageUrl || item.cover) && !item._imgBroken"
+               :src="item.imageUrl || item.cover"
+               :alt="item.title"
+               @error="handleImgError(item)"
+               loading="lazy"
+          >
           <div v-else class="cover-placeholder" :class="item.resourceType || item.type">
             <span class="placeholder-icon">{{ getPlaceholderIcon(item.resourceType || item.type) }}</span>
           </div>
 
           <div class="type-tag">{{ getResourceTypeLabel(item.resourceType || item.type) }}</div>
 
-          <div v-if="item.relevanceScore" class="relevance-badge">
-            匹配度 {{ (item.relevanceScore * 100).toFixed(0) }}%
-          </div>
+<div v-if="item.relevanceScore" class="relevance-badge">
+             匹配度 {{ formatScore(item.relevanceScore) }}%
+           </div>
         </div>
 
         <div class="card-info">
@@ -98,14 +103,12 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed } from 'vue';
+import { useAsyncData } from '@/composables/useAsyncData';
 import request from '@/utils/request';
 import { API } from '@/config/api';
 
 // --- 状态与分类 ---
-const loading = ref(false);
-const error = ref(null);
-const resources = ref([]);
 const currentCat = ref('all');
 
 // 融合新版标签样式与旧版分类逻辑
@@ -116,60 +119,54 @@ const categories = [
   { id: 'article', name: '深度阅读' }
 ];
 
-// --- 问候语逻辑 ---
-const greetingData = computed(() => {
-  const hour = new Date().getHours();
-  if (hour >= 5 && hour < 12) {
-    return { text: '早安，开始新的一天', class: 'greeting-morning' };
-  } else if (hour >= 12 && hour < 14) {
-    return { text: '午安，稍作休息吧', class: 'greeting-noon' };
-  } else if (hour >= 14 && hour < 18) {
-    return { text: '下午好，继续保持专注', class: 'greeting-afternoon' };
-  } else if (hour >= 18 && hour < 22) {
-    return { text: '晚上好，沉淀今日的思绪', class: 'greeting-evening' };
-  } else {
-    return { text: '夜深了，注意休息哦', class: 'greeting-night' };
-  }
+// --- 问候语逻辑（稳定 computed，避免每次返回新对象触发下游重渲染）---
+const _greetingHour = computed(() => new Date().getHours())
+
+const greeting = computed(() => {
+  const hour = _greetingHour.value;
+  if (hour >= 5 && hour < 12) return '早安，开始新的一天';
+  if (hour >= 12 && hour < 14) return '午安，稍作休息吧';
+  if (hour >= 14 && hour < 18) return '下午好，继续保持专注';
+  if (hour >= 18 && hour < 22) return '晚上好，沉淀今日的思绪';
+  return '夜深了，注意休息哦';
 });
 
-const greeting = computed(() => greetingData.value.text);
-const greetingClass = computed(() => greetingData.value.class);
+const greetingClass = computed(() => {
+  const hour = _greetingHour.value;
+  if (hour >= 5 && hour < 12) return 'greeting-morning';
+  if (hour >= 12 && hour < 14) return 'greeting-noon';
+  if (hour >= 14 && hour < 18) return 'greeting-afternoon';
+  if (hour >= 18 && hour < 22) return 'greeting-evening';
+  return 'greeting-night';
+});
 
 // --- 核心业务逻辑  ---
-async function loadRecommendations() {
-  loading.value = true;
-  error.value = null;
-  try {
-    const result = await request({
-      url: API.AI_RECOM,
-      method: 'get'
-    });
-    if (result.code === 200) {
-      const data = result.data;
-      resources.value = Array.isArray(data) ? data : (data?.list || data?.records || []);
-    } else {
-      error.value = result.message || '数据同步未完成';
-    }
-  } catch (e) {
-    console.error('加载资源推荐失败:', e);
-    error.value = '神经链接断开，请检查网络';
-  } finally {
-    loading.value = false;
+const { data: resources, loading, error, execute: loadRecommendations } = useAsyncData(async () => {
+  const result = await request({ url: API.AI_RECOM, method: 'get' })
+  if (result.code === 200) {
+    const d = result.data
+    return Array.isArray(d) ? d : (d?.list || d?.records || [])
   }
+  throw new Error(result.message || '数据同步未完成')
+})
+
+// 推荐图片加载失败 → 标记为 broken，显示 placeholder
+function handleImgError(item) {
+  item._imgBroken = true
 }
 
 async function handleResourceClick(resource) {
-  try {
-    await request({
-      url: API.AI_RECOM_CLICK,
-      method: 'post',
-      params: { id: resource.id }
-    });
-    resource.isClicked = true;
-  } catch (e) {
-    console.error('记录点击失败:', e);
+    try {
+      await request({
+        url: API.AI_RECOM_CLICK,
+        method: 'post',
+        params: { id: resource.id }
+      });
+      resource.isClicked = true;
+    } catch (e) {
+      console.error('记录点击失败:', e);
+    }
   }
-}
 
 // --- 视觉映射工具函数 ---
 function getResourceTypeLabel(type) {
@@ -182,28 +179,37 @@ function getResourceTypeLabel(type) {
 }
 
 function getPlaceholderIcon(type) {
-  switch (type) {
-    case 'video': return '▶';
-    case 'article': return '✎';
-    case 'document': return '🗂';
-    default: return '📄';
-  }
+   switch (type) {
+     case 'video': return '▶';
+     case 'article': return '✎';
+     case 'document': return '🗂';
+     default: return '📄';
+   }
+}
+
+function formatScore(score) {
+   return (score * 100).toFixed(0);
 }
 
 // --- 计算属性：过滤资源 ---
+let _prevFilteredRes = null
+let _prevFilteredCat = ''
+let _cachedFilteredRes = []
 const filteredResources = computed(() => {
-  if (!resources.value || resources.value.length === 0) return [];
-  if (currentCat.value === 'all') return resources.value;
-
-  return resources.value.filter(item => {
-    const itemType = item?.resourceType || item?.type;
-    return itemType === currentCat.value;
-  });
-});
-
-onMounted(() => {
-  loadRecommendations();
-});
+  const cat = currentCat.value
+  const res = resources.value
+  // 当 resources 引用和 currentCat 都未变化时，返回稳定的数组引用
+  if (res === _prevFilteredRes && cat === _prevFilteredCat) return _cachedFilteredRes
+  _prevFilteredRes = res
+  _prevFilteredCat = cat
+  if (!res || res.length === 0) { _cachedFilteredRes = []; return _cachedFilteredRes }
+  if (cat === 'all') { _cachedFilteredRes = res; return _cachedFilteredRes }
+  _cachedFilteredRes = res.filter(item => {
+    const itemType = item?.resourceType || item?.type
+    return itemType === cat
+  })
+  return _cachedFilteredRes
+})
 </script>
 
 <style scoped>

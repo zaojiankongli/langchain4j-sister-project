@@ -1,9 +1,7 @@
 package com.zjkl.user.service.impl;
 
-import com.google.gson.Gson;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zjkl.memory.mapper.ConversationMemoryMapper;
 import com.zjkl.user.domain.ConversationMemory;
 import com.zjkl.user.domain.User;
@@ -36,7 +34,7 @@ public class InterestTagGenerateServiceImpl implements InterestTagGenerateServic
     private final UntypedAgent tagWorkflow;
     private final UserProfileMapper userProfileMapper;
     private final ConversationMemoryMapper conversationMemoryMapper;
-    private final Gson gson = new Gson();
+    private final ObjectMapper objectMapper;
 
     @Autowired
     @Lazy
@@ -44,10 +42,12 @@ public class InterestTagGenerateServiceImpl implements InterestTagGenerateServic
 
     public InterestTagGenerateServiceImpl(UntypedAgent tagWorkflow,
                                            UserProfileMapper userProfileMapper,
-                                           ConversationMemoryMapper conversationMemoryMapper) {
+                                           ConversationMemoryMapper conversationMemoryMapper,
+                                           ObjectMapper objectMapper) {
         this.tagWorkflow = tagWorkflow;
         this.userProfileMapper = userProfileMapper;
         this.conversationMemoryMapper = conversationMemoryMapper;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -109,7 +109,7 @@ public class InterestTagGenerateServiceImpl implements InterestTagGenerateServic
 
         } catch (Exception e) {
             log.error("用户 {} 标签生成失败", userId, e);
-            return new ArrayList<>();
+            throw new RuntimeException("标签生成失败: " + userId, e);
         }
     }
 
@@ -139,27 +139,26 @@ public class InterestTagGenerateServiceImpl implements InterestTagGenerateServic
      * 解析工作流返回的标签结果
      */
     private List<String> parseGeneratedTags(String result) {
+        if (result == null || result.isBlank()) {
+            return new ArrayList<>();
+        }
+
         List<String> tags = new ArrayList<>();
+        String cleanJson = stripMarkdownJson(result);
 
         try {
-            if (result == null || result.isBlank()) {
-                return tags;
-            }
-
-            String cleanJson = stripMarkdownJson(result);
-            JsonObject jsonObj = gson.fromJson(cleanJson, JsonObject.class);
-
-            if (jsonObj.has("scoredTags") && !jsonObj.get("scoredTags").isJsonNull()) {
-                JsonArray tagsArray = jsonObj.getAsJsonArray("scoredTags");
-                for (JsonElement el : tagsArray) {
-                    String tag = el.getAsString().trim();
+            JsonNode root = objectMapper.readTree(cleanJson);
+            JsonNode scoredTags = root.path("scoredTags");
+            if (scoredTags.isArray()) {
+                for (JsonNode el : scoredTags) {
+                    String tag = el.asText().trim();
                     if (!tag.isEmpty() && tag.length() >= 2 && tag.length() <= 8) {
                         tags.add(tag);
                     }
                 }
             }
         } catch (Exception e) {
-            log.error("解析标签结果失败: {}", e.getMessage());
+            log.warn("解析标签 JSON 失败: {}", e.getMessage());
         }
 
         return tags;

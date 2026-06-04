@@ -3,6 +3,8 @@ package com.zjkl.user.service.impl;
 
 import com.zjkl.ai.component.UserActivityTracker;
 import com.zjkl.ai.oss.service.OssService;
+import com.zjkl.common.ErrorCode;
+import com.zjkl.common.exception.BusinessException;
 import com.zjkl.user.domain.User;
 import com.zjkl.user.domain.dto.UserProfileUpdateDTO;
 import com.zjkl.user.domain.vo.UserProfileVO;
@@ -54,6 +56,19 @@ public class UserProfileServiceImpl implements UserProfileService {
     }
     
     @Override
+    public String[] getProfileForChat(String userId) {
+        User user = userProfileMapper.findUserById(userId);
+        if (user == null) {
+            return null;
+        }
+        return new String[]{
+                user.getUsername(),
+                user.getHobbies(),
+                user.getUserProfile()
+        };
+    }
+
+    @Override
     public UserProfileVO getProfile(String userId) {
         log.info("获取用户 {} 的资料", userId);
         
@@ -62,7 +77,7 @@ public class UserProfileServiceImpl implements UserProfileService {
         // 1. 基础用户信息
         User user = userProfileMapper.findUserById(userId);
         if (user == null) {
-            throw new RuntimeException("用户不存在：" + userId);
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND);
         }
         BeanUtils.copyProperties(user, vo);
         // 补充 BeanUtils.copyProperties 未覆盖的字段
@@ -138,7 +153,7 @@ public class UserProfileServiceImpl implements UserProfileService {
         );
         
         if (rows == 0) {
-            throw new RuntimeException("更新用户资料失败");
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND.getCode(), "更新用户资料失败");
         }
         
         log.info("用户 {} 资料更新成功", userId);
@@ -150,7 +165,7 @@ public class UserProfileServiceImpl implements UserProfileService {
         log.info("更新用户 {} 基本信息: username={}, gender={}", userId, username, gender);
         int rows = userProfileMapper.updateUserBasic(userId, username, gender);
         if (rows == 0) {
-            throw new RuntimeException("更新基本信息失败");
+            throw new BusinessException("更新基本信息失败");
         }
     }
     
@@ -160,7 +175,7 @@ public class UserProfileServiceImpl implements UserProfileService {
         log.info("更新用户 {} 爱好", userId);
         int rows = userProfileMapper.updateUserHobbies(userId, hobbies);
         if (rows == 0) {
-            throw new RuntimeException("更新爱好失败");
+            throw new BusinessException("更新爱好失败");
         }
     }
     
@@ -170,7 +185,7 @@ public class UserProfileServiceImpl implements UserProfileService {
         log.info("更新用户 {} AI类型: {}", userId, aiType);
         int rows = userProfileMapper.updateUserAiType(userId, aiType);
         if (rows == 0) {
-            throw new RuntimeException("更新AI类型失败");
+            throw new BusinessException("更新AI类型失败");
         }
     }
     
@@ -196,7 +211,7 @@ public class UserProfileServiceImpl implements UserProfileService {
             // 更新数据库
             int rows = userProfileMapper.updateUserAvatar(userId, ossUrl);
             if (rows == 0) {
-                throw new RuntimeException("更新头像失败：用户不存在");
+                throw new BusinessException(ErrorCode.USER_NOT_FOUND);
             }
             
             log.info("用户 {} 头像上传成功：{}", userId, ossUrl);
@@ -208,10 +223,10 @@ public class UserProfileServiceImpl implements UserProfileService {
             throw e;
         } catch (IOException e) {
             log.error("上传头像失败 - userId: {}, filename: {}", userId, file.getOriginalFilename(), e);
-            throw new RuntimeException("上传失败：" + e.getMessage());
+            throw new BusinessException(ErrorCode.OSS_UPLOAD_FAILED.getCode(), "上传头像失败，请稍后重试");
         } catch (Exception e) {
             log.error("上传头像异常 - userId: {}", userId, e);
-            throw new RuntimeException("上传失败：" + e.getMessage());
+            throw new BusinessException(ErrorCode.OSS_UPLOAD_FAILED.getCode(), "上传头像失败");
         }
     }
 }

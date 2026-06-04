@@ -23,8 +23,7 @@ public class WakeUpPromptBuilder {
         if (state.activeAnchorContext() != null) {
             sb.append(state.activeAnchorContext());
         }
-        if (!"无历史锚点事件".equals(state.recentAnchorSummary())
-                && !"无已结束的锚点事件".equals(state.recentAnchorSummary())) {
+        if (!"无历史锚点事件".equals(state.recentAnchorSummary())) {
             if (!sb.isEmpty()) sb.append("；");
             sb.append(state.recentAnchorSummary());
         }

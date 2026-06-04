@@ -1,7 +1,7 @@
 package com.zjkl.common.config;
 
 import com.zjkl.common.config.properties.RedisProperties;
-import lombok.RequiredArgsConstructor;
+import com.zjkl.common.config.properties.ThreadPoolProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.Redisson;
 import org.redisson.api.RedissonClient;
@@ -14,14 +14,19 @@ import org.springframework.context.annotation.Configuration;
  */
 @Configuration
 @Slf4j
-@RequiredArgsConstructor
 public class RedissonConfig {
 
     private final RedisProperties redisProperties;
+    private final ThreadPoolProperties threadPoolProperties;
+
+    public RedissonConfig(RedisProperties redisProperties, ThreadPoolProperties threadPoolProperties) {
+        this.redisProperties = redisProperties;
+        this.threadPoolProperties = threadPoolProperties;
+    }
     
     /**
      * 创建 Redisson 客户端
-     *
+     * 连接池大小通过 app.thread-pool.redisson-pool-size 配置（默认 32，2 核推荐值）
      */
     @Bean
     public RedissonClient redissonClient() {
@@ -35,8 +40,11 @@ public class RedissonConfig {
         if (password != null && !password.isEmpty()) {
             singleServerConfig.setPassword(password);
         }
-        singleServerConfig.setConnectionMinimumIdleSize(10);
-        singleServerConfig.setConnectionPoolSize(64);
+        int minIdle = threadPoolProperties.getRedissonMinIdle();
+        int poolSize = threadPoolProperties.getRedissonPoolSize();
+        singleServerConfig.setConnectionMinimumIdleSize(minIdle);
+        singleServerConfig.setConnectionPoolSize(poolSize);
+        log.info("Redisson 连接池配置：minIdle={}, poolSize={}", minIdle, poolSize);
         
         RedissonClient redissonClient = Redisson.create(config);
         

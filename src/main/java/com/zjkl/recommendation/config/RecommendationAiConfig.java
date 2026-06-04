@@ -1,6 +1,7 @@
 package com.zjkl.recommendation.config;
 
 import com.zjkl.recommendation.assistant.FeedbackExtractor;
+import com.zjkl.recommendation.assistant.ImageUrlFetcher;
 import com.zjkl.recommendation.assistant.ProfileFetcher;
 import com.zjkl.recommendation.assistant.RecommendAccumulator;
 import com.zjkl.recommendation.assistant.ResourceRecommender;
@@ -25,10 +26,6 @@ import org.springframework.context.annotation.Configuration;
 @Slf4j
 @Configuration
 public class RecommendationAiConfig {
-
-    private static final int TARGET_COUNT = 15;
-
-    private static final int MAX_ITERATIONS = 5;
 
     @Bean("recommendationWorkflow")
     public UntypedAgent recommendationWorkflow(
@@ -56,22 +53,24 @@ public class RecommendationAiConfig {
         UntypedAgent searchScoreLoop = AgenticServices
                 .loopBuilder()
                 .subAgents(recommender, scorer, accumulator, feedbackExtractor)
-                .maxIterations(MAX_ITERATIONS)
+                .maxIterations(RecommendationConstants.MAX_ITERATIONS)
                 .testExitAtLoopEnd(true)
                 .exitCondition(this::checkPassingCount)
                 .outputKey(RecommendationConstants.OUTPUT_KEY_PASSING_RECOMMENDATIONS)
                 .build();
 
+        ImageUrlFetcher imageUrlFetcher = new ImageUrlFetcher();
+
         // Sequential 编排
         UntypedAgent workflow = AgenticServices
                 .sequenceBuilder()
-                .subAgents(profileFetcher, searchScoreLoop)
+                .subAgents(profileFetcher, searchScoreLoop, imageUrlFetcher)
                 .outputKey(RecommendationConstants.OUTPUT_KEY_PASSING_RECOMMENDATIONS)
                 .errorHandler(this::handleWorkflowError)
                 .build();
 
-        log.info("推荐工作流构建完成: Sequential(ProfileFetcher → Loop(maxIter={}, target={}))",
-                MAX_ITERATIONS, TARGET_COUNT);
+        log.info("推荐工作流构建完成: Sequential(ProfileFetcher → Loop(maxIter={}, target={}) → ImageUrlFetcher)",
+                RecommendationConstants.MAX_ITERATIONS, RecommendationConstants.TOP_N);
         return workflow;
     }
 
@@ -80,8 +79,8 @@ public class RecommendationAiConfig {
         try {
             String passing = scope.readState(RecommendationConstants.OUTPUT_KEY_PASSING_RECOMMENDATIONS, "[]");
             int count = JsonUtils.parseJsonArray(passing).size();
-            log.debug("退出条件检查: passingRecommendations 当前数量={}, 目标={}", count, TARGET_COUNT);
-            return count >= TARGET_COUNT;
+            log.debug("退出条件检查: passingRecommendations 当前数量={}, 目标={}", count, RecommendationConstants.TOP_N);
+            return count >= RecommendationConstants.TOP_N;
         } catch (Exception e) {
             log.error("退出条件检查异常", e);
         }

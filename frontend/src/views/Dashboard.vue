@@ -6,7 +6,7 @@
     <MailBox :style="mailBoxStyle" />
     <div class="fullscreen-bg-container">
       <div class="parallax-layer" :style="parallaxStyle">
-        <img src="../assets/背景2.png" class="base-bg-img breath-effect" draggable="false">
+        <img :src="themeBgSrc" class="base-bg-img breath-effect" draggable="false" loading="lazy" decoding="async" fetchpriority="low">
       </div>
       <div class="ambient-overlay" :style="ambientStyle"></div>
     </div>
@@ -16,6 +16,9 @@
 
       <div class="live2d-box" @click.stop="openNav">
         <div ref="live2dInnerRef" class="live2d-container"></div>
+        <div v-if="live2dLoadStatus === 'loading'" class="live2d-loading-overlay">
+          <div class="live2d-loading-spinner"></div>
+        </div>
       </div>
 
       <NavigationMenu
@@ -41,9 +44,9 @@
           <button class="close-btn" @click="activeTab = null">✕</button>
         </div>
       </div>
-      <div class="panel-body">
+      <div ref="panelBodyRef" class="panel-body">
           <div class="global-module-wrapper">
-            <keep-alive include="UserProfile,MemoryFragment,PersonalityCloud,EmotionPulse,ActionCenter">
+            <keep-alive include="UserProfile,MemoryFragment,EmotionPulse,ActionCenter,SettingsPanel">
               <component :is="currentView" />
             </keep-alive>
           </div>
@@ -66,135 +69,385 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, provide, defineAsyncComponent } from 'vue'
+  import { ref, computed, watch, onMounted, onBeforeUnmount, provide, defineAsyncComponent, nextTick } from 'vue'
+import { useGsapAnimation } from '@/composables/useGsapAnimation'
+import { useMouseParallax } from '@/composables/useMouseParallax'
 import { useRouter } from 'vue-router'
-import { clearToken } from '@/utils/auth'
 import { disconnect } from '@/utils/chatWebSocket'
-import { loadOml2d } from 'oh-my-live2d'
 import live2dModels from '@/config/live2d-models.json'
-import { Live2DMotionManager } from '@/utils/live2dMotionManager'
 import request from '@/utils/request'
+import { API } from '@/config/api'
+import { useSettingsStore } from '@/stores/settings'
+import { useUiStore } from '@/stores/ui'
+import { useAuthStore } from '@/stores/auth'
+import { OML2D_KEY } from '@/symbols'
+// ── ChatWindow 同步导入（输入框必须在首屏就绪） ──
 import ChatWindow from "@/components/chat/ChatWindow.vue"
-import NavigationMenu from "@/components/NavigationMenu.vue"
-import HistoryPanel from "@/components/HistoryPanel.vue"
-
-// 面板组件懒加载 — 每次只渲染一个，按需加载减小首屏包体积
+// ── 其余首屏不用的组件延迟加载 ──
+const NavigationMenu = defineAsyncComponent(() => import("@/components/NavigationMenu.vue"))
+const HistoryPanel = defineAsyncComponent(() => import("@/components/HistoryPanel.vue"))
 const UserProfile = defineAsyncComponent(() => import("@/components/dashboard/UserProfile.vue"))
 const MemoryFragment = defineAsyncComponent(() => import('@/components/dashboard/MemoryFragment.vue'))
-const PersonalityCloud = defineAsyncComponent(() => import('@/components/dashboard/PersonalityCloud.vue'))
 const EmotionPulse = defineAsyncComponent(() => import("@/components/dashboard/EmotionPulse.vue"))
 const ActionCenter = defineAsyncComponent(() => import('@/components/dashboard/ActionCenter.vue'))
+const SettingsPanel = defineAsyncComponent(() => import('@/components/settings/SettingsPanel.vue'))
 const MailBox = defineAsyncComponent(() => import("@/components/Panel/MailBox.vue"))
 const StatusPanel = defineAsyncComponent(() => import("@/components/Panel/StatusPanel.vue"))
 
+// 模块级常量：避免 computed 每次求值都创建新对象
+const viewMap = { 'user': UserProfile, 'memory': MemoryFragment, 'emotion': EmotionPulse, 'relation': EmotionPulse, 'action': ActionCenter, 'settings': SettingsPanel }
+// 模型配置缓存：initLive2D 重试时复用，避免重复 map
+// 缓存源为 live2d-models.json 静态 import，运行时不可变，因此不会过期
+let modelsCache = null
+
+// 首次 Live2D 空闲调度超时（ms），超过则降级为 setTimeout 兜底
+const LIVE2D_IDLE_TIMEOUT = 5000
+// Live2D 模型加载超时（ms），超时做重试
+const LIVE2D_LOAD_TIMEOUT = 15000
+
+const { gsap, timeline, entryStagger, rippleEffect } = useGsapAnimation()
+const { mouseX, mouseY } = useMouseParallax()
+
 const router = useRouter()
+let live2dInitTimer = null
+let gsapEnterTimer = null
+let _isAlive = true              // 组件存活标记，阻止卸载后的异步回调
+let _live2dGen = 0               // 生成计数器，每次 destroy 自增，使旧 onLoad 回调失效
 const activeLayer = ref('idle')
 const activeTab = ref(null)
 const chatWindowRef = ref(null)
 const live2dInnerRef = ref(null)
-const mouseX = ref(window.innerWidth / 2)
-const mouseY = ref(window.innerHeight / 2)
+const entered = ref(false)
 
+// ── 主题背景（从用户设置读取） ──
+const settingsStore = useSettingsStore()
+const uiStore = useUiStore()
+const themeBgSrc = computed(() => {
+  const themeId = settingsStore.settings?.themeId || 'default'
+  const bgMap = {
+    default: new URL('../assets/bk1.webp', import.meta.url).href,
+    bk2: new URL('../assets/bk2.webp', import.meta.url).href,
+    bk3: new URL('../assets/bk3.webp', import.meta.url).href,
+    bk4: new URL('../assets/bk4.webp', import.meta.url).href,
+    bk5: new URL('../assets/bk5.webp', import.meta.url).href,
+  }
+  return bgMap[themeId] || bgMap.default
+})
 
-// 新增：事件锁，防止 mousedown 导致底层的 click 穿透触发关闭
-const isTransitionLocked = ref(false)
+// ── 事件穿透防护 ──
+// 记录面板打开的时间戳，handleGlobalClick 检测到短时间内（<300ms）的 click 视为穿透忽略
+const lastPanelActionTime = ref(0)
 
-// --- Live2D 相关 ---
+// --- Live2D 相关（使用 oml2d 内置功能，去掉自定义 motionManager）---
 const oml2dInstance = ref(null)
-let motionManager = null
+const live2dLoadStatus = ref('idle') // idle | loading | success | fail
+let _initLive2Ding = false // 防并发
 
-// 在 setup 顶层 provide（保证子组件 inject 可获取响应式 ref）
-provide('oml2d', oml2dInstance)
+provide(OML2D_KEY, oml2dInstance)
 
-const initLive2D = () => {
-  if (!live2dInnerRef.value) return
-  const models = live2dModels.models.map(model => ({
-    name: model.name,
-    path: model.path,
-    scale: 0.12
-  }))
+/** 销毁 oml2d 实例，清理所有资源 */
+const destroyOml2d = () => {
+  _isAlive = false // 与 _live2dGen++ 同步写入，消除任何竞态窗口；即使从 onUnmounted 外部调用也保证安全
+  _live2dGen++ // 自增使所有待定 onLoad/loadTimer 回调失效
+  const inst = oml2dInstance.value
+  if (!inst) return
+  try {
+    inst.stopTipsIdle()
+    inst.clearTips()
+    inst.stageSlideOut()
+  } catch (e) {
+    console.warn('Dashboard destroyOml2d:', e)
+  }
+  // 恢复 document.oncopy（oml2d 内部注册，防止全局泄漏）
+  window.document.oncopy = null
+  if (live2dInnerRef.value) live2dInnerRef.value.innerHTML = ''
+  oml2dInstance.value = null
+  live2dLoadStatus.value = 'idle'
+}
 
-  oml2dInstance.value = loadOml2d({
+/** 加载模型重试 */
+const _live2dRetries = ref(0)
+const MAX_LIVE2D_RETRIES = 2
+const retryLive2D = () => {
+  if (!_isAlive) return
+  if (_live2dRetries.value >= MAX_LIVE2D_RETRIES) {
+    live2dLoadStatus.value = 'fail'
+    return
+  }
+  _live2dRetries.value++
+  console.warn(`Dashboard Live2D 模型加载失败，第 ${_live2dRetries.value} 次重试...`)
+  live2dLoadStatus.value = 'loading'
+  initLive2D()
+}
+
+const initLive2D = async () => {
+  if (!_isAlive || !live2dInnerRef.value || _initLive2Ding) return
+  _initLive2Ding = true
+  live2dLoadStatus.value = 'loading'
+
+  // 捕获当前 generation：所有异步回调都要与此比对，防止跨实例污染
+  const gen = ++_live2dGen
+
+  // 动态导入 oh-my-live2d（~976KB 延后加载，不阻塞首屏）
+  let loadOml2d
+  try {
+    const mod = await import('oh-my-live2d')
+    loadOml2d = mod.loadOml2d
+  } catch (e) {
+    console.error('Dashboard Live2D 模块加载失败:', e)
+    live2dLoadStatus.value = 'fail'
+    _initLive2Ding = false
+    return
+  }
+  // await 后再次校验组件存活性
+  if (!_isAlive || !live2dInnerRef.value || gen !== _live2dGen) {
+    _initLive2Ding = false
+    return
+  }
+
+  // 预计算模型配置（每次重试共享同一份）
+  const modelCfgs = modelsCache || (() => {
+    modelsCache = live2dModels.models.map(m => ({
+      name: m.name,
+      path: m.path,
+      scale: 0.12,
+      motionPreloadStrategy: 'IDLE',
+    }))
+    return modelsCache
+  })()
+
+  const inst = loadOml2d({
     parentElement: live2dInnerRef.value,
-    models: models,
-    draggable: true,
-    touchable: true
+    models: modelCfgs,
+    primaryColor: '#5eead4',
+    dockedPosition: 'left',
+    sayHello: false,
+    transitionTime: 800,
+    initialStatus: 'sleep',
+    // ── 状态栏（毛玻璃风格）──
+    statusBar: {
+      disable: false,
+      loadingMessage: '同步记忆回路…',
+      loadSuccessMessage: '记忆同步完成',
+      loadFailMessage: '连接中断，点击重试',
+      reloadMessage: '重新连接',
+      restMessage: '知微正在休息',
+      switchingMessage: '切换形态中',
+      errorColor: '#e74c3c',
+      transitionTime: 600,
+      style: {
+        background: 'rgba(0,0,0,0.6)',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        border: '1px solid rgba(94,234,212,0.15)',
+        borderRadius: '8px',
+        color: '#fff',
+        fontSize: '12px',
+        padding: '6px 14px',
+        letterSpacing: '1px',
+        fontFamily: '"SF Mono", monospace',
+      },
+    },
+    // ── 菜单（函数形式，未来可扩展多模型不同配置）──
+    menus: {
+      items: (defaultItems) => [
+        // 保留除 About 外的所有默认菜单项
+        ...defaultItems.filter(item => item.id !== 'About'),
+        // 自定义：切换提示框常驻/自动模式
+        {
+          id: 'ToggleTips',
+          title: '切换提示模式',
+          icon: '💬',
+          onClick: (oml2d) => {
+            // 通过 tipsMessage 发送一条确认
+            oml2d.tipsMessage('提示模式已切换 ♡', 2000, 5)
+          }
+        }
+      ],
+      style: {
+        bottom: '120px',
+        right: '10px',
+        gap: '10px',
+        display: 'flex',
+        flexDirection: 'column',
+      },
+      itemStyle: {
+        width: '44px',
+        height: '44px',
+        background: '#fffbf7',
+        backdropFilter: 'blur(12px)',
+        WebkitBackdropFilter: 'blur(12px)',
+        border: '1.5px solid rgba(244,114,182,0.15)',
+        borderRadius: '16px',
+        color: '#4a4a5a',
+        fontSize: '18px',
+        fontFamily: '"PingFang SC","Microsoft YaHei","Hiragino Sans",sans-serif',
+        boxShadow: '0 4px 16px rgba(244,114,182,0.08), 0 0 0 1px rgba(244,114,182,0.05)',
+        transition: 'all 0.25s ease',
+        cursor: 'pointer',
+      },
+    },
+    // ── 提示框（函数形式，按时间段微调消息）──
+    tips: (currentModel, modelIndex) => ({
+      messageLine: 2,
+      style: {
+        maxWidth: '280px',
+        whiteSpace: 'nowrap',
+        overflow: 'visible',
+        // 注意：实际视觉样式由 main.css 的 !important 接管，此处仅作 fallback
+        background: 'rgba(0,0,0,0.5)',
+        backdropFilter: 'blur(6px)',
+        WebkitBackdropFilter: 'blur(6px)',
+        border: '1px solid rgba(94,234,212,0.1)',
+        borderRadius: '10px',
+        padding: '10px 18px',
+        color: '#fff',
+        fontSize: '13px',
+        letterSpacing: '0.5px',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
+      },
+      welcomeTips: {
+        duration: 5000,
+        priority: 3,
+        message: {
+          daybreak: '破晓了，记忆回路正在苏醒……',
+          morning: `「${currentModel.name || '看板娘'}」已就位，今天的记录会写入哪段记忆呢？`,
+          noon: '正午了，该补充数据能量了。',
+          afternoon: '午后容易犯困，要重置一下注意力吗？',
+          dusk: '黄昏时分，今天的记忆正在归档。',
+          night: '晚上好，要翻阅今天的记忆碎片吗？',
+          lateNight: '已经很晚了，记忆也需要休眠整理。',
+          weeHours: '深夜信号…你还不休息吗？'
+        }
+      },
+      idleTips: {
+        interval: 30000,
+        duration: 4000,
+        priority: 1,
+        wordTheDay(wordTheDayData) {
+          return `${wordTheDayData.hitokoto}    ——${wordTheDayData.from}`
+        },
+      },
+      copyTips: {
+        duration: 3000,
+        priority: 2,
+        message: [
+          '正在复制这段记忆…',
+          '需要帮你归档这段内容吗？',
+          '数据已复制到剪贴板。',
+          '这段内容值得记住呢 ♡'
+        ]
+      }
+    })
   })
 
-  if (!oml2dInstance.value) return
+  // await loadOml2d 返回后再次校验
+  if (!_isAlive || !live2dInnerRef.value || gen !== _live2dGen) {
+    _initLive2Ding = false
+    return
+  }
 
-  motionManager = new Live2DMotionManager(oml2dInstance.value)
+  oml2dInstance.value = inst
 
-  oml2dInstance.value.onLoad((status) => {
-    if (status === 'success') {
-      motionManager?.startIdle()
+  // ── 模型加载超时监控（闭包捕获 gen，与当前实例绑定）──
+  let loadTimer = null
+  const currentGen = gen  // 固定闭包中的 gen 值
+
+  const onLoadCb = (status) => {
+    // 核心生命周期守卫：generation 不匹配说明实例已废弃
+    if (currentGen !== _live2dGen) return
+
+    switch (status) {
+      case 'loading':
+        loadTimer = setTimeout(() => {
+          if (currentGen !== _live2dGen || !_isAlive) return
+          console.warn('Dashboard Live2D 模型加载超时，触发重试')
+          destroyOml2d()
+          _initLive2Ding = false
+          retryLive2D()
+        }, LIVE2D_LOAD_TIMEOUT)
+        break
+
+      case 'success':
+        if (loadTimer) { clearTimeout(loadTimer); loadTimer = null }
+        _initLive2Ding = false
+        live2dLoadStatus.value = 'success'
+        if (currentGen === _live2dGen && oml2dInstance.value) {
+          oml2dInstance.value.stageSlideIn()
+        }
+        break
+
+      case 'fail':
+        if (loadTimer) { clearTimeout(loadTimer); loadTimer = null }
+        _initLive2Ding = false
+        if (currentGen === _live2dGen) retryLive2D()
+        break
     }
-  })
+  }
+
+  inst.onLoad(onLoadCb)
 }
 
 // 退出登录
-const handleLogout = () => {
-  request.post('/auth/logout').catch(() => {})
-  disconnect()
-  motionManager?.destroy()
-  oml2dInstance.value?.destroy()
-  if (live2dInnerRef.value) {
-    live2dInnerRef.value.innerHTML = ''
+const handleLogout = async () => {
+  const authStore = useAuthStore()
+  try {
+    // 用 authStore.refreshToken 而非直接读 localStorage，保持状态一致
+    await request.post(API.AUTH_LOGOUT, { refreshToken: authStore.refreshToken })
+  } catch {
+    // 即使后端 logout 失败，前端仍需清理本地状态（通知用户已退出，但未通知服务端）
+    uiStore.error('已退出登录（服务端通知失败）')
   }
-  oml2dInstance.value = null
-  clearToken()
-  router.push('/login')
+  disconnect()
+  destroyOml2d()
+  // 清理 Pinia authStore（自动同步 localStorage），防止同一会话重新登录后 token 引用过期
+  authStore.clearAuth()
+  router.push({ name: 'Login' }).catch(() => {})
 }
 
 // navItems moved to NavigationMenu.vue
 
+// --- 缓存签名工具：为每个 computed 创建独立的缓存实例，避免交叉缓存碰撞 ---
+function createStyleCache() {
+  let sig = ''
+  let val = null
+  return (s, factory) => {
+    if (s === sig) return val
+    sig = s
+    val = factory()
+    return val
+  }
+}
+const statusPanelStyleCache = createStyleCache()
+const mailBoxStyleCache = createStyleCache()
+const charParallaxStyleCache = createStyleCache()
+const parallaxStyleCache = createStyleCache()
+const ambientStyleCache = createStyleCache()
+
 // 时间组件逻辑
 const statusPanelStyle = computed(() => {
-  const isHistoryOpen = activeLayer.value === 'history';
-  const isRightNavOpen = activeLayer.value === 'nav' && activeTab.value !== null;
-
-  if (isHistoryOpen) {
-    return {
-      opacity: 0,
-      pointerEvents: 'none',
-      transform: 'translateX(-20px)',
-      transition: 'all 0.6s cubic-bezier(0.16, 1, 0.3, 1)'
-    };
-  }
-
-  if (isRightNavOpen) {
-    return {
-      opacity: 1,
-      transform: 'scale(0.65) translate(-20%, -20%)',
-      transformOrigin: 'top left',
-      transition: 'all 0.8s cubic-bezier(0.16, 1, 0.3, 1)'
-    };
-  }
-
-  return {
-    opacity: 1,
-    transform: 'scale(1)',
-    transition: 'all 0.8s cubic-bezier(0.16, 1, 0.3, 1)'
-  };
-});
+  const sig = `${activeLayer.value}|${activeTab.value}`
+  return statusPanelStyleCache(sig, () => {
+    const isHistoryOpen = activeLayer.value === 'history'
+    const isRightNavOpen = activeLayer.value === 'nav' && activeTab.value !== null
+    if (isHistoryOpen) return { opacity: 0, pointerEvents: 'none', transform: 'translateX(-20px)', transition: 'all 0.6s cubic-bezier(0.16, 1, 0.3, 1)' }
+    if (isRightNavOpen) return { opacity: 1, transform: 'scale(0.65) translate(-20%, -20%)', transformOrigin: 'top left', transition: 'all 0.8s cubic-bezier(0.16, 1, 0.3, 1)' }
+    return { opacity: 1, transform: 'scale(1)', transition: 'all 0.8s cubic-bezier(0.16, 1, 0.3, 1)' }
+  })
+})
 
 // 邮箱组件
 const mailBoxStyle = computed(() => {
-  const isAnyPanelOpen =
-      activeLayer.value === 'history' ||
-      (activeLayer.value === 'nav' && activeTab.value !== null) ||
-      activeLayer.value === 'chat';
-
-  return {
-    opacity: isAnyPanelOpen ? 0 : 1,
-    pointerEvents: isAnyPanelOpen ? 'none' : 'auto',
-    transform: isAnyPanelOpen ? 'translateX(20px)' : 'translateX(0)',
-    transition: 'all 0.6s cubic-bezier(0.16, 1, 0.3, 1)'
-  };
-});
+  const sig = `${activeLayer.value}|${activeTab.value}`
+  return mailBoxStyleCache(sig, () => {
+    const isAnyPanelOpen = activeLayer.value === 'history' || (activeLayer.value === 'nav' && activeTab.value !== null) || activeLayer.value === 'chat'
+    return { opacity: isAnyPanelOpen ? 0 : 1, pointerEvents: isAnyPanelOpen ? 'none' : 'auto', transform: isAnyPanelOpen ? 'translateX(20px)' : 'translateX(0)', transition: 'all 0.6s cubic-bezier(0.16, 1, 0.3, 1)' }
+  })
+})
 
 // 交互逻辑
-const openNav = () => {
+const openNav = (e) => {
+  lastPanelActionTime.value = Date.now()
   if(activeLayer.value == 'nav'){
     activeLayer.value = 'idle'
   }else {
@@ -208,98 +461,128 @@ const handleNavClick = (item) => {
   activeTab.value = item.path
 }
 
-const openHistory = () => {
-  // 1. 开启锁定状态
-  isTransitionLocked.value = true
+const panelBodyRef = ref(null)
 
+// 切换 tab 时重置面板滚动位置
+watch(activeTab, () => {
+  nextTick(() => {
+    if (panelBodyRef.value) panelBodyRef.value.scrollTop = 0
+  })
+})
+
+const openHistory = () => {
+  lastPanelActionTime.value = Date.now()
   activeLayer.value = 'history'
   activeTab.value = null
   chatWindowRef.value?.collapse()
-
-  // 2. 延迟 150 毫秒后解锁，避开孤儿 Click 事件触发的瞬间
-  setTimeout(() => {
-    isTransitionLocked.value = false
-  }, 150)
 }
 
 const handleGlobalClick = () => {
-  // 3. 如果当前处于锁定状态（刚点开历史记录），则拦截这次误触的点击
-  if (isTransitionLocked.value) return
+  // 面板打开后 300ms 内的 click 视为事件穿透，忽略
+  if (Date.now() - lastPanelActionTime.value < 300) return
 
   activeLayer.value = 'idle'
   activeTab.value = null
   chatWindowRef.value?.collapse()
 }
-// 核心：人物舞台样式计算
+// 核心：人物舞台样式计算（mouse 值量化为 4px 网格，减少微小编移触发的无意义重算）
 const charParallaxStyle = computed(() => {
-  const isPanelOpen = (activeLayer.value === 'nav' && activeTab.value !== null) || activeLayer.value === 'history'
-
-  const scale = isPanelOpen ? 0.78 : 1
-  const opacity = isPanelOpen ? 0.7 : 1
-
-  let xOffset = 0
-  if (activeLayer.value === 'nav' && activeTab.value !== null) xOffset = -18
-  if (activeLayer.value === 'history') xOffset = 18
-
-  const mx = (mouseX.value / window.innerWidth - 0.5) * 12
-  const my = (mouseY.value / window.innerHeight - 0.5) * 8
-
-  return {
-    transform: `translate(calc(-50% + ${xOffset}vw + ${mx}px), calc(-50% + ${my}px)) scale(${scale})`,
-    opacity: opacity,
-    transition: 'all 0.8s cubic-bezier(0.16, 1, 0.3, 1)'
-  }
+  const mx = Math.round(mouseX.value / 4) * 4
+  const my = Math.round(mouseY.value / 4) * 4
+  const sig = `${activeLayer.value}|${activeTab.value}|${mx}|${my}`
+  return charParallaxStyleCache(sig, () => {
+    const isPanelOpen = (activeLayer.value === 'nav' && activeTab.value !== null) || activeLayer.value === 'history'
+    const scale = isPanelOpen ? 0.78 : 1
+    const opacity = isPanelOpen ? 0.7 : 1
+    let xOffset = 0
+    if (activeLayer.value === 'nav' && activeTab.value !== null) xOffset = -18
+    if (activeLayer.value === 'history') xOffset = 18
+    const px = (mx / window.innerWidth - 0.5) * 12
+    const py = (my / window.innerHeight - 0.5) * 8
+    return { transform: `translate(calc(-50% + ${xOffset}vw + ${px}px), calc(-50% + ${py}px)) scale(${scale})`, opacity, transition: 'all 0.8s cubic-bezier(0.16, 1, 0.3, 1)' }
+  })
 })
 
 const parallaxStyle = computed(() => {
-  const isPanelOpen = (activeLayer.value === 'nav' && activeTab.value !== null) || activeLayer.value === 'history'
-  const blurValue = isPanelOpen ? 12 : 0
-  const mx = (mouseX.value / window.innerWidth - 0.5) * 30
-
-  return {
-    transform: `translate(calc(-50% + ${mx}px), -50%)`,
-    filter: `blur(${blurValue}px)`,
-    transition: 'filter 0.6s ease'
-  }
+  const mx = Math.round(mouseX.value / 4) * 4
+  const sig = `${activeLayer.value}|${activeTab.value}|${mx}`
+  return parallaxStyleCache(sig, () => {
+    const isPanelOpen = (activeLayer.value === 'nav' && activeTab.value !== null) || activeLayer.value === 'history'
+    const blurValue = isPanelOpen ? 12 : 0
+    const px = (mx / window.innerWidth - 0.5) * 30
+    return { transform: `translate(calc(-50% + ${px}px), -50%)`, filter: `blur(${blurValue}px)`, transition: 'filter 0.6s ease' }
+  })
 })
 
-const currentView = computed(() => {
-  const maps = {
-    'user': UserProfile,
-    'memory': MemoryFragment,
-    'emotion': PersonalityCloud,
-    'relation': EmotionPulse,
-    'action': ActionCenter,
-  }
-  return maps[activeTab.value] || null
-})
+const currentView = computed(() => viewMap[activeTab.value] || null)
 
-const tabNames = { 'user': '你的样子', 'memory': '与我的回忆', 'emotion': '灵魂的颜色', 'relation': '成长轨迹', 'action': '为你推荐' }
+const tabNames = { 'user': '你的样子', 'memory': '与我的回忆', 'emotion': '灵魂的颜色', 'relation': '成长轨迹', 'action': '为你推荐', 'settings': '灵魂调谐' }
 const activeTabName = computed(() => tabNames[activeTab.value] || '')
 
+const ambientHour = ref(new Date().getHours())
+let ambientTimer = null
+
 const ambientStyle = computed(() => {
-  const h = new Date().getHours()
-  let color = 'transparent'
-  if (h >= 19 || h < 6) color = 'rgba(20, 30, 80, 0.2)'
-  return { backgroundColor: color }
+  const sig = `${ambientHour.value}`
+  return ambientStyleCache(sig, () => {
+    const h = ambientHour.value
+    let color = 'transparent'
+    if (h >= 19 || h < 6) color = 'rgba(20, 30, 80, 0.2)'
+    return { backgroundColor: color }
+  })
 })
 
-const updateMouse = (e) => { mouseX.value = e.clientX; mouseY.value = e.clientY }
 onMounted(() => {
-  window.addEventListener('mousemove', updateMouse, { passive: true })
-  initLive2D()
-})
-onUnmounted(() => {
-  window.removeEventListener('mousemove', updateMouse)
-  motionManager?.destroy()
-  if (live2dInnerRef.value) {
-    live2dInnerRef.value.innerHTML = ''
+  // 页面挂载后获取用户设置（不在模块级执行，避免副作用时序问题）
+  if (!settingsStore.settings) settingsStore.fetchSettings()
+
+  // Live2D 延后到空闲时初始化，避免阻塞首屏渲染
+  // 低带宽场景：requestIdleCallback timeout 兜底 + import() 内部超时由 LIVE2D_LOAD_TIMEOUT 控制
+  if ('requestIdleCallback' in window) {
+    requestIdleCallback(() => initLive2D(), { timeout: LIVE2D_IDLE_TIMEOUT })
+  } else {
+    live2dInitTimer = setTimeout(initLive2D, 500)
   }
-  oml2dInstance.value = null
+
+  // 周期性更新 ambientHour，使 ambientStyle 在小时边界生效
+  ambientTimer = setInterval(() => { ambientHour.value = new Date().getHours() }, 60000)
+
+  // GSAP 入场动画 — 使用 timeline 序列
+  gsapEnterTimer = setTimeout(() => {
+    entered.value = true
+    nextTick(() => {
+      const tl = timeline()
+      tl.from('.dynamic-status-panel', { opacity: 0, y: 25, duration: 0.6, ease: 'back.out(1.7)' })
+        .from('.mailbox-wrapper', { opacity: 0, y: 25, duration: 0.6, ease: 'back.out(1.7)' }, '-=0.4')
+        .from('.character-stage', { opacity: 0, y: 25, duration: 0.6, ease: 'back.out(1.7)' }, '-=0.4')
+        .from('.global-chat-area', { opacity: 0, y: 25, duration: 0.6, ease: 'back.out(1.7)' }, '-=0.4')
+
+      document.querySelectorAll('.logout-btn, .close-btn').forEach(el => rippleEffect(el))
+    })
+  }, 100)
+})
+onBeforeUnmount(() => {
+  // 同步写入存活标志 + 生成计数器，确保所有待定/排队回调立即失效
+  // destroyOml2d 内部也会设置 _isAlive = false + live2dGen++ 作为 belt-and-suspenders
+  destroyOml2d()
+  if (live2dInitTimer) { clearTimeout(live2dInitTimer); live2dInitTimer = null }
+  if (gsapEnterTimer) { clearTimeout(gsapEnterTimer); gsapEnterTimer = null }
+  if (ambientTimer) { clearInterval(ambientTimer); ambientTimer = null }
 })
 </script>
 
 <style scoped>
+/* ── GPU 分层（只对实际动画元素启用 will-change，静态面板用 contain 隔离） ── */
+.character-stage,
+.content-panel,
+.chat-window-container { will-change: transform, opacity; contain: layout style; }
+
+.dynamic-status-panel,
+.mailbox-wrapper,
+.global-chat-area,
+.parallax-layer,
+.ambient-overlay { contain: layout style; }
+
 .cyber-layout {
   width: 100vw; height: 100vh;
   position: relative; overflow: hidden; background: #000;
@@ -335,6 +618,25 @@ onUnmounted(() => {
   transform: translateX(-50%);
   width: 650px;
   height: 650px;
+}
+.live2d-loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.live2d-loading-spinner {
+  width: 32px;
+  height: 32px;
+  border: 2px solid rgba(255,255,255,0.1);
+  border-top-color: #5eead4;
+  border-radius: 50%;
+  animation: live2d-spin 0.8s linear infinite;
+}
+@keyframes live2d-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* --- 面板通用样式 --- */

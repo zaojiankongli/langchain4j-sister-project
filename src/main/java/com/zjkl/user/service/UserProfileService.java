@@ -14,6 +14,15 @@ public interface UserProfileService {
      * 获取用户完整资料
      */
     UserProfileVO getProfile(String userId);
+
+    /**
+     * 获取聊天所需的轻量用户信息（仅 username、hobbies、bio），
+     * 避免每次聊天都执行完整的 6 次 DB 查询。
+     *
+     * @return String[3]：[0]=username, [1]=hobbies, [2]=userProfile(bio)；
+     *         用户不存在时返回 null
+     */
+    String[] getProfileForChat(String userId);
     
     /**
      * 更新用户资料（综合）

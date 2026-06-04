@@ -80,10 +80,10 @@
         SELECT * FROM emotion_anchor_events
         WHERE user_id = #{userId}
         <if test="beginDate != null">
-            AND DATE(start_time) &gt;= #{beginDate}
+            AND start_time &gt;= #{beginDate}
         </if>
         <if test="endDate != null">
-            AND DATE(start_time) &lt; #{endDate}
+            AND start_time &lt; #{endDate}
         </if>
         ORDER BY start_time DESC
         LIMIT #{offset}, #{limit}
@@ -99,7 +99,7 @@
     <select id="selectRecentNegativeTopics" resultType="string">
         SELECT COALESCE(trigger_reason, CONCAT('情绪波动事件(变化', delta_pleasure, ')'))
         FROM emotion_anchor_events
-        WHERE user_id = #{userId} AND (end_type != 'POSITIVE' OR end_type IS NULL)
+        WHERE user_id = #{userId} AND end_type IS NOT NULL AND end_type != 'POSITIVE'
           AND trigger_reason IS NOT NULL
         ORDER BY start_time DESC
         LIMIT #{limit}
@@ -112,5 +112,16 @@
         ORDER BY start_time DESC
         LIMIT #{limit}
     </select>
+
+    <!-- 仅关闭超过最大持续时长的遗留事件，避免重启时误关正在进行的事件 -->
+    <update id="closeStaleEvents">
+        UPDATE emotion_anchor_events
+        SET end_time = NOW(),
+            duration_seconds = TIMESTAMPDIFF(SECOND, start_time, NOW()),
+            end_type = 'NEGATIVE',
+            end_reason = '服务重启导致事件中断'
+        WHERE end_time IS NULL
+          AND start_time &lt; DATE_SUB(NOW(), INTERVAL #{maxDurationMinutes} MINUTE)
+    </update>
 
 </mapper>

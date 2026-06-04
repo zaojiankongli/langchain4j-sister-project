@@ -25,36 +25,14 @@ public class ResourceMcpClient {
         this.mcpProperties = mcpProperties;
     }
 
-    @Bean
+    @Bean(destroyMethod = "close")
     public McpClient firecrawlMcpClient() {
-        McpTransport transport = StreamableHttpMcpTransport.builder()
-                .url("https://mcp.firecrawl.dev/" + mcpProperties.getFirecrawlApiKey() + "/v2/mcp")
-                .logRequests(false)
-                .logResponses(false)
-                .build();
-
-        return DefaultMcpClient.builder()
-                .key("FIRECRAWL_MCP_CLIENT")
-                .transport(transport)
-                .build();
+        return buildClient("FIRECRAWL_MCP_CLIENT", buildFirecrawlTransport());
     }
 
-    @Bean
+    @Bean(destroyMethod = "close")
     public McpClient context7McpClient() {
-        McpTransport transport = StreamableHttpMcpTransport.builder()
-                .url("https://mcp.context7.com/mcp")
-                .customHeaders(Map.of(
-                        "Authorization", "Bearer " + mcpProperties.getContext7ApiKey(),
-                        "Content-Type", "application/json"
-                ))
-                .logRequests(false)
-                .logResponses(false)
-                .build();
-
-        return DefaultMcpClient.builder()
-                .key("CONTEXT7_MCP_CLIENT")
-                .transport(transport)
-                .build();
+        return buildClient("CONTEXT7_MCP_CLIENT", buildContext7Transport());
     }
 
     @Bean
@@ -63,6 +41,33 @@ public class ResourceMcpClient {
             @Qualifier("firecrawlMcpClient") McpClient firecrawlMcpClient) {
         return McpToolProvider.builder()
                 .mcpClients(List.of(context7McpClient, firecrawlMcpClient))
+                .build();
+    }
+
+    protected McpTransport buildFirecrawlTransport() {
+        return StreamableHttpMcpTransport.builder()
+                .url("https://mcp.firecrawl.dev/" + mcpProperties.getFirecrawlApiKey() + "/v2/mcp")
+                .logRequests(false)
+                .logResponses(false)
+                .build();
+    }
+
+    protected McpTransport buildContext7Transport() {
+        return StreamableHttpMcpTransport.builder()
+                .url("https://mcp.context7.com/mcp")
+                .customHeaders(Map.of(
+                        "Authorization", "Bearer " + mcpProperties.getContext7ApiKey(),
+                        "Content-Type", "application/json"
+                ))
+                .logRequests(false)
+                .logResponses(false)
+                .build();
+    }
+
+    protected McpClient buildClient(String key, McpTransport transport) {
+        return DefaultMcpClient.builder()
+                .key(key)
+                .transport(transport)
                 .build();
     }
 }

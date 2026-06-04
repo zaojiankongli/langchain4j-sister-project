@@ -18,6 +18,10 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AnchorController {
 
+    private static final int DEFAULT_PAGE_SIZE = 5;
+    private static final int MAX_PAGE_SIZE = 50;
+    private static final int MAX_PAGE = 10_000;
+
     private final AnchorService anchorService;
     private final UserContext userContext;
 
@@ -30,9 +34,12 @@ public class AnchorController {
         @RequestParam(defaultValue = "5") int size,
         @RequestParam(required = false) String filter
     ) {
-        if (page < 1) page = 1;
-        if (size < 1) size = 5;
+        page = Math.max(1, Math.min(page, MAX_PAGE));
+        size = size < 1 ? DEFAULT_PAGE_SIZE : Math.min(size, MAX_PAGE_SIZE);
         String userId = userContext.getUserId();
+        if (userId == null) {
+            return Result.unauthorized("请先登录");
+        }
         int offset = (page - 1) * size;
         
         String[] dateRange = DateFilterParser.parse(filter);

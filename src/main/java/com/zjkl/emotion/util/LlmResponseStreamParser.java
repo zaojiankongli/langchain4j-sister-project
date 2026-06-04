@@ -10,7 +10,9 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.core.publisher.Sinks;
 
+import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 
 
 
@@ -20,11 +22,16 @@ public class LlmResponseStreamParser {
 
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static final VoiceParams DEFAULT_VOICE_PARAMS = VoiceParams.fromEmotion(null);
+    private static final DeltaEmotion DEFAULT_DELTA_EMOTION = new DeltaEmotion(0.0, 0.0, 0.0);
 
     private static final int MAX_KEYWORD_LEN = 13;
     private static final int RING_BUF_SIZE = MAX_KEYWORD_LEN + 2;
     private static final int MAX_BUFFER_SIZE = 30;
     private static final int MIN_FLUSH_SIZE = 3;
+    private static final int MAX_REPLY_SEGMENTS = 256;
+    private static final int MAX_JSON_CHARS = 4_096;
+    private static final int MAX_REPLY_CHARS = 20_000;
     private static final Set<Character> PUNCTUATION = Set.of(
         '。', '！', '？', '；', '…', '\n', '.', '，', ','
     );
@@ -59,7 +66,8 @@ public class LlmResponseStreamParser {
 
     public ParsedResult parse(Flux<String> llmStream) {
         Sinks.One<VoiceParams> voiceParamsSink = Sinks.one();
-        Sinks.Many<String> replySink = Sinks.many().unicast().onBackpressureBuffer();
+        Queue<String> replyQueue = new ArrayBlockingQueue<>(MAX_REPLY_SEGMENTS);
+        Sinks.Many<String> replySink = Sinks.many().unicast().onBackpressureBuffer(replyQueue);
         Sinks.One<DeltaEmotion> deltaSink = Sinks.one();
 
         ParseState[] state = {ParseState.FINDING_VOICE};
@@ -70,6 +78,7 @@ public class LlmResponseStreamParser {
         // reply 解析上下文
         boolean[] isEscapeNext = {false};
         StringBuilder replyBuf = new StringBuilder();
+        int[] replyChars = {0};
 
         // AC 自动机（每次 parse 独立创建，避免并发问题）
         AhoCorasickMatcher acAutomaton = new AhoCorasickMatcher(
@@ -122,6 +131,14 @@ public class LlmResponseStreamParser {
 
                         case PARSING_VOICE: {
                             jsonBuilder.append(c);
+                            if (jsonBuilder.length() > MAX_JSON_CHARS) {
+                                failParser(replySink, voiceParamsSink, deltaSink,
+                                        DEFAULT_VOICE_PARAMS, DEFAULT_DELTA_EMOTION,
+                                        new IllegalStateException("voice_params JSON exceeds max length: " + MAX_JSON_CHARS));
+                                jsonBuilder.setLength(0);
+                                state[0] = ParseState.DONE;
+                                return;
+                            }
                             if (c == '{') braceCount[0]++;
                             else if (c == '}') braceCount[0]--;
                             if (braceCount[0] == 0) {
@@ -132,6 +149,7 @@ public class LlmResponseStreamParser {
                                         params.getVolume(), params.getSpeechRate(), params.getPitchRate());
                                 } catch (JsonProcessingException e) {
                                     log.error("解析 voice_params 失败", e);
+                                    voiceParamsSink.tryEmitValue(DEFAULT_VOICE_PARAMS);
                                 }
                                 braceCount[0] = 0;
                                 state[0] = ParseState.FINDING_REPLY;
@@ -169,21 +187,52 @@ public class LlmResponseStreamParser {
 
                         case PARSING_REPLY: {
                             if (isEscapeNext[0]) {
+                                if (replyChars[0] >= MAX_REPLY_CHARS) {
+                                    failParser(replySink, voiceParamsSink, deltaSink,
+                                            DEFAULT_VOICE_PARAMS, DEFAULT_DELTA_EMOTION,
+                                            new IllegalStateException("reply exceeds max length: " + MAX_REPLY_CHARS));
+                                    state[0] = ParseState.DONE;
+                                    return;
+                                }
                                 replyBuf.append(c);
+                                replyChars[0]++;
                                 isEscapeNext[0] = false;
                             } else if (c == '\\') {
                                 isEscapeNext[0] = true;
                             } else if (c == '"') {
-                                flushReplyBuffer(replyBuf, replySink);
+                                if (!flushReplyBuffer(replyBuf, replySink)) {
+                                    voiceParamsSink.tryEmitValue(DEFAULT_VOICE_PARAMS);
+                                    deltaSink.tryEmitValue(DEFAULT_DELTA_EMOTION);
+                                    state[0] = ParseState.DONE;
+                                    return;
+                                }
                                 state[0] = ParseState.FINDING_EMOTION;
                                 acAutomaton.reset();
                                 log.debug("reply 闭合，AC reset，进入 FINDING_EMOTION");
                             } else {
+                                if (replyChars[0] >= MAX_REPLY_CHARS) {
+                                    failParser(replySink, voiceParamsSink, deltaSink,
+                                            DEFAULT_VOICE_PARAMS, DEFAULT_DELTA_EMOTION,
+                                            new IllegalStateException("reply exceeds max length: " + MAX_REPLY_CHARS));
+                                    state[0] = ParseState.DONE;
+                                    return;
+                                }
                                 replyBuf.append(c);
+                                replyChars[0]++;
                                 if (PUNCTUATION.contains(c) && replyBuf.length() >= MIN_FLUSH_SIZE) {
-                                    flushReplyBuffer(replyBuf, replySink);
+                                    if (!flushReplyBuffer(replyBuf, replySink)) {
+                                        voiceParamsSink.tryEmitValue(DEFAULT_VOICE_PARAMS);
+                                        deltaSink.tryEmitValue(DEFAULT_DELTA_EMOTION);
+                                        state[0] = ParseState.DONE;
+                                        return;
+                                    }
                                 } else if (replyBuf.length() >= MAX_BUFFER_SIZE) {
-                                    flushReplyBuffer(replyBuf, replySink);
+                                    if (!flushReplyBuffer(replyBuf, replySink)) {
+                                        voiceParamsSink.tryEmitValue(DEFAULT_VOICE_PARAMS);
+                                        deltaSink.tryEmitValue(DEFAULT_DELTA_EMOTION);
+                                        state[0] = ParseState.DONE;
+                                        return;
+                                    }
                                 }
                             }
                             break;
@@ -222,6 +271,14 @@ public class LlmResponseStreamParser {
 
                         case PARSING_EMOTION: {
                             jsonBuilder.append(c);
+                            if (jsonBuilder.length() > MAX_JSON_CHARS) {
+                                failParser(replySink, voiceParamsSink, deltaSink,
+                                        DEFAULT_VOICE_PARAMS, DEFAULT_DELTA_EMOTION,
+                                        new IllegalStateException("delta_emotion JSON exceeds max length: " + MAX_JSON_CHARS));
+                                jsonBuilder.setLength(0);
+                                state[0] = ParseState.DONE;
+                                return;
+                            }
                             if (c == '{') braceCount[0]++;
                             else if (c == '}') braceCount[0]--;
                             if (braceCount[0] == 0) {
@@ -232,6 +289,7 @@ public class LlmResponseStreamParser {
                                         delta.getDeltaP(), delta.getDeltaA(), delta.getDeltaD());
                                 } catch (JsonProcessingException e) {
                                     log.error("解析 delta_emotion 失败", e);
+                                    deltaSink.tryEmitValue(DEFAULT_DELTA_EMOTION);
                                 }
                                 braceCount[0] = 0;
                                 state[0] = ParseState.DONE;
@@ -253,6 +311,8 @@ public class LlmResponseStreamParser {
                 } else {
                     log.info("LLM 流完成，phase: {}", state[0]);
                 }
+                voiceParamsSink.tryEmitValue(DEFAULT_VOICE_PARAMS);
+                deltaSink.tryEmitValue(DEFAULT_DELTA_EMOTION);
                 replySink.tryEmitComplete();
             })
             .doOnError(error -> {
@@ -275,16 +335,31 @@ public class LlmResponseStreamParser {
      * 将回复缓冲区内容批量 emit，清空缓冲区。
      * 缓冲为空时直接跳过。
      */
-    private void flushReplyBuffer(StringBuilder buf, Sinks.Many<String> sink) {
-        if (buf.length() == 0) return;
+    private boolean flushReplyBuffer(StringBuilder buf, Sinks.Many<String> sink) {
+        if (buf.length() == 0) return true;
         String segment = buf.toString();
         buf.setLength(0);
         Sinks.EmitResult result = sink.tryEmitNext(segment);
         if (result != Sinks.EmitResult.OK) {
-            log.warn("reply segment emit 失败: {}, segment: {}", result, segment);
+            log.warn("reply segment emit 失败: {}", result);
+            sink.tryEmitError(new IllegalStateException("reply stream overflow or emit failed: " + result));
+            return false;
         } else {
-            log.debug("reply emit segment: len={}, text={}", segment.length(), segment);
+            log.debug("reply emit segment: len={}", segment.length());
+            return true;
         }
+    }
+
+    private void failParser(Sinks.Many<String> replySink,
+                            Sinks.One<VoiceParams> voiceParamsSink,
+                            Sinks.One<DeltaEmotion> deltaSink,
+                            VoiceParams fallbackVoice,
+                            DeltaEmotion fallbackEmotion,
+                            IllegalStateException error) {
+        log.warn("LLM 响应解析失败: {}", error.getMessage());
+        voiceParamsSink.tryEmitValue(fallbackVoice);
+        deltaSink.tryEmitValue(fallbackEmotion);
+        replySink.tryEmitError(error);
     }
 
 

@@ -4,6 +4,8 @@ package com.zjkl.ai.summary.controller.admin;
 import com.zjkl.ai.prompt.service.PromptTemplateService;
 import com.zjkl.memory.service.PromptCacheService;
 import com.zjkl.common.Result;
+import com.zjkl.common.config.properties.AuthProperties;
+import com.zjkl.common.context.UserContext;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -20,10 +22,15 @@ public class PromptAdminController {
     
     private final PromptTemplateService promptTemplateService;
     private final PromptCacheService promptCacheService;
+    private final UserContext userContext;
+    private final AuthProperties authProperties;
     
-    public PromptAdminController(PromptTemplateService promptTemplateService, PromptCacheService promptCacheService) {
+    public PromptAdminController(PromptTemplateService promptTemplateService, PromptCacheService promptCacheService,
+                                 UserContext userContext, AuthProperties authProperties) {
         this.promptTemplateService = promptTemplateService;
         this.promptCacheService = promptCacheService;
+        this.userContext = userContext;
+        this.authProperties = authProperties;
     }
     
     /**
@@ -34,6 +41,8 @@ public class PromptAdminController {
      */
     @PostMapping("/{templateKey}/refresh")
     public Result<String> refreshTemplate(@PathVariable String templateKey) {
+        String authError = userContext.checkAdminAccess(authProperties);
+        if (authError != null) return Result.unauthorized(authError);
         boolean success = promptTemplateService.refreshTemplate(templateKey);
         if (success) {
             return Result.success("模板刷新成功：" + templateKey);
@@ -49,6 +58,8 @@ public class PromptAdminController {
      */
     @PostMapping("/refresh-all")
     public Result<Map<String, Integer>> refreshAllTemplates() {
+        String authError = userContext.checkAdminAccess(authProperties);
+        if (authError != null) return Result.unauthorized(authError);
         int count = promptTemplateService.refreshAllTemplates();
         return Result.success(Map.of("refreshed", count));
     }
@@ -60,6 +71,8 @@ public class PromptAdminController {
      */
     @GetMapping("/list")
     public Result<List<String>> listTemplates() {
+        String authError = userContext.checkAdminAccess(authProperties);
+        if (authError != null) return Result.unauthorized(authError);
         return Result.success(promptCacheService.getLoadedTemplateKeys());
     }
     
@@ -71,6 +84,8 @@ public class PromptAdminController {
      */
     @GetMapping("/{templateKey}")
     public Result<String> getTemplate(@PathVariable String templateKey) {
+        String authError = userContext.checkAdminAccess(authProperties);
+        if (authError != null) return Result.unauthorized(authError);
         try {
             String content = promptTemplateService.getRawTemplate(templateKey);
             return Result.success(content);
@@ -78,4 +93,5 @@ public class PromptAdminController {
             return Result.error(404, "模板不存在：" + templateKey);
         }
     }
+
 }

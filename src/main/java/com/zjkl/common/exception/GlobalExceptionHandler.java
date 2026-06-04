@@ -6,13 +6,17 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.validation.BindException;
+import org.springframework.beans.TypeMismatchException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.concurrent.TimeoutException;
@@ -26,6 +30,8 @@ import java.util.stream.Collectors;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    private static final String AUTH_REQUIRED_MESSAGE = "登录状态已失效，请重新登录";
+
     // ==================== 400 - 请求参数错误 ====================
 
     /**
@@ -34,7 +40,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public Result<?> handleValidation(MethodArgumentNotValidException e, HttpServletRequest request) {
         String message = e.getBindingResult().getFieldErrors().stream()
-                .map(fe -> fe.getField() + ": " + fe.getDefaultMessage())
+                .map(fe -> fe.getDefaultMessage())
                 .collect(Collectors.joining("; "));
         log.warn("请求参数校验失败 [{} {}]: {}", request.getMethod(), request.getRequestURI(), message);
         return Result.badRequest(message);
@@ -95,14 +101,14 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(IllegalStateException.class)
     public Result<?> handleIllegalState(IllegalStateException e, HttpServletRequest request) {
         log.warn("非法状态 [{} {}]: {}", request.getMethod(), request.getRequestURI(), e.getMessage());
-        return Result.badRequest(e.getMessage());
+        return Result.badRequest("当前服务状态异常，请稍后重试");
     }
 
 
     @ExceptionHandler(UnauthorizedException.class)
     public Result<?> handleUnauthorized(UnauthorizedException e, HttpServletRequest request) {
         log.warn("认证失败 [{} {}]: {}", request.getMethod(), request.getRequestURI(), e.getMessage());
-        return Result.unauthorized(e.getMessage());
+        return Result.unauthorized(sanitizeUnauthorizedMessage(e.getMessage()));
     }
 
 
@@ -124,6 +130,44 @@ public class GlobalExceptionHandler {
         return Result.error(405, "请求方法不支持: " + e.getMethod());
     }
 
+    /**
+     * 不支持的媒体类型
+     */
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public Result<?> handleMediaTypeNotSupported(HttpMediaTypeNotSupportedException e, HttpServletRequest request) {
+        log.warn("不支持的媒体类型 [{} {}]: {}", request.getMethod(), request.getRequestURI(), e.getMessage());
+        return Result.error(415, "不支持的媒体类型，请使用 application/json");
+    }
+
+    /**
+     * 参数类型不匹配
+     */
+    @ExceptionHandler(TypeMismatchException.class)
+    public Result<?> handleTypeMismatch(TypeMismatchException e, HttpServletRequest request) {
+        log.warn("参数类型不匹配 [{} {}]: {}", request.getMethod(), request.getRequestURI(), e.getMessage());
+        return Result.error(400, "参数类型错误: " + e.getPropertyName());
+    }
+
+    /**
+     * 数据绑定异常
+     */
+    @ExceptionHandler(BindException.class)
+    public Result<?> handleBind(BindException e, HttpServletRequest request) {
+        String message = e.getBindingResult().getFieldErrors().stream()
+                .map(fe -> fe.getDefaultMessage())
+                .collect(Collectors.joining("; "));
+        log.warn("数据绑定失败 [{} {}]: {}", request.getMethod(), request.getRequestURI(), message);
+        return Result.error(400, message);
+    }
+
+    /**
+     * 数据完整性违例
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public Result<?> handleDataIntegrityViolation(DataIntegrityViolationException e, HttpServletRequest request) {
+        log.warn("数据完整性违例 [{} {}]: {}", request.getMethod(), request.getRequestURI(), e.getMessage());
+        return Result.error(409, "数据冲突，请检查请求数据");
+    }
 
     /**
      * 超时异常
@@ -144,11 +188,36 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * 业务异常
+     */
+    @ExceptionHandler(BusinessException.class)
+    public Result<?> handleBusinessException(BusinessException e, HttpServletRequest request) {
+        log.warn("业务异常 [{} {}]: code={}, message={}", request.getMethod(), request.getRequestURI(), e.getCode(), e.getMessage());
+        return Result.error(e.getCode(), e.getMessage());
+    }
+
+    /**
+     * AccessDeniedException (Spring Security / 自定义)
+     */
+    @ExceptionHandler(java.nio.file.AccessDeniedException.class)
+    public Result<?> handleAccessDenied(java.nio.file.AccessDeniedException e, HttpServletRequest request) {
+        log.warn("访问被拒绝 [{} {}]: {}", request.getMethod(), request.getRequestURI(), e.getMessage());
+        return Result.forbidden("访问被拒绝");
+    }
+
+    /**
      * 兜底
      */
     @ExceptionHandler(Exception.class)
     public Result<?> handleException(Exception e, HttpServletRequest request) {
         log.error("未捕获异常 [{} {}]", request.getRequestURI(), e);
         return Result.error("服务器内部错误");
+    }
+
+    private String sanitizeUnauthorizedMessage(String message) {
+        if ("验证码错误".equals(message) || "验证码已过期，请重新获取".equals(message)) {
+            return message;
+        }
+        return AUTH_REQUIRED_MESSAGE;
     }
 }

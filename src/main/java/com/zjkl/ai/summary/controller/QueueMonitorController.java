@@ -2,7 +2,8 @@ package com.zjkl.ai.summary.controller;
 
 import com.zjkl.ai.summary.scheduler.DailySummaryScheduler;
 import com.zjkl.common.Result;
-import lombok.RequiredArgsConstructor;
+import com.zjkl.common.config.properties.AuthProperties;
+import com.zjkl.common.context.UserContext;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -21,12 +22,21 @@ import static com.zjkl.ai.summary.config.RedisStreamConfig.*;
  */
 @RestController
 @RequestMapping("/api/admin/queue")
-@RequiredArgsConstructor
 @Slf4j
 public class QueueMonitorController {
     
     private final StringRedisTemplate redisTemplate;
     private final DailySummaryScheduler dailySummaryScheduler;
+    private final UserContext userContext;
+    private final AuthProperties authProperties;
+    
+    public QueueMonitorController(StringRedisTemplate redisTemplate, DailySummaryScheduler dailySummaryScheduler,
+                                  UserContext userContext, AuthProperties authProperties) {
+        this.redisTemplate = redisTemplate;
+        this.dailySummaryScheduler = dailySummaryScheduler;
+        this.userContext = userContext;
+        this.authProperties = authProperties;
+    }
     
     /**
      * 获取队列统计信息
@@ -35,6 +45,8 @@ public class QueueMonitorController {
      */
     @GetMapping("/stats")
     public Result<Map<String, Object>> getQueueStats() {
+        String authError = userContext.checkAdminAccess(authProperties);
+        if (authError != null) return Result.unauthorized(authError);
         Map<String, Object> stats = new HashMap<>();
         
         // 获取摘要流长度
@@ -74,6 +86,8 @@ public class QueueMonitorController {
      */
     @GetMapping("/health")
     public Result<Map<String, Object>> healthCheck() {
+        String authError = userContext.checkAdminAccess(authProperties);
+        if (authError != null) return Result.unauthorized(authError);
         Map<String, Object> health = new HashMap<>();
         
         try {
@@ -84,19 +98,13 @@ public class QueueMonitorController {
             health.put("redis", "connected");
             
         } catch (Exception e) {
+            log.warn("Health check 失败", e);
             health.put("status", "DOWN");
             health.put("redis", "disconnected");
-            health.put("error", e.getMessage());
+            health.put("error", "connection_failed");
         }
         
         return Result.success(health);
     }
-
-    @GetMapping("/h")
-    public Result<Void> h() {
-        dailySummaryScheduler.generateDailySummary();
-        return Result.success();
-    }
-
 
 }

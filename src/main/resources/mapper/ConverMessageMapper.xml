@@ -24,33 +24,45 @@
     </insert>
 
     <select id="selectById" resultMap="BaseResultMap">
-        SELECT * FROM conver_messages WHERE id = #{id}
+        SELECT * FROM conver_messages WHERE id = #{id} AND is_deleted = 0
     </select>
 
     <select id="selectByUserId" resultMap="BaseResultMap">
         SELECT * FROM conver_messages
         WHERE user_id = #{userId}
+        AND is_deleted = 0
         ORDER BY created_at DESC
-        LIMIT #{offset}, #{limit}
+        LIMIT #{limit} OFFSET #{offset}
     </select>
 
     <select id="selectByUserIdAndTimeRange" resultMap="BaseResultMap">
         SELECT * FROM conver_messages
         WHERE user_id = #{userId}
+        AND is_deleted = 0
         AND created_at BETWEEN #{startTime} AND #{endTime}
         ORDER BY created_at ASC
+    </select>
+
+    <select id="selectLatestByUserIdAndTimeRange" resultMap="BaseResultMap">
+        SELECT * FROM conver_messages
+        WHERE user_id = #{userId}
+        AND is_deleted = 0
+        AND created_at BETWEEN #{startTime} AND #{endTime}
+        ORDER BY created_at DESC
+        LIMIT #{limit}
     </select>
 
     <select id="selectLatestByUserId" resultMap="BaseResultMap">
         SELECT * FROM conver_messages
         WHERE user_id = #{userId}
+        AND is_deleted = 0
         ORDER BY created_at DESC
         LIMIT #{limit}
     </select>
 
-    <delete id="deleteByUserId">
-        DELETE FROM conver_messages WHERE user_id = #{userId}
-    </delete>
+    <update id="deleteByUserId">
+        UPDATE conver_messages SET is_deleted = 1 WHERE user_id = #{userId} AND is_deleted = 0
+    </update>
 
     <select id="selectSessionPreviews" resultType="java.util.Map">
         SELECT dates.date_val AS date, SUBSTRING(dates.preview_text, 1, 50) AS preview_text
@@ -62,10 +74,15 @@
             SELECT DATE(created_at) AS date_val,
                 JSON_UNQUOTE(JSON_EXTRACT(contents, '$[0].text')) AS preview_text,
                 2 AS priority
-            FROM conver_messages
-            WHERE user_id = #{userId}
-              AND role = 'assistant'
-              AND is_deleted = 0
+            FROM (
+                SELECT created_at, contents
+                FROM conver_messages
+                WHERE user_id = #{userId}
+                  AND role = 'assistant'
+                  AND is_deleted = 0
+                ORDER BY created_at DESC
+                LIMIT 1000
+            ) recent_assistant_messages
         ) dates
         GROUP BY dates.date_val
         ORDER BY MAX(dates.priority), dates.date_val DESC

@@ -3,20 +3,28 @@ import Stomp from 'stompjs'
 import SockJS from 'sockjs-client'
 import { STORAGE_KEYS } from '@/config/storage'
 import { WS } from '@/config/api'
+import { safeGet, safeRemove } from '@/utils/storage'
+import { base64UrlDecode } from './request'
 
 // STOMP 状态（模块级单例）
 const stompClient = ref(null)
 const isConnected = ref(false)
 const isConnecting = ref(false)
-let reconnectAttempts = 0
+const reconnectAttempts = ref(0)
 const MAX_RECONNECT_ATTEMPTS = 5
 let isManualDisconnect = false
+let _appDisposed = false // 应用级销毁标记，防止 reconnectTimer 在 app 卸载后继续
+
 
 
 // 消息回调（由 ChatWindow 设置，绑定实例防止覆盖）
 let callbacks = {
   onTextMessage: null,
   onAudioChunk: null,
+  onEmotionUpdate: null,
+  onSystemMessage: null,
+  onAuthSuccess: null,
+  onPeekRequest: null,
   onError: null,
   onStatusChange: null
 }
@@ -36,7 +44,7 @@ export function connect(userId) {
   }
   isConnecting.value = true
 
-  const token = localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN)
+  const token = safeGet(STORAGE_KEYS.ACCESS_TOKEN)
   if (!token) {
     callbacks.onError?.('请先登录')
     callbacks.onStatusChange?.('disconnected')
@@ -50,16 +58,20 @@ export function connect(userId) {
   
   // 添加底层 WebSocket 关闭处理
   socket.onclose = (event) => {
-    console.warn('WebSocket closed:', event)
     isConnected.value = false
     isConnecting.value = false
-    // 通知状态变化
+    // 手动断开时不触发额外通知，避免与 disconnect() 的清理竞争
+    if (isManualDisconnect) return
     callbacks.onStatusChange?.('disconnected')
   }
 
   // 创建 STOMP 客户端
   stompClient.value = Stomp.over(socket)
   
+  // 配置 STOMP 心跳：10s 发送心跳，10s 期望接收心跳
+  stompClient.value.heartbeat.outgoing = 10000
+  stompClient.value.heartbeat.incoming = 10000
+
   // 关闭 STOMP 调试日志（生产环境）
   stompClient.value.debug = function(str) {
   }
@@ -76,7 +88,7 @@ export function connect(userId) {
   function onConnect(frame) {
     isConnecting.value = false
     isConnected.value = true
-    reconnectAttempts = 0
+    reconnectAttempts.value = 0
 
     // 订阅用户私有队列
     stompClient.value.subscribe(
@@ -104,9 +116,9 @@ export function connect(userId) {
 
     // 认证失败不重连
     if (error && error.toString().includes('Access token')) {
-      localStorage.removeItem(STORAGE_KEYS.ACCESS_TOKEN)
-      localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN)
-      localStorage.removeItem(STORAGE_KEYS.USER)
+      safeRemove(STORAGE_KEYS.ACCESS_TOKEN)
+      safeRemove(STORAGE_KEYS.REFRESH_TOKEN)
+      safeRemove(STORAGE_KEYS.USER)
       return
     }
 
@@ -119,19 +131,30 @@ export function connect(userId) {
 
 /**
  * 处理聊天消息（来自 /user/{userId}/queue/chat）
+ * 消息类型：TEXT / AUDIO / SYSTEM（主动唤醒）/ EMOTION_UPDATE / ERROR
  */
+
 function handleMessage(message) {
   if (message.type === 'TEXT') {
     callbacks.onTextMessage?.(message)
   } else if (message.type === 'AUDIO') {
-    const binary = atob(message.payload?.audioData || '')
-    const bytes = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i)
-    }
+    const binary = base64UrlDecode(message.payload?.audioData || '')
+    const bytes = Uint8Array.from(binary, c => c.charCodeAt(0))
     callbacks.onAudioChunk?.(bytes.buffer)
+  } else if (message.type === 'SYSTEM') {
+    // 如果是 authSuccess payload（有 success 字段），分发给专门的处理器
+    if (message.payload?.success === true && callbacks.onAuthSuccess) {
+      callbacks.onAuthSuccess?.(message.payload)
+    } else {
+      // 主动唤醒/系统通知（WakeUpScheduler 推送）
+      callbacks.onSystemMessage?.(message)
+    }
+  } else if (message.type === 'EMOTION_UPDATE') {
+    callbacks.onEmotionUpdate?.(message.payload)
   } else if (message.type === 'ERROR') {
     callbacks.onError?.(message.payload)
+  } else if (message.type === 'PEEK_REQUEST') {
+    callbacks.onPeekRequest?.(message.payload)
   }
 }
 
@@ -158,19 +181,19 @@ function handleControlMessage(message) {
 let reconnectTimer = null
 
 function scheduleReconnect(userId) {
-  if (isManualDisconnect) {
+  if (isManualDisconnect || _appDisposed) {
     return
   }
 
   if (reconnectTimer) clearTimeout(reconnectTimer)
 
-  if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+  if (reconnectAttempts.value >= MAX_RECONNECT_ATTEMPTS) {
     callbacks.onError?.('连接失败，请刷新页面重试')
     return
   }
 
-  const delay = 1000 * Math.pow(2, reconnectAttempts)
-  reconnectAttempts++
+  const delay = 1000 * Math.pow(2, reconnectAttempts.value)
+  reconnectAttempts.value++
 
   reconnectTimer = setTimeout(() => {
     connect(userId)
@@ -181,16 +204,20 @@ function scheduleReconnect(userId) {
  * 发送聊天消息
  * @param {string} text - 用户输入
  * @param {boolean} enableAudio - 是否启用语音
+ * @param {string} [imageUrl] - 图片 URL（可选）
  */
-export function sendChat(text, enableAudio = true) {
+export function sendChat(text, enableAudio = true, imageUrl) {
   if (!stompClient.value || !isConnected.value) {
     return false
   }
 
+  const payload = { text, enableAudio }
+  if (imageUrl) payload.imageUrl = imageUrl
+
   stompClient.value.send(
     WS.SEND_CHAT,  // 后端 @MessageMapping("/chat")
     {},
-    JSON.stringify({ text, enableAudio })
+    JSON.stringify(payload)
   )
   return true
 }
@@ -207,9 +234,23 @@ export function disconnect() {
     stompClient.value = null
   }
   isConnected.value = false
-  reconnectAttempts = 0
+  reconnectAttempts.value = 0
   isConnecting.value = false
 }
+
+/**
+ * 应用级销毁：清除所有残留定时器（在 app 卸载时调用）
+ * 与组件级 disconnect() 不同，此函数确保 reconnectTimer 也被清除
+ */
+export function disposeAppLevel() {
+  _appDisposed = true
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer)
+    reconnectTimer = null
+  }
+}
+
+export { isConnected, isConnecting, reconnectAttempts, MAX_RECONNECT_ATTEMPTS }
 
 /**
  * 设置消息回调（绑定实例，防止多组件覆盖）
@@ -222,10 +263,13 @@ export function setCallbacks(newCallbacks) {
   callbackInstanceId.current = instanceId
   callbacks = { ...newCallbacks, _instanceId: instanceId }
 
-  // 返回取消函数，组件卸载时调用
   return function dispose() {
     if (callbackInstanceId.current === instanceId) {
-      callbacks = { onTextMessage: null, onAudioChunk: null, onError: null, onStatusChange: null, _instanceId: null }
+      callbacks = {
+        onTextMessage: null, onAudioChunk: null, onEmotionUpdate: null,
+        onSystemMessage: null, onAuthSuccess: null, onPeekRequest: null,
+        onError: null, onStatusChange: null, _instanceId: null
+      }
       callbackInstanceId.current = null
     }
   }

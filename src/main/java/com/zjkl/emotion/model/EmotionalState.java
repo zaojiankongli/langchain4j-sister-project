@@ -14,8 +14,9 @@ public final class EmotionalState {
     }
 
     public EmotionalState(double pleasure, double arousal, double dominance) {
+        // PAD 模型范围: 愉悦度[-1,1], 唤醒度[0,1], 支配感[-1,1]
         this.pleasure = clamp(pleasure, -1.0, 1.0);
-        this.arousal = clamp(arousal, -1.0, 1.0);
+        this.arousal = clamp(arousal, 0.0, 1.0);
         this.dominance = clamp(dominance, -1.0, 1.0);
     }
 

@@ -48,7 +48,7 @@ public class WakeUpArbiter {
                     return pickCandidate(candidates, selectedIndex, timeContext);
             }
         } catch (Exception e) {
-            log.warn("解析仲裁 JSON 失败，使用第一条候选: {}", json, e);
+            log.warn("解析仲裁 JSON 失败，使用第一条候选: jsonLength={}", json != null ? json.length() : 0, e);
             String firstValid = null;
             for (String c : candidates) {
                 if (c != null) {

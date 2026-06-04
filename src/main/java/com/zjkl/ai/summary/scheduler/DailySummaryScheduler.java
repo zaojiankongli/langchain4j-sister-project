@@ -29,6 +29,9 @@ import static com.zjkl.ai.summary.config.RedisStreamConfig.SUMMARY_STREAM;
 @RequiredArgsConstructor
 @Slf4j
 public class DailySummaryScheduler {
+    private static final String DAILY_SUMMARY_SCHEDULER_KEY_PREFIX = "daily-summary:scheduler:";
+    private static final long SUMMARY_STREAM_MAX_LENGTH = 10_000;
+    private static final int MAX_ACTIVE_USERS_TO_SCAN = 200;
     
     private final RedisChatMemoryStore redisChatMemoryStore;
     private final UserActivityTracker userActivityTracker;
@@ -49,7 +52,7 @@ public class DailySummaryScheduler {
         
         try {
             // 1. 获取今日活跃用户
-            Set<String> userIds = userActivityTracker.getActiveMemoryIdsInLastDays(1);
+            Set<String> userIds = userActivityTracker.getActiveMemoryIdsInLastDays(1, MAX_ACTIVE_USERS_TO_SCAN);
             log.info("今日活跃用户数：{}", userIds.size());
             
             int successCount = 0;
@@ -82,44 +85,64 @@ public class DailySummaryScheduler {
      */
     public void processUserMemory(String userId) {
         log.debug("开始处理用户 {} 的每日摘要", userId);
+        String dedupKey = DAILY_SUMMARY_SCHEDULER_KEY_PREFIX + java.time.LocalDate.now() + ":" + userId;
+        boolean acquired = false;
         
-        // 1. 从 Redis 获取对话历史
-        List<ChatMessage> messages = redisChatMemoryStore.getMessages(userId);
-        
-        if (messages == null || messages.isEmpty()) {
-            log.debug("用户 {} 没有对话历史，跳过", userId);
-            return;
+        try {
+            Boolean setIfAbsent = redisTemplate.opsForValue().setIfAbsent(
+                    dedupKey,
+                    "1",
+                    java.time.Duration.ofDays(1)
+            );
+            acquired = Boolean.TRUE.equals(setIfAbsent);
+            if (!acquired) {
+                log.debug("用户 {} 当日摘要任务已存在，跳过", userId);
+                return;
+            }
+
+            // 1. 从 Redis 获取对话历史
+            List<ChatMessage> messages = redisChatMemoryStore.getMessages(userId);
+
+            if (messages == null || messages.isEmpty()) {
+                log.debug("用户 {} 没有对话历史，跳过", userId);
+                return;
+            }
+
+            // 2. 过滤掉系统消息（摘要是基于用户对话）
+            List<ChatMessage> conversationMessages = messages.stream()
+                    .filter(msg -> !(msg instanceof SystemMessage))
+                    .collect(Collectors.toList());
+
+            if (conversationMessages.isEmpty()) {
+                log.debug("用户 {} 没有有效对话内容，跳过", userId);
+                return;
+            }
+
+            // 3. 转换为文本（使用工具类）
+            String conversationText = ChatMessageUtils.messagesToText(conversationMessages);
+
+            // 4. 获取旧摘要（如果没有则为空串，AI 能处理）
+            String previousSummary = getPreviousSummary(userId);
+
+            // 5. 组装摘要生成任务
+            SummaryGenerationTask task = SummaryGenerationTask.builder()
+                .taskId(UUID.randomUUID().toString())
+                .userId(userId)
+                .conversationText(conversationText)
+                .previousSummary(previousSummary)
+                .createdAt(LocalDateTime.now().minusDays(1))
+                .build();
+
+            // 6. 发送到 Redis Stream（不阻塞！）
+            sendSummaryTask(task);
+
+            log.info("用户 {} 的摘要任务已发送，taskId={}", userId, task.getTaskId());
+        } catch (RuntimeException e) {
+            if (acquired) {
+                redisTemplate.delete(dedupKey);
+            }
+            throw e;
         }
-        
-        // 2. 过滤掉系统消息（摘要是基于用户对话）
-        List<ChatMessage> conversationMessages = messages.stream()
-                .filter(msg -> !(msg instanceof SystemMessage))
-                .collect(Collectors.toList());
-        
-        if (conversationMessages.isEmpty()) {
-            log.debug("用户 {} 没有有效对话内容，跳过", userId);
-            return;
-        }
-        
-        // 3. 转换为文本（使用工具类）
-        String conversationText = ChatMessageUtils.messagesToText(conversationMessages);
-        
-        // 4. 获取旧摘要（如果没有则为空串，AI 能处理）
-        String previousSummary = getPreviousSummary(userId);
-        
-        // 5. 组装摘要生成任务
-        SummaryGenerationTask task = SummaryGenerationTask.builder()
-            .taskId(UUID.randomUUID().toString())
-            .userId(userId)
-            .conversationText(conversationText)
-            .previousSummary(previousSummary)
-            .createdAt(LocalDateTime.now().minusDays(1))
-            .build();
-        
-        // 6. 发送到 Redis Stream（不阻塞！）
-        sendSummaryTask(task);
-        
-        log.info("用户 {} 的摘要任务已发送，taskId={}", userId, task.getTaskId());
     }
     
     /**
@@ -136,6 +159,7 @@ public class DailySummaryScheduler {
         messageBody.put("createdAt", task.getCreatedAt().toString());
         
         redisTemplate.opsForStream().add(SUMMARY_STREAM, messageBody);
+        redisTemplate.opsForStream().trim(SUMMARY_STREAM, SUMMARY_STREAM_MAX_LENGTH, true);
     }
     
     /**

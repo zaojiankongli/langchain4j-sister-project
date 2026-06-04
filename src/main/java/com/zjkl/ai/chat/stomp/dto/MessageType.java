@@ -44,5 +44,10 @@ public enum MessageType {
     /**
      * 偷看请求（服务端请求客户端截图）
      */
-    PEEK_REQUEST
+    PEEK_REQUEST,
+
+    /**
+     * 情绪状态更新
+     */
+    EMOTION_UPDATE
 }

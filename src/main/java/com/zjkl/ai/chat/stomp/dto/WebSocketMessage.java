@@ -80,4 +80,11 @@ public class WebSocketMessage {
     public static WebSocketMessage system(String content) {
         return new WebSocketMessage(MessageType.SYSTEM, of("content", content));
     }
+
+    /**
+     * 创建情绪更新消息
+     */
+    public static WebSocketMessage emotionUpdate(Map<String, Object> emotionData) {
+        return new WebSocketMessage(MessageType.EMOTION_UPDATE, emotionData);
+    }
 }

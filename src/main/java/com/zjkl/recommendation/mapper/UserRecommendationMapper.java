@@ -26,7 +26,22 @@ public interface UserRecommendationMapper {
                                                     @Param("recommendationDate") LocalDate date);
 
     /**
+     * 根据 ID 查询推荐
+     */
+    UserRecommendation selectById(@Param("id") Long id);
+
+    /**
      * 标记点击状态
      */
     int markAsClicked(@Param("id") Long id);
+
+    /**
+     * 删除指定日期之前的推荐记录
+     */
+    int deleteOlderThan(@Param("cutoffDate") LocalDate cutoffDate);
+
+    /**
+     * 删除某用户指定日期的推荐记录（重生成时使用）
+     */
+    int deleteByUserAndDate(@Param("userId") String userId, @Param("recommendationDate") LocalDate date);
 }

@@ -8,6 +8,7 @@
         <result column="resource_type" property="resourceType"/>
         <result column="title" property="title"/>
         <result column="url" property="url"/>
+        <result column="image_url" property="imageUrl"/>
         <result column="description" property="description"/>
         <result column="source" property="source"/>
         <result column="relevance_score" property="relevanceScore"/>
@@ -18,21 +19,25 @@
 
     <insert id="insert" parameterType="com.zjkl.recommendation.entity.UserRecommendation"
             useGeneratedKeys="true" keyProperty="id">
-        INSERT INTO user_recommendations (user_id, resource_type, title, url, description,
+        INSERT INTO user_recommendations (user_id, resource_type, title, url, image_url, description,
                                           source, relevance_score, recommendation_date, is_clicked)
-        VALUES (#{userId}, #{resourceType}, #{title}, #{url}, #{description},
+        VALUES (#{userId}, #{resourceType}, #{title}, #{url}, #{imageUrl}, #{description},
                 #{source}, #{relevanceScore}, #{recommendationDate}, #{isClicked})
     </insert>
 
     <insert id="batchInsert" parameterType="java.util.List">
-        INSERT INTO user_recommendations (user_id, resource_type, title, url, description,
+        INSERT INTO user_recommendations (user_id, resource_type, title, url, image_url, description,
                                           source, relevance_score, recommendation_date, is_clicked)
         VALUES
         <foreach collection="list" item="item" separator=",">
-            (#{item.userId}, #{item.resourceType}, #{item.title}, #{item.url}, #{item.description},
+            (#{item.userId}, #{item.resourceType}, #{item.title}, #{item.url}, #{item.imageUrl}, #{item.description},
              #{item.source}, #{item.relevanceScore}, #{item.recommendationDate}, #{item.isClicked})
         </foreach>
     </insert>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT * FROM user_recommendations WHERE id = #{id}
+    </select>
 
     <select id="selectByUserIdAndDate" resultMap="BaseResultMap">
         SELECT * FROM user_recommendations
@@ -43,5 +48,14 @@
     <update id="markAsClicked">
         UPDATE user_recommendations SET is_clicked = 1 WHERE id = #{id}
     </update>
+
+    <delete id="deleteOlderThan">
+        DELETE FROM user_recommendations WHERE recommendation_date &lt; #{cutoffDate}
+    </delete>
+
+    <delete id="deleteByUserAndDate">
+        DELETE FROM user_recommendations
+        WHERE user_id = #{userId} AND recommendation_date = #{recommendationDate}
+    </delete>
 
 </mapper>

@@ -17,6 +17,8 @@ public final class MemoryRedisKeys {
     public static final Duration EXPIRATION_7_DAYS = Duration.ofDays(7);
 
     public static final String LOCK_KEY_PREFIX = "lock:chat:compact:";
+    public static final String SUMMARY_DEDUP_KEY = "chat:summary:dedup:";
+    public static final Duration SUMMARY_DEDUP_TTL = Duration.ofMinutes(5);
 
     private MemoryRedisKeys() {}
 }

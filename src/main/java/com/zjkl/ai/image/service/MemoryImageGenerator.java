@@ -74,7 +74,8 @@ public class MemoryImageGenerator {
             }
         }
 
-        log.warn("图片生成重试耗尽，降级为默认图，userId={}, reason={}", userId, lastException.getMessage());
+        String reason = lastException != null ? lastException.getMessage() : "任务被中断";
+        log.warn("图片生成重试耗尽，降级为默认图，userId={}, reason={}", userId, reason);
         return CompletableFuture.completedFuture(appProperties.getDefaultImageUrl());
     }
 }

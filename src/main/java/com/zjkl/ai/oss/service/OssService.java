@@ -16,10 +16,16 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
+import java.net.InetAddress;
+import java.net.Inet6Address;
+import java.net.URI;
 import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * 阿里云 OSS 文件服务（基于官方最佳实践）
@@ -53,118 +59,38 @@ public class OssService {
     }
     
     // ==================== 上传方法 ====================
-    
+
     /**
      * 上传头像到 OSS
-     * 
-     * @param userId 用户 ID（必填）
-     * @param file 头像文件
-     * @return OSS 上的文件访问 URL
-     * @throws IOException 上传失败时抛出
      */
     public String uploadAvatar(String userId, MultipartFile file) throws IOException {
-        // 参数校验
         if (userId == null || userId.isBlank()) {
             throw new IllegalArgumentException("用户 ID 不能为空");
         }
-        
-        validateAvatarFile(file);
-        
-        // 生成 ObjectKey：avatars/{userId}/{uuid}.{ext}
+        validateImageFile(file, "头像");
         String objectKey = objectKeyGenerator.generateAvatarObjectKey(userId, file.getOriginalFilename());
-        
-        log.info("开始上传头像 - userId: {}, filename: {}, size: {} bytes", 
-            userId, file.getOriginalFilename(), file.getSize());
-        
-        try (InputStream inputStream = file.getInputStream()) {
-            // 设置元数据
-            ObjectMetadata metadata = createMetadata(file.getContentType(), file.getSize());
-            
-            // 上传到 OSS
-            PutObjectResult result = putObject(objectKey, inputStream, metadata, "头像上传失败：");
-            log.info("头像上传成功 - bucket: {}, objectKey: {}, ETag: {}", 
-                bucketName, objectKey, result.getETag());
-            
-            return generateFileUrl(objectKey);
-        }
+        return uploadToOSS(file, objectKey, "头像");
     }
-    
+
     /**
-     * 上传任意文件到 OSS
-     * 
-     * @param folder 文件夹路径（如：avatars, documents 等）
-     * @param file 文件
-     * @return OSS 上的文件访问 URL
-     * @throws IOException 上传失败时抛出
+     * 上传任意文件到 OSS（仅允许图片）
      */
     public String uploadFile(String folder, MultipartFile file) throws IOException {
-        // 参数校验
         if (folder == null || folder.isBlank()) {
             throw new IllegalArgumentException("文件夹路径不能为空");
         }
-        
-        if (file == null || file.isEmpty()) {
-            throw new IllegalArgumentException("请选择要上传的文件");
-        }
-        
-        // 校验文件大小
-        if (file.getSize() > MAX_FILE_SIZE) {
-            throw new IllegalArgumentException("文件大小不能超过 5MB");
-        }
-        
-        // 生成 ObjectKey：{folder}/{yyyy/MM/dd}/{uuid}.{ext}
+        validateImageFile(file, "文件");
         String objectKey = objectKeyGenerator.generateObjectKey(folder, file.getOriginalFilename());
-        
-        log.info("开始上传文件 - folder: {}, filename: {}, size: {} bytes", 
-            folder, file.getOriginalFilename(), file.getSize());
-        
-        try (InputStream inputStream = file.getInputStream()) {
-            ObjectMetadata metadata = createMetadata(file.getContentType(), file.getSize());
-            
-            PutObjectResult result = putObject(objectKey, inputStream, metadata, "文件上传失败：");
-            log.info("文件上传成功 - bucket: {}, objectKey: {}, ETag: {}", 
-                bucketName, objectKey, result.getETag());
-            
-            return generateFileUrl(objectKey);
-        }
+        return uploadToOSS(file, objectKey, "文件");
     }
-    
+
     /**
      * 上传聊天图片到 OSS
-     *
-     * @param file 上传的图片文件
-     * @param userId 用户 ID
-     * @return OSS 上的文件访问 URL
-     * @throws IOException 上传失败时抛出
      */
     public String uploadMessageImage(MultipartFile file, String userId) throws IOException {
-        if (file == null || file.isEmpty()) {
-            throw new IllegalArgumentException("请选择要上传的图片");
-        }
-
-        if (file.getSize() > MAX_FILE_SIZE) {
-            throw new IllegalArgumentException("图片大小不能超过 5MB");
-        }
-
-        String contentType = file.getContentType();
-        if (contentType == null || !contentType.startsWith("image/")) {
-            throw new IllegalArgumentException("只支持图片文件（JPG/PNG/GIF/WebP）");
-        }
-
+        validateImageFile(file, "聊天图片");
         String objectKey = objectKeyGenerator.generateMessageImageObjectKey(userId, file.getOriginalFilename());
-
-        log.info("开始上传聊天图片 - userId: {}, filename: {}, size: {} bytes",
-            userId, file.getOriginalFilename(), file.getSize());
-
-        try (InputStream inputStream = file.getInputStream()) {
-            ObjectMetadata metadata = createMetadata(file.getContentType(), file.getSize());
-
-            PutObjectResult result = putObject(objectKey, inputStream, metadata, "聊天图片上传失败：");
-            log.info("聊天图片上传成功 - bucket: {}, objectKey: {}, ETag: {}",
-                bucketName, objectKey, result.getETag());
-
-            return generateFileUrl(objectKey);
-        }
+        return uploadToOSS(file, objectKey, "聊天图片");
     }
 
     /**
@@ -179,6 +105,8 @@ public class OssService {
         if (fileUrl == null || fileUrl.isEmpty()) {
             throw new IllegalArgumentException("文件 URL 不能为空");
         }
+
+        validateRemoteFileUrl(fileUrl);
         
         log.info("开始从 URL 下载并上传 - fileUrl: {}", fileUrl);
         
@@ -187,11 +115,16 @@ public class OssService {
             // 从 URL 下载文件
             URL url = new URL(fileUrl);
             connection = (HttpURLConnection) url.openConnection();
+            connection.setInstanceFollowRedirects(false); // 禁用自动重定向，防止 DNS rebinding 攻击
             connection.setRequestMethod("GET");
             connection.setConnectTimeout(10000);
             connection.setReadTimeout(30000);
             
             int responseCode = connection.getResponseCode();
+            // 拒绝重定向响应，避免 SSRF
+            if (responseCode >= 300 && responseCode < 400) {
+                throw new IllegalArgumentException("不允许重定向的文件 URL");
+            }
             if (responseCode != HttpURLConnection.HTTP_OK) {
                 throw new IOException("下载文件失败，HTTP 状态码：" + responseCode);
             }
@@ -205,7 +138,7 @@ public class OssService {
                 throw new IllegalArgumentException("文件大小不能超过 5MB");
             }
             
-            try (InputStream inputStream = connection.getInputStream()) {
+            try (InputStream inputStream = openBoundedStream(connection, contentLength)) {
                 // 生成 ObjectKey
                 String targetFolder = (folder != null && !folder.isBlank()) ? folder : "downloads";
                 String objectKey = objectKeyGenerator.generateObjectKey(targetFolder, filename);
@@ -227,6 +160,42 @@ public class OssService {
                 connection.disconnect();
             }
         }
+    }
+
+    private InputStream openBoundedStream(HttpURLConnection connection, long contentLength) throws IOException {
+        if (contentLength > 0) {
+            return connection.getInputStream();
+        }
+
+        return new java.io.FilterInputStream(connection.getInputStream()) {
+            private long bytesRead = 0;
+
+            @Override
+            public int read() throws IOException {
+                int value = super.read();
+                if (value != -1) {
+                    bytesRead++;
+                    ensureWithinLimit();
+                }
+                return value;
+            }
+
+            @Override
+            public int read(byte[] b, int off, int len) throws IOException {
+                int count = super.read(b, off, len);
+                if (count > 0) {
+                    bytesRead += count;
+                    ensureWithinLimit();
+                }
+                return count;
+            }
+
+            private void ensureWithinLimit() throws IOException {
+                if (bytesRead > MAX_FILE_SIZE) {
+                    throw new IOException("文件下载失败：文件大小不能超过 5MB");
+                }
+            }
+        };
     }
     
     // ==================== 下载方法 ====================
@@ -296,7 +265,11 @@ public class OssService {
         // 格式：https://{bucket}.{endpoint}/{objectKey}
         // 从 endpoint 提取域名（去除 https:// 前缀）
         String domain = endpoint.replace("https://", "").replace("http://", "");
-        return "https://" + bucketName + "." + domain + "/" + objectKey;
+        // 对 objectKey 进行 URL 编码（保留 / 分隔符）
+        String encodedKey = Arrays.stream(objectKey.split("/"))
+            .map(s -> URLEncoder.encode(s, StandardCharsets.UTF_8).replace("+", "%20"))
+            .collect(Collectors.joining("/"));
+        return "https://" + bucketName + "." + domain + "/" + encodedKey;
     }
     
     /**
@@ -364,31 +337,81 @@ public class OssService {
     }
     
     /**
-     * 校验头像文件
+     * 统一的图片文件校验
      */
-    private void validateAvatarFile(MultipartFile file) {
+    private void validateImageFile(MultipartFile file, String fileType) {
         if (file == null || file.isEmpty()) {
-            throw new IllegalArgumentException("请选择要上传的文件");
+            throw new IllegalArgumentException(fileType + "不能为空");
         }
-        
-        long fileSize = file.getSize();
-        if (fileSize > MAX_FILE_SIZE) {
-            throw new IllegalArgumentException("头像大小不能超过 5MB");
+        if (file.getSize() > MAX_FILE_SIZE) {
+            throw new IllegalArgumentException(fileType + "大小不能超过 5MB");
         }
-        
         String contentType = file.getContentType();
         if (contentType == null || !contentType.startsWith("image/")) {
-            throw new IllegalArgumentException("只支持图片文件（JPG/PNG/GIF/WebP）");
+            throw new IllegalArgumentException(fileType + "只支持图片文件（JPG/PNG/GIF/WebP）");
         }
-        
         String originalFilename = file.getOriginalFilename();
         if (originalFilename == null) {
-            throw new IllegalArgumentException("文件名不能为空");
+            throw new IllegalArgumentException(fileType + "文件名不能为空");
         }
-        
         String extension = objectKeyGenerator.getFileExtension(originalFilename);
         if (!ALLOWED_IMAGE_EXTENSIONS.contains(extension.toLowerCase())) {
-            throw new IllegalArgumentException("只支持 JPG/PNG/GIF/WebP 格式");
+            throw new IllegalArgumentException(fileType + "只支持 JPG/PNG/GIF/WebP 格式");
+        }
+    }
+
+    private void validateRemoteFileUrl(String fileUrl) {
+        try {
+            URI uri = URI.create(fileUrl);
+            String scheme = uri.getScheme();
+            if (scheme == null || (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))) {
+                throw new IllegalArgumentException("文件 URL 仅支持 HTTP(S)");
+            }
+
+            String host = uri.getHost();
+            if (host == null || host.isBlank()) {
+                throw new IllegalArgumentException("文件 URL 缺少合法主机名");
+            }
+
+            InetAddress[] addresses = InetAddress.getAllByName(host);
+            for (InetAddress address : addresses) {
+                if (isLocalOrPrivateAddress(address)) {
+                    throw new IllegalArgumentException("不允许上传来自本地或内网地址的文件");
+                }
+            }
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalArgumentException("文件 URL 非法", e);
+        }
+    }
+
+    private boolean isLocalOrPrivateAddress(InetAddress address) {
+        if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress() || address.isSiteLocalAddress()) {
+            return true;
+        }
+
+        if (address instanceof Inet6Address) {
+            byte[] bytes = address.getAddress();
+            return bytes.length == 16 && (bytes[0] & (byte) 0xFE) == (byte) 0xFC;
+        }
+
+        return false;
+    }
+
+    /**
+     * 通用 OSS 上传（校验 → 元数据 → putObject → URL）
+     */
+    private String uploadToOSS(MultipartFile file, String objectKey, String fileType) throws IOException {
+        log.info("开始上传{} - objectKey: {}, filename: {}, size: {} bytes",
+            fileType, objectKey, file.getOriginalFilename(), file.getSize());
+
+        try (InputStream inputStream = file.getInputStream()) {
+            ObjectMetadata metadata = createMetadata(file.getContentType(), file.getSize());
+            PutObjectResult result = putObject(objectKey, inputStream, metadata, fileType + "上传失败：");
+            log.info("{}上传成功 - bucket: {}, objectKey: {}, ETag: {}",
+                fileType, bucketName, objectKey, result.getETag());
+            return generateFileUrl(objectKey);
         }
     }
 }

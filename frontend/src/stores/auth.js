@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { STORAGE_KEYS } from '@/config/storage'
 import { API } from '@/config/api'
 import request from '@/utils/request'
+import { safeGet, safeSet, safeRemove, safeGetJSON, safeSetJSON } from '@/utils/storage'
 
 /**
  * 认证状态管理 Store
@@ -12,8 +13,8 @@ import request from '@/utils/request'
  */
 export const useAuthStore = defineStore('auth', () => {
   // ── 状态 ──
-  const accessToken = ref(localStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN) || '')
-  const refreshToken = ref(localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN) || '')
+  const accessToken = ref(safeGet(STORAGE_KEYS.ACCESS_TOKEN, ''))
+  const refreshToken = ref(safeGet(STORAGE_KEYS.REFRESH_TOKEN, ''))
   const user = ref(parseUser())
   const loading = ref(false)
   const error = ref('')
@@ -24,40 +25,36 @@ export const useAuthStore = defineStore('auth', () => {
   const username = computed(() => user.value?.username || '')
 
   // ── 内部工具 ──
-  function parseUser() {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEYS.USER)
-      return raw ? JSON.parse(raw) : null
-    } catch {
-      return null
+    function parseUser() {
+      return safeGetJSON(STORAGE_KEYS.USER)
     }
-  }
 
-  function parseUserIdFromToken(token) {
-    if (!token) return null
-    try {
-      const payload = JSON.parse(atob(token.split('.')[1]))
-      return payload.sub || payload.userId || payload.id
-    } catch {
-      return null
-    }
-  }
+   function parseUserIdFromToken(token) {
+     if (!token) return null
+     try {
+       const payload = JSON.parse(atob(token.split('.')[1]))
+       return payload.sub || payload.userId || payload.id
+     } catch (error) {
+       console.warn('解析token payload失败:', error, token)
+       return null
+     }
+   }
 
   function syncLocalStorage() {
     if (accessToken.value) {
-      localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, accessToken.value)
+      safeSet(STORAGE_KEYS.ACCESS_TOKEN, accessToken.value)
     } else {
-      localStorage.removeItem(STORAGE_KEYS.ACCESS_TOKEN)
+      safeRemove(STORAGE_KEYS.ACCESS_TOKEN)
     }
     if (refreshToken.value) {
-      localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken.value)
+      safeSet(STORAGE_KEYS.REFRESH_TOKEN, refreshToken.value)
     } else {
-      localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN)
+      safeRemove(STORAGE_KEYS.REFRESH_TOKEN)
     }
     if (user.value) {
-      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user.value))
+      safeSetJSON(STORAGE_KEYS.USER, user.value)
     } else {
-      localStorage.removeItem(STORAGE_KEYS.USER)
+      safeRemove(STORAGE_KEYS.USER)
     }
   }
 
@@ -83,6 +80,10 @@ export const useAuthStore = defineStore('auth', () => {
     error.value = ''
     try {
       const res = await request.post(API.AUTH_LOGIN, { email, code, username })
+      if (res.code !== 200) {
+        error.value = res.message || '登录失败'
+        return res
+      }
       const data = res.data || res
       setTokens(data.accessToken, data.refreshToken, data.user)
       return res
@@ -94,19 +95,36 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  /**
+   * 刷新令牌（单例，防止并发重复刷新）
+   */
+  let _refreshPromise = null
+
   async function refreshTokens() {
+    // 已有进行中的刷新 → 复用
+    if (_refreshPromise) return _refreshPromise
     if (!refreshToken.value) throw new Error('无 refreshToken')
-    try {
-      const res = await request.post(API.AUTH_REFRESH, { refreshToken: refreshToken.value })
-      const data = res.data || res
-      accessToken.value = data.accessToken
-      refreshToken.value = data.refreshToken
-      syncLocalStorage()
-      return res
-    } catch (e) {
-      clearAuth()
-      throw e
-    }
+
+    _refreshPromise = (async () => {
+      try {
+        const res = await request.post(API.AUTH_REFRESH, { refreshToken: refreshToken.value }, { _skipRefresh: true })
+        if (res.code !== 200) {
+          throw new Error(res.message || '刷新失败')
+        }
+        const data = res.data || res
+        accessToken.value = data.accessToken
+        refreshToken.value = data.refreshToken
+        syncLocalStorage()
+        return res
+      } catch (e) {
+        clearAuth()
+        throw e
+      } finally {
+        _refreshPromise = null
+      }
+    })()
+
+    return _refreshPromise
   }
 
   function logout() {

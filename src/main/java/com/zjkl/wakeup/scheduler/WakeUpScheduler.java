@@ -4,10 +4,16 @@ import com.zjkl.ai.chat.entity.MessageContent;
 import com.zjkl.ai.chat.service.ConverMessageService;
 import com.zjkl.ai.chat.stomp.ChatPushService;
 import com.zjkl.ai.component.UserActivityTracker;
+import com.zjkl.ai.prompt.service.PromptTemplateService;
 import com.zjkl.common.config.properties.WakeUpProperties;
+import com.zjkl.emotion.model.EmotionalState;
+import com.zjkl.emotion.model.VoiceParams;
 import com.zjkl.emotion.model.VoiceSynthesisParam;
 import com.zjkl.emotion.service.EmotionService;
 import com.zjkl.emotion.service.VoiceSynthesisService;
+import com.zjkl.user.domain.vo.UserProfileVO;
+import com.zjkl.user.service.UserProfileService;
+import com.zjkl.settings.service.SettingsService;
 import com.zjkl.wakeup.agent.*;
 import com.zjkl.wakeup.arbiter.WakeUpArbiter;
 import com.zjkl.wakeup.arbiter.WakeUpArbiter.ArbiterDecision;
@@ -25,13 +31,16 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.nio.ByteBuffer;
+        import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 /**
  * 主动唤醒调度 — Agentic 架构：
@@ -40,6 +49,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 @Component
 @RequiredArgsConstructor
 public class WakeUpScheduler {
+
+    private static final int MAX_ACTIVE_USERS_TO_SCAN = 200;
 
     private final UserActivityTracker userActivityTracker;
     private final UserStateTool userStateTool;
@@ -58,14 +69,22 @@ public class WakeUpScheduler {
     private final WakeUpScorer3Agent scorer3Agent;
     private final WakeUpArbiterAgent arbiterAgent;
     private final WakeUpTracker wakeUpTracker;
+    private final UserProfileService userProfileService;
+    private final PromptTemplateService promptTemplateService;
 
     private final WakeUpPromptBuilder promptBuilder;
     private final WakeUpContentGenerator contentGenerator;
     private final WakeUpScorer scorer;
     private final WakeUpArbiter arbiter;
 
+    private final SettingsService settingsService;
+
     private final WakeUpProperties wakeUpProperties;
 
+    private static final int MAX_CONCURRENT_WAKEUPS = 4;
+    private final Semaphore wakeupConcurrency = new Semaphore(MAX_CONCURRENT_WAKEUPS);
+
+    /** 虚拟线程执行器（不限制线程创建，由 Semaphore 控制并发量） */
     private final Executor wakeupExecutor = Thread::startVirtualThread;
 
     @PostConstruct
@@ -84,7 +103,7 @@ public class WakeUpScheduler {
             return;
         }
 
-        Set<String> activeUsers = userActivityTracker.getActiveMemoryIdsInLastDays(7);
+        Set<String> activeUsers = userActivityTracker.getActiveMemoryIdsInLastDays(7, MAX_ACTIVE_USERS_TO_SCAN);
         if (activeUsers.isEmpty()) {
             log.debug("无活跃用户");
             return;
@@ -94,11 +113,14 @@ public class WakeUpScheduler {
         log.info("唤醒心跳：时间={}, 时段={}, 特殊时间={}",
                 timeContext.currentTime(), timeContext.timeOfDay(), timeContext.specialMoment());
 
-            AtomicInteger passFilter = new AtomicInteger(0);
-            AtomicInteger passProb = new AtomicInteger(0);
-            AtomicInteger sentCount = new AtomicInteger(0);
+        AtomicInteger passFilter = new AtomicInteger(0);
+        AtomicInteger passProb = new AtomicInteger(0);
+        AtomicInteger sentCount = new AtomicInteger(0);
 
-            List<CompletableFuture<Void>> futures = activeUsers.stream()
+        List<String> users = new ArrayList<>(activeUsers);
+        for (int i = 0; i < users.size(); i += MAX_CONCURRENT_WAKEUPS) {
+            List<String> batch = users.subList(i, Math.min(i + MAX_CONCURRENT_WAKEUPS, users.size()));
+            List<CompletableFuture<Void>> futures = batch.stream()
                     .map(userId -> CompletableFuture.runAsync(() -> {
                         try {
                             int result = processUserWakeUp(userId, timeContext);
@@ -111,7 +133,8 @@ public class WakeUpScheduler {
                     }, getExecutor()))
                     .toList();
 
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        }
 
         log.info("唤醒检查完成：总用户={}, 通过过滤={}, 通过概率={}, 实际发送={}",
                 activeUsers.size(), passFilter.get(), passProb.get(), sentCount.get());
@@ -124,16 +147,25 @@ public class WakeUpScheduler {
      * 核心流程：3 并行生成 → 过滤 → 并行评分 → 仲裁 → A/B → 发送
      */
     private int processUserWakeUp(String userId, TimeContextTool.TimeContext timeContext) {
-        // === 0. Redis 用户级去重 ===
+        // === 0. 并发控制：限制同时处理的唤醒请求数（优先检查，避免浪费 Redis SETNX） ===
+        boolean semAcquired = wakeupConcurrency.tryAcquire();
+        if (!semAcquired) {
+            log.debug("唤醒并发达到上限（{}），跳过：userId={}", MAX_CONCURRENT_WAKEUPS, userId);
+            return 0;
+        }
+
+        // === 0.1 Redis 用户级去重（Semaphore 通过后再 SETNX，避免浪费） ===
         String processingKey = PROCESSING_KEY_PREFIX + userId;
         Boolean alreadyProcessing = redisTemplate.opsForValue().setIfAbsent(processingKey, "1",
                 java.time.Duration.ofSeconds(PROCESSING_KEY_TTL_SECONDS));
         if (Boolean.FALSE.equals(alreadyProcessing)) {
+            wakeupConcurrency.release();
             log.debug("用户正在被其他线程处理中，跳过：userId={}", userId);
             return 0;
         }
 
         try {
+
             // === 1. 过滤条件 ===
             boolean isDnd = userStateTool.isDoNotDisturb(userId);
             if (isDnd) {
@@ -146,6 +178,19 @@ public class WakeUpScheduler {
                         userId, minutesSinceLastWakeup, wakeUpProperties.getCooldownMinutes());
                 return 0;
             }
+
+            // === 用户配置检查：主动推送 ===
+            var settings = settingsService.getSettings(userId);
+            if (!settings.isProactiveEnabled()) {
+                log.debug("用户已关闭主动推送，跳过唤醒：userId={}", userId);
+                return 0;
+            }
+            if (minutesSinceLastWakeup < settings.getProactiveIntervalMin()) {
+                log.debug("用户自定义冷却期内，跳过唤醒：userId={}, minutesSinceLastWakeup={}min, proactiveIntervalMin={}min",
+                        userId, minutesSinceLastWakeup, settings.getProactiveIntervalMin());
+                return 0;
+            }
+
             Double silentHours = userStateTool.getSilentHours(userId);
 
             double probability = userStateTool.calculateWakeProbability(userId, silentHours, timeContext);
@@ -163,28 +208,60 @@ public class WakeUpScheduler {
                 userId, timeContext, isDnd, silentHours, minutesSinceLastWakeup);
         String anchorHint = promptBuilder.buildAnchorHint(state);
 
+        // 获取用户画像
+        String userName = "哥哥";
+        String userHobbies = "";
+        try {
+            String[] chatProfile = userProfileService.getProfileForChat(userId);
+            if (chatProfile != null) {
+                userName = chatProfile[0] != null ? chatProfile[0] : userName;
+                userHobbies = chatProfile[1] != null ? chatProfile[1] : "";
+            }
+        } catch (Exception e) {
+            log.warn("获取用户画像失败，使用默认值: userId={}", userId, e);
+        }
+
+        // 渲染 characterCore（角色身份 + 动态情绪参数）
+        EmotionalState currentEmotion = emotionService.getUserEmotion(userId);
+        String moodLabel = emotionService.getUserMoodLabel(userId);
+        String characterCore = promptTemplateService.render("character/core", Map.of(
+            "pleasure", String.format("%.3f", currentEmotion.getPleasure()),
+            "arousal", String.format("%.3f", currentEmotion.getArousal()),
+            "dominance", String.format("%.3f", currentEmotion.getDominance()),
+            "moodLabel", moodLabel != null ? moodLabel : ""
+        ));
+
         // === 3. 并行调用 3 个 Generator Agent ===
-        log.info("开始并行生成问候：userId={}", userId);
-        CompletableFuture<String> future1 = CompletableFuture.supplyAsync(() ->
-                generator1Agent.generate(timeContext.timeOfDay(), timeContext.specialMoment(),
-                        state.moodDescription(), state.moodScore(), state.silentHours(), anchorHint, userId),
+        log.info("开始并行生成问候：userId={}, userName={}", userId, userName);
+
+        // 提取到本地变量，避免 lambda 直接调用 @Agent 代理方法时的类型推断问题
+        String _cc = characterCore;
+        String _tod = timeContext.timeOfDay();
+        String _sm = timeContext.specialMoment();
+        String _md = state.moodDescription();
+        Double _ms = state.moodScore();
+        Double _sh = state.silentHours();
+        String _ah = anchorHint;
+        String _un = userName;
+        String _uh = userHobbies;
+        String _uid = userId;
+
+        CompletableFuture<String> future1 = CompletableFuture.supplyAsync(
+                () -> callGen1(generator1Agent, _cc, _tod, _sm, _md, _ms, _sh, _ah, _un, _uh, _uid),
                 getExecutor()).exceptionally(e -> { log.warn("Generator1 失败: {}", e.getMessage()); return null; });
-
-        CompletableFuture<String> future2 = CompletableFuture.supplyAsync(() ->
-                generator2Agent.generate(timeContext.timeOfDay(), timeContext.specialMoment(),
-                        state.moodDescription(), state.moodScore(), state.silentHours(), anchorHint, userId),
+        CompletableFuture<String> future2 = CompletableFuture.supplyAsync(
+                () -> callGen2(generator2Agent, _cc, _tod, _sm, _md, _ms, _sh, _ah, _un, _uh, _uid),
                 getExecutor()).exceptionally(e -> { log.warn("Generator2 失败: {}", e.getMessage()); return null; });
-
-        CompletableFuture<String> future3 = CompletableFuture.supplyAsync(() ->
-                generator3Agent.generate(timeContext.timeOfDay(), timeContext.specialMoment(),
-                        state.moodDescription(), state.moodScore(), state.silentHours(), anchorHint, userId),
+        CompletableFuture<String> future3 = CompletableFuture.supplyAsync(
+                () -> callGen3(generator3Agent, _cc, _tod, _sm, _md, _ms, _sh, _ah, _un, _uh, _uid),
                 getExecutor()).exceptionally(e -> { log.warn("Generator3 失败: {}", e.getMessage()); return null; });
 
         String raw1 = future1.join();
         String raw2 = future2.join();
         String raw3 = future3.join();
 
-        log.info("生成结果：userId={}, 候选1={}, 候选2={}, 候选3={}", userId, raw1, raw2, raw3);
+        log.info("生成结果：userId={}, candidateLens=[{},{},{}]", userId,
+                lengthOf(raw1), lengthOf(raw2), lengthOf(raw3));
 
         // === 4. 解析 JSON 提取 message，过滤无效候选 ===
         GeneratorOutput out1 = contentGenerator.parseGeneratorOutput(raw1);
@@ -200,26 +277,36 @@ public class WakeUpScheduler {
 
         if (validCount == 0) {
             String fallbackMsg = promptBuilder.buildFallbackMessage(timeContext);
-            log.info("无有效候选，使用 fallback：userId={}, msg={}", userId, fallbackMsg);
+            log.info("无有效候选，使用 fallback：userId={}, msgLength={}", userId, fallbackMsg.length());
+            boolean sent = sendWakeUpWithVoice(userId, fallbackMsg, null);
+            if (!sent) {
+                return 2;
+            }
             saveWakeUpMessageAsync(userId, fallbackMsg);
-            sendWakeUpWithVoice(userId, fallbackMsg, null);
             return 3;
         }
 
         if (validCount == 1) {
-            GeneratorOutput chosen = candidates.stream().filter(c -> c != null).findFirst().get();
+            GeneratorOutput chosen = candidates.stream().filter(c -> c != null).findFirst()
+                    .orElseThrow(() -> new IllegalStateException("有效候选列表为空，但 validCount==1 不匹配"));
             String msg = chosen.getMessage();
-            log.info("仅有一条有效候选，直接使用：userId={}, msg={}", userId, msg);
+            log.info("仅有一条有效候选，直接使用：userId={}, msgLength={}", userId, msg.length());
             WakeUpTracker.SwapResult swapResult = wakeUpTracker.maybeSwap(
                     candidates.stream().map(c -> c != null ? c.getMessage() : null).toList(),
                     new int[]{0, 0, 0}, candidates.indexOf(chosen));
             msg = swapResult.getMessage();
+            int actualSentIndex = swapResult.getActualSentIndex();
+            GeneratorOutput selectedOutput = contentGenerator.selectOutput(candidates, actualSentIndex);
+            VoiceSynthesisParam finalVoiceParams = selectedOutput != null ? selectedOutput.getVoiceParams() : null;
+            boolean sent = sendWakeUpWithVoice(userId, msg, finalVoiceParams);
+            if (!sent) {
+                return 2;
+            }
             saveWakeUpMessageAsync(userId, msg);
-            sendWakeUpWithVoice(userId, msg, chosen.getVoiceParams());
             wakeUpTracker.recordSent(userId,
                     candidates.stream().map(c -> c != null ? c.getMessage() : null).toList(),
                     new int[]{0, 0, 0},
-                    candidates.indexOf(chosen), swapResult.getOriginalBestIndex(), msg);
+                    candidates.indexOf(chosen), actualSentIndex, msg);
             return 3;
         }
 
@@ -264,7 +351,7 @@ public class WakeUpScheduler {
                 candidateMsg2, sr2.getScore(), sr2.getReason(),
                 candidateMsg3, sr3.getScore(), sr3.getReason());
 
-        log.info("仲裁结果：userId={}, result={}", userId, arbiterResult);
+        log.info("仲裁结果：userId={}, resultLength={}", userId, lengthOf(arbiterResult));
 
         List<String> candidateMessages = List.of(candidateMsg1, candidateMsg2, candidateMsg3);
         ArbiterDecision decision = arbiter.parseArbiterResult(arbiterResult, candidateMessages, timeContext);
@@ -277,19 +364,27 @@ public class WakeUpScheduler {
         // === 8. 发送 ===
         String finalMessage = swapResult.getMessage();
         int validatedBestIndex = swapResult.getOriginalBestIndex();
-        GeneratorOutput selectedOutput = contentGenerator.selectOutput(candidates, validatedBestIndex);
+        int actualSentIndex = swapResult.getActualSentIndex();
+        GeneratorOutput selectedOutput = contentGenerator.selectOutput(candidates, actualSentIndex);
         VoiceSynthesisParam finalVoiceParams = selectedOutput != null ? selectedOutput.getVoiceParams() : null;
 
+        boolean sent = sendWakeUpWithVoice(userId, finalMessage, finalVoiceParams);
+        if (!sent) {
+            return 2;
+        }
+
         saveWakeUpMessageAsync(userId, finalMessage);
-        sendWakeUpWithVoice(userId, finalMessage, finalVoiceParams);
 
         wakeUpTracker.recordSent(userId, candidateMessages,
                 new int[]{sr1.getScore(), sr2.getScore(), sr3.getScore()},
-                validatedBestIndex, swapResult.getOriginalBestIndex(), finalMessage);
+                validatedBestIndex, actualSentIndex, finalMessage);
 
         return 3;
         } finally {
             redisTemplate.delete(processingKey);
+            if (semAcquired) {
+                wakeupConcurrency.release();
+            }
         }
     }
 
@@ -314,26 +409,50 @@ public class WakeUpScheduler {
 
     private boolean sendWakeUpWithVoice(String userId, String content, VoiceSynthesisParam voiceParams) {
         try {
+            // === 读取用户 TTS 设置 ===
+            var settings = settingsService.getSettings(userId);
+            if (!settings.isTtsEnabled()) {
+                log.info("用户已关闭 TTS，发送纯文本：userId={}", userId);
+                chatPushService.pushText(userId, content, true);
+                userStateTool.recordWakeUp(userId);
+                return true;
+            }
+
             log.info("开始 TTS 合成：userId={}, textLength={}", userId, content.length());
             ByteBuffer audioBuffer;
             try {
                 if (voiceParams != null) {
+                    // 应用用户音量/语速设置
+                    int adjustedVolume = (int) Math.round(voiceParams.getVolume() * settings.getTtsVolume());
+                    adjustedVolume = Math.max(0, Math.min(100, adjustedVolume));
+                    voiceParams.setVolume(adjustedVolume);
+                    voiceParams.setSpeechRate((float) settings.getTtsSpeed());
                     audioBuffer = voiceSynthesisService.synthesize(content, voiceParams);
                 } else {
-                    audioBuffer = voiceSynthesisService.synthesize(content, emotionService.getUserEmotion(userId));
+                    // 从情绪推导语音参数，再叠加上用户设置
+                    EmotionalState emotion = emotionService.getUserEmotion(userId);
+                    VoiceParams vp = VoiceParams.fromEmotion(emotion);
+                    VoiceSynthesisParam effectiveParams = new VoiceSynthesisParam();
+                    int adjustedVolume = (int) Math.round(vp.getVolume() * settings.getTtsVolume());
+                    adjustedVolume = Math.max(0, Math.min(100, adjustedVolume));
+                    effectiveParams.setVolume(adjustedVolume);
+                    effectiveParams.setSpeechRate((float) settings.getTtsSpeed());
+                    effectiveParams.setPitchRate(vp.getPitchRate());
+                    effectiveParams.setInstruction(vp.getInstruction());
+                    audioBuffer = voiceSynthesisService.synthesize(content, effectiveParams);
                 }
             } catch (Exception ttsEx) {
                 log.warn("TTS 合成失败，fallback 纯文本：userId={}, error={}", userId, ttsEx.getMessage());
-                userStateTool.recordWakeUp(userId);
                 chatPushService.pushText(userId, content, true);
+                userStateTool.recordWakeUp(userId);
                 log.info("唤醒消息已发送（纯文本）：userId={}, textLength={}", userId, content.length());
                 return true;
             }
 
             if (audioBuffer == null) {
                 log.warn("TTS 返回 null，fallback 纯文本：userId={}", userId);
-                userStateTool.recordWakeUp(userId);
                 chatPushService.pushText(userId, content, true);
+                userStateTool.recordWakeUp(userId);
                 return true;
             }
 
@@ -342,9 +461,13 @@ public class WakeUpScheduler {
             log.info("TTS 合成完成：userId={}, audioSize={} bytes, useLLMParams={}",
                     userId, audioData.length, voiceParams != null);
 
-            userStateTool.recordWakeUp(userId);
             chatPushService.pushText(userId, content, true);
-            chatPushService.pushAudio(userId, audioData);
+            userStateTool.recordWakeUp(userId);
+            try {
+                chatPushService.pushAudio(userId, audioData);
+            } catch (Exception audioEx) {
+                log.warn("语音推送失败，保留已发送文本：userId={}, error={}", userId, audioEx.getMessage());
+            }
 
             log.info("唤醒消息已发送（文本+语音）：userId={}, textLength={}, audioSize={}",
                     userId, content.length(), audioData.length);
@@ -353,5 +476,22 @@ public class WakeUpScheduler {
             log.error("唤醒消息发送失败：userId={}", userId, e);
             return false;
         }
+    }
+
+    // ========== @Agent 代理包装方法（解决 lambda 类型推断问题）==========
+    private static String callGen1(WakeUpGenerator1Agent agent, String cc, String tod, String sm, String md, Double ms, Double sh, String ah, String un, String uh, String uid) {
+        return agent.generate(cc, tod, sm, md, ms, sh, ah, un, uh, uid);
+    }
+
+    private static String callGen2(WakeUpGenerator2Agent agent, String cc, String tod, String sm, String md, Double ms, Double sh, String ah, String un, String uh, String uid) {
+        return agent.generate(cc, tod, sm, md, ms, sh, ah, un, uh, uid);
+    }
+
+    private static String callGen3(WakeUpGenerator3Agent agent, String cc, String tod, String sm, String md, Double ms, Double sh, String ah, String un, String uh, String uid) {
+        return agent.generate(cc, tod, sm, md, ms, sh, ah, un, uh, uid);
+    }
+
+    private static int lengthOf(String value) {
+        return value != null ? value.length() : 0;
     }
 }

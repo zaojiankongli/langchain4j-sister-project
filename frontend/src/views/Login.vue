@@ -1,10 +1,11 @@
 <script setup>
-import { ref, computed, onUnmounted } from 'vue';
+import { ref, computed, onBeforeUnmount, defineAsyncComponent } from 'vue';
 import { useRouter } from 'vue-router';
-import { setToken } from '@/utils/auth';
+import { useAuthStore } from '@/stores/auth';
 import request from '@/utils/request';
-import CompleteProfileDialog from '@/components/CompleteProfileDialog.vue';
 import { API } from '@/config/api';
+
+const CompleteProfileDialog = defineAsyncComponent(() => import('@/components/CompleteProfileDialog.vue'));
 
 const router = useRouter();
 
@@ -14,6 +15,7 @@ const router = useRouter();
 const email = ref('');
 const code = ref('');
 const isLoading = ref(false);
+const sendingCode = ref(false);       // 验证码发送中（与 isLoading 分离，实现即时反馈）
 const errorMessage = ref('');
 const successMessage = ref('');
 
@@ -22,8 +24,14 @@ const userData = ref(null);
 
 const countdown = ref(0);
 const canSendCode = ref(true);
-const errorField = ref(''); // 新增：用于记录哪个输入框触发了震动
-let countdownTimer = null; // 保存定时器引用，用于组件卸载时清理
+const errorField = ref('');
+
+// 内部状态（非响应式）
+let _isMounted = true;
+let countdownTimer = null;
+let navigationTimer = null;
+let _errorTimer = null;
+let codeAbortController = null;      // 用于取消上一次验证码请求
 
 // ==========================================
 // 交互反馈与校验逻辑
@@ -33,11 +41,11 @@ const isEmailValid = computed(() => {
   return pattern.test(email.value);
 });
 
-// 触发错误震动
 const triggerError = (field, message) => {
   errorField.value = field;
   errorMessage.value = message;
-  setTimeout(() => { errorField.value = ''; }, 400); // 400ms后移除震动class
+  if (_errorTimer) clearTimeout(_errorTimer);
+  _errorTimer = setTimeout(() => { errorField.value = ''; _errorTimer = null; }, 400);
 };
 
 const clearError = () => {
@@ -46,27 +54,8 @@ const clearError = () => {
 };
 
 // ==========================================
-// 业务逻辑
+// 倒计时（乐观 UI：点击按钮立即开始）
 // ==========================================
-const sendVerificationCode = async () => {
-  clearError();
-  if (!isEmailValid.value) {
-    return triggerError('email', '请输入正确的邮箱地址');
-  }
-
-  try {
-    const response = await request.post(API.AUTH_SEND_CODE, { email: email.value });
-    if (response.code === 200) {
-      successMessage.value = '验证码已发送，请查收邮箱';
-      startCountdown();
-    } else {
-      triggerError('email', response.message || '发送失败');
-    }
-  } catch (error) {
-    triggerError('email', error.message || '发送失败，请稍后重试');
-  }
-};
-
 const startCountdown = () => {
   countdown.value = 60;
   canSendCode.value = false;
@@ -80,12 +69,63 @@ const startCountdown = () => {
   }, 1000);
 };
 
-onUnmounted(() => {
+// ==========================================
+// 业务逻辑
+// ==========================================
+const sendVerificationCode = async () => {
+  clearError();
+  if (!isEmailValid.value) {
+    return triggerError('email', '请输入正确的邮箱地址');
+  }
+  if (sendingCode.value) return; // 请求进行中，忽略重复点击
+
+  // ── 取消上一次未完成的请求 ──
+  if (codeAbortController) codeAbortController.abort();
+
+  // ── 乐观 UI：按钮立刻进入发送状态 + 倒计时 ──
+  sendingCode.value = true;
+  startCountdown();
+  successMessage.value = '验证码发送中...';
+
+  codeAbortController = new AbortController();
+  const timeoutId = setTimeout(() => codeAbortController.abort(), 10000); // 10s 超时
+
+  try {
+    const response = await request.post(API.AUTH_SEND_CODE, { email: email.value }, {
+      signal: codeAbortController.signal,
+      _skipRefresh: true, // 登录页无 token，跳过 refresh 检查
+    });
+    clearTimeout(timeoutId);
+    if (!_isMounted) return;
+
+    if (response.code === 200) {
+      successMessage.value = '验证码已发送，请查收邮箱';
+    } else {
+      // 失败：回滚倒计时
+      stopCountdown();
+      triggerError('email', response.message || '发送失败');
+    }
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (!_isMounted || error?.name === 'CanceledError' || error?.name === 'AbortError') return;
+
+    const isTimeout = error?.code === 'ECONNABORTED' || error?.message?.includes('timeout');
+    stopCountdown();
+    triggerError('email', isTimeout ? '发送超时，请检查网络或稍后重试' : (error.message || '发送失败，请稍后重试'));
+  } finally {
+    if (_isMounted) sendingCode.value = false;
+  }
+};
+
+const stopCountdown = () => {
   if (countdownTimer) {
     clearInterval(countdownTimer);
     countdownTimer = null;
   }
-});
+  canSendCode.value = true;
+  countdown.value = 0;
+  sendingCode.value = false;
+};
 
 const handleLogin = async () => {
   clearError();
@@ -94,16 +134,18 @@ const handleLogin = async () => {
 
   try {
     isLoading.value = true;
-    successMessage.value = '';
+    successMessage.value = '校验中...';
 
     const response = await request.post(API.AUTH_LOGIN, {
       email: email.value,
       code: code.value
-    });
+    }, { _skipRefresh: true });
+    if (!_isMounted) return;
 
     if (response.code === 200) {
       const { accessToken, refreshToken, user, requiresProfileComplete } = response.data;
-      setToken(accessToken, refreshToken, user);
+      const authStore = useAuthStore();
+      authStore.setTokens(accessToken, refreshToken, user);
 
       if (requiresProfileComplete) {
         userData.value = user;
@@ -111,21 +153,35 @@ const handleLogin = async () => {
         successMessage.value = '登录成功，请完善个人资料';
       } else {
         successMessage.value = '登录成功，正在同步记忆...';
-        setTimeout(() => { router.push('/dashboard'); }, 1000);
+        // 延迟 1500ms 跳转：让用户看一眼成功提示的 toast 再切页面
+        // 匹配 successMessage 的可读时长（约 1.2s）+ 余量
+        navigationTimer = setTimeout(() => {
+          if (_isMounted) router.push({ name: 'Dashboard' }).catch(() => {});
+        }, 1500);
       }
     } else {
       triggerError('code', response.message || '登录失败');
     }
   } catch (error) {
+    if (!_isMounted) return;
     triggerError('code', error.message || '登录失败，请稍后重试');
   } finally {
-    isLoading.value = false;
+    if (_isMounted) isLoading.value = false;
   }
 };
 
 const handleProfileComplete = () => {
-  router.push('/dashboard');
+  router.push({ name: 'Dashboard' }).catch(() => {});
 };
+
+// ── 生命周期：统一清理 ──
+onBeforeUnmount(() => {
+  _isMounted = false;
+  if (codeAbortController) codeAbortController.abort();
+  if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+  if (navigationTimer) { clearTimeout(navigationTimer); navigationTimer = null; }
+  if (_errorTimer) { clearTimeout(_errorTimer); _errorTimer = null; }
+});
 </script>
 
 <template>
@@ -156,7 +212,7 @@ const handleProfileComplete = () => {
                 :key="index"
                 class="label-char"
                 :style="`--index: ${index}`"
-            >{{ char === ' ' ? '&nbsp;' : char }}</span>
+            >{{ char === ' ' ? '\u00A0' : char }}</span>
           </label>
         </div>
 
@@ -177,12 +233,12 @@ const handleProfileComplete = () => {
                   :key="index"
                   class="label-char"
                   :style="`--index: ${index}`"
-              >{{ char === ' ' ? '&nbsp;' : char }}</span>
+              >{{ char === ' ' ? '\u00A0' : char }}</span>
             </label>
           </div>
 
-          <button class="code-btn-ghost" :disabled="!canSendCode || isLoading" @click="sendVerificationCode">
-            {{ canSendCode ? '获取指令' : `冷却 [${countdown}s]` }}
+          <button class="code-btn-ghost" :disabled="!canSendCode || isLoading || sendingCode" @click="sendVerificationCode">
+            {{ sendingCode ? '发送中...' : (canSendCode ? '获取指令' : `冷却 [${countdown}s]`) }}
           </button>
         </div>
 
@@ -216,7 +272,6 @@ const handleProfileComplete = () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  /* 替换为你的二次元房间原图 URL */
   background-image: url('https://images.unsplash.com/photo-1519681393784-d120267933ba?auto=format&fit=crop&w=1920&q=80');
   background-size: cover;
   background-position: center;

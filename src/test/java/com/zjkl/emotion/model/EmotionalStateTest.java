@@ -16,23 +16,32 @@ class EmotionalStateTest {
 
     @Test
     void constructorClampsValuesToRange() {
+        // PAD范围: Pleasure[-1,1], Arousal[0,1], Dominance[-1,1]
         EmotionalState state = new EmotionalState(2.0, -2.0, 1.5);
         assertEquals(1.0, state.getPleasure());
-        assertEquals(-1.0, state.getArousal());
+        assertEquals(0.0, state.getArousal());   // Arousal min=0
         assertEquals(1.0, state.getDominance());
     }
 
     @Test
     void constructorAcceptsValidValues() {
+        EmotionalState state = new EmotionalState(0.5, 0.3, 0.8);
+        assertEquals(0.5, state.getPleasure());
+        assertEquals(0.3, state.getArousal());
+        assertEquals(0.8, state.getDominance());
+    }
+
+    @Test
+    void constructorClampsNegativeArousalToZero() {
         EmotionalState state = new EmotionalState(0.5, -0.3, 0.8);
         assertEquals(0.5, state.getPleasure());
-        assertEquals(-0.3, state.getArousal());
+        assertEquals(0.0, state.getArousal());  // 负值被clamp到0
         assertEquals(0.8, state.getDominance());
     }
 
     @Test
     void copyReturnsIndependentInstance() {
-        EmotionalState original = new EmotionalState(0.5, -0.3, 0.8);
+        EmotionalState original = new EmotionalState(0.5, 0.3, 0.8);
         EmotionalState copy = original.copy();
 
         assertEquals(original.getPleasure(), copy.getPleasure());
@@ -58,7 +67,7 @@ class EmotionalStateTest {
 
     @Test
     void clampedReturnsNewInstance() {
-        EmotionalState state = new EmotionalState(0.5, -0.3, 0.8);
+        EmotionalState state = new EmotionalState(0.5, 0.3, 0.8);
         EmotionalState clamped = state.clamped();
         assertNotSame(state, clamped);
         assertEquals(state.getPleasure(), clamped.getPleasure());
@@ -76,9 +85,9 @@ class EmotionalStateTest {
 
     @Test
     void getFormattedMethodsReturnRoundedValues() {
-        EmotionalState state = new EmotionalState(1.0 / 3.0, -1.0 / 3.0, 2.0 / 3.0);
+        EmotionalState state = new EmotionalState(1.0 / 3.0, 0.5, 2.0 / 3.0);
         assertEquals(0.333, state.getFormattedPleasure());
-        assertEquals(-0.333, state.getFormattedArousal());
+        assertEquals(0.500, state.getFormattedArousal());
         assertEquals(0.667, state.getFormattedDominance());
     }
 }

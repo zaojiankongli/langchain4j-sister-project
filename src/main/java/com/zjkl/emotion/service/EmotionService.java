@@ -4,9 +4,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.zjkl.emotion.config.EmotionEngineConfig;
+import com.zjkl.emotion.mapper.EmotionAnchorMapper;
+import com.zjkl.emotion.mapper.UserEmotionMapper;
 import com.zjkl.emotion.model.DeltaEmotion;
 import com.zjkl.emotion.model.EmotionalState;
 import com.zjkl.emotion.model.Personality;
+import com.zjkl.emotion.model.UserEmotionRecord;
+import com.zjkl.emotion.model.vo.EmotionHistoryVO;
+import com.zjkl.emotion.model.vo.EvolutionEventVO;
+import com.zjkl.settings.mapper.UserSettingsMapper;
+import com.zjkl.settings.model.UserSettings;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
@@ -14,10 +21,16 @@ import org.springframework.data.redis.core.RedisOperations;
 import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.util.Date;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * 情感计算引擎
@@ -28,6 +41,7 @@ public class EmotionService {
 
     private static final String EMOTION_KEY_PREFIX = "user:emotion:";
     private static final String PERSONALITY_KEY_PREFIX = "user:personality:";
+    private static final String EMOTION_CONFIG_KEY_PREFIX = "user:emotion-config:";
     private static final Long EMOTION_EXPIRE_DAYS = 7L;
     private static final long LOCK_WAIT_SECONDS = 1;
     private static final long LOCK_LEASE_SECONDS = 5;
@@ -41,6 +55,9 @@ public class EmotionService {
     private final StringRedisTemplate redisTemplate;
     private final org.redisson.api.RedissonClient redissonClient;
     private final ObjectMapper objectMapper;
+    private final UserSettingsMapper userSettingsMapper;
+    private final EmotionAnchorMapper emotionAnchorMapper;
+    private final UserEmotionMapper userEmotionMapper;
 
     private final Cache<String, EmotionalState> localCache = Caffeine.newBuilder()
             .maximumSize(LOCAL_CACHE_MAX_SIZE)
@@ -53,11 +70,17 @@ public class EmotionService {
             .build();
 
     public EmotionService(EmotionEngineConfig config, StringRedisTemplate redisTemplate,
-                          org.redisson.api.RedissonClient redissonClient, ObjectMapper objectMapper) {
+                          org.redisson.api.RedissonClient redissonClient, ObjectMapper objectMapper,
+                          UserSettingsMapper userSettingsMapper,
+                          EmotionAnchorMapper emotionAnchorMapper,
+                          UserEmotionMapper userEmotionMapper) {
         this.config = config;
         this.redisTemplate = redisTemplate;
         this.redissonClient = redissonClient;
         this.objectMapper = objectMapper;
+        this.userSettingsMapper = userSettingsMapper;
+        this.emotionAnchorMapper = emotionAnchorMapper;
+        this.userEmotionMapper = userEmotionMapper;
     }
 
     @PostConstruct
@@ -75,10 +98,13 @@ public class EmotionService {
     }
 
     private Personality getUserPersonality(String userId) {
+        // 1. L1 本地缓存
         Personality cached = personalityCache.getIfPresent(userId);
         if (cached != null) {
             return cached;
         }
+
+        // 2. Redis 缓存
         String key = PERSONALITY_KEY_PREFIX + userId;
         String json = redisTemplate.opsForValue().get(key);
         if (json != null && !json.isEmpty()) {
@@ -90,11 +116,58 @@ public class EmotionService {
                 log.warn("解析用户个性配置失败: userId={}, value={}", userId, json);
             }
         }
+
+        // 3. MySQL 持久层回退
+        Personality fromDb = loadPersonalityFromDb(userId);
+        if (fromDb != null) {
+            personalityCache.put(userId, fromDb);
+            // 回写到 Redis，下次直接走缓存
+            savePersonalityToRedis(userId, fromDb);
+            return fromDb;
+        }
+
+        // 4. 默认值
         Personality defaultPersonality = Personality.gentleAndShy();
         personalityCache.put(userId, defaultPersonality);
         return defaultPersonality;
     }
 
+    /**
+     * 从 MySQL user_settings 表加载人格设定
+     */
+    private Personality loadPersonalityFromDb(String userId) {
+        try {
+            UserSettings settings = userSettingsMapper.findByUserId(userId);
+            if (settings != null) {
+                String preset = settings.getPersonalityPreset();
+                if ("custom".equals(preset)) {
+                    return new Personality(
+                            settings.getOpenness(),
+                            settings.getConscientiousness(),
+                            settings.getExtraversion(),
+                            settings.getAgreeableness(),
+                            settings.getNeuroticism()
+                    );
+                }
+                return Personality.fromPreset(preset);
+            }
+        } catch (Exception e) {
+            log.warn("从 MySQL 加载人格设定失败: userId={}", userId, e);
+        }
+        return null;
+    }
+
+    /**
+     * 回写人格到 Redis（key: user:personality:*）
+     */
+    private void savePersonalityToRedis(String userId, Personality personality) {
+        try {
+            String value = objectMapper.writeValueAsString(personality);
+            redisTemplate.opsForValue().set(PERSONALITY_KEY_PREFIX + userId, value, PERSONALITY_TTL);
+        } catch (Exception e) {
+            log.warn("回写人格到 Redis 失败: userId={}", userId, e);
+        }
+    }
 
 
     /**
@@ -126,8 +199,9 @@ public class EmotionService {
     }
 
     private EmotionalState applyDecayAndRegression(EmotionalState state, String userId) {
-        double decay = config.getDecayRate();
-        double regression = config.getRegressionRate();
+        // 优先使用用户自定义的情绪引擎参数，如果没有则使用全局配置
+        double decay = getUserDecayRate(userId);
+        double regression = getUserRegressionRate(userId);
         EmotionalState base = computeBaseEmotion(userId);
         double bp = base.getPleasure();
         double ba = base.getArousal();
@@ -167,7 +241,7 @@ public class EmotionService {
             EmotionalState current = getUserEmotion(userId);
 
             // 施加刺激（基于当前情绪的增量变化）
-            double s = config.getSensitivity();
+            double s = getUserSensitivity(userId);
             double newP = current.getPleasure() + delta.getDeltaP() * s;
             double newA = current.getArousal() + delta.getDeltaA() * s;
             double newD = current.getDominance() + delta.getDeltaD() * s;
@@ -239,16 +313,18 @@ public class EmotionService {
 
     private void saveUserEmotion(String userId, EmotionalState emotion) {
         String key = EMOTION_KEY_PREFIX + userId;
+        @SuppressWarnings({"rawtypes", "unchecked"})
         SessionCallback<Object> sessionCallback = new SessionCallback<>() {
             @Override
             public Object execute(RedisOperations operations) throws DataAccessException {
-                operations.opsForHash().putAll(key, Map.of(
+                RedisOperations<String, String> ops = operations;
+                ops.opsForHash().putAll(key, Map.of(
                         "pleasure", String.valueOf(emotion.getPleasure()),
                         "arousal", String.valueOf(emotion.getArousal()),
                         "dominance", String.valueOf(emotion.getDominance()),
                         "updatedAt", String.valueOf(System.currentTimeMillis())
                 ));
-                operations.expire(key, Duration.ofDays(EMOTION_EXPIRE_DAYS));
+                ops.expire(key, Duration.ofDays(EMOTION_EXPIRE_DAYS));
                 return null;
             }
         };
@@ -265,9 +341,6 @@ public class EmotionService {
             return 0.0;
         }
     }
-
-
-
 
 
     /**
@@ -314,5 +387,191 @@ public class EmotionService {
         EmotionalState basePAD = personality.toBasePAD();
         log.info("用户新的基础 PAD - P: {}, A: {}, D: {}",
                 basePAD.getPleasure(), basePAD.getArousal(), basePAD.getDominance());
+    }
+
+    /**
+     * 设置用户的情绪引擎参数（sensitivity / decayRate / regressionRate）
+     * 这些参数将被EmotionDecayScheduler读取以实现按用户的情绪衰减
+     */
+    public void setUserEmotionConfig(String userId, double sensitivity, double decayRate, double regressionRate) {
+        // 验证参数范围
+        if (sensitivity < 0 || sensitivity > 1) {
+            throw new IllegalArgumentException("sensitivity must be between 0 and 1");
+        }
+        if (decayRate < 0 || decayRate > 1) {
+            throw new IllegalArgumentException("decayRate must be between 0 and 1");
+        }
+        if (regressionRate < 0 || regressionRate > 1) {
+            throw new IllegalArgumentException("regressionRate must be between 0 and 1");
+        }
+
+        String key = EMOTION_CONFIG_KEY_PREFIX + userId;
+        try {
+            // 存储为JSON映射
+            var configMap = Map.of(
+                    "sensitivity", sensitivity,
+                    "decayRate", decayRate,
+                    "regressionRate", regressionRate
+            );
+            String json = objectMapper.writeValueAsString(configMap);
+            redisTemplate.opsForValue().set(key, json, Duration.ofDays(30)); // 与设置保持相同TTL
+            log.info("用户情绪引擎配置已保存: userId={}, sensitivity={}, decayRate={}, regressionRate={}",
+                    userId, sensitivity, decayRate, regressionRate);
+        } catch (Exception e) {
+            log.error("序列化用户情绪引擎配置失败: userId={}", userId, e);
+            throw new RuntimeException("Failed to serialize emotion config", e);
+        }
+    }
+
+    /**
+     * 获取用户的敏感度参数，MySQL → Redis → 全局默认值
+     */
+    public double getUserSensitivity(String userId) {
+        // 1. Redis
+        double val = readEmotionConfigField(userId, "sensitivity");
+        if (val >= 0) return val;
+        // 2. MySQL 回退
+        val = loadEmotionConfigFromDb(userId, "sensitivity");
+        if (val >= 0) return val;
+        // 3. 全局默认值
+        return config.getSensitivity();
+    }
+
+    /**
+     * 获取用户的衰减率参数，MySQL → Redis → 全局默认值
+     */
+    public double getUserDecayRate(String userId) {
+        double val = readEmotionConfigField(userId, "decayRate");
+        if (val >= 0) return val;
+        val = loadEmotionConfigFromDb(userId, "decayRate");
+        if (val >= 0) return val;
+        return config.getDecayRate();
+    }
+
+    /**
+     * 获取用户的回归率参数，MySQL → Redis → 全局默认值
+     */
+    public double getUserRegressionRate(String userId) {
+        double val = readEmotionConfigField(userId, "regressionRate");
+        if (val >= 0) return val;
+        val = loadEmotionConfigFromDb(userId, "regressionRate");
+        if (val >= 0) return val;
+        return config.getRegressionRate();
+    }
+
+    // ==================== 情绪引擎参数辅助 ====================
+
+    /**
+     * 从 Redis user:emotion-config:* 解析指定字段，-1 表示无数据
+     */
+    private double readEmotionConfigField(String userId, String field) {
+        String key = EMOTION_CONFIG_KEY_PREFIX + userId;
+        String json = redisTemplate.opsForValue().get(key);
+        if (json == null || json.isEmpty()) return -1;
+        try {
+            Map<String, Object> map = objectMapper.readValue(json, Map.class);
+            Object val = map.get(field);
+            if (val != null) return Double.parseDouble(val.toString());
+        } catch (Exception e) {
+            log.warn("解析用户情绪引擎配置失败: userId={}, field={}", userId, field);
+        }
+        return -1;
+    }
+
+    /** 小缓存：MySQL 回退的情绪引擎参数，30s 过期防止频繁查库 */
+    private final Cache<String, Map<String, Double>> emotionConfigDbCache = Caffeine.newBuilder()
+            .maximumSize(5000)
+            .expireAfterWrite(30, TimeUnit.SECONDS)
+            .build();
+
+    /**
+     * 从 MySQL user_settings 表回退读取情绪引擎参数，-1 表示无数据
+     */
+    private double loadEmotionConfigFromDb(String userId, String field) {
+        Map<String, Double> cached = emotionConfigDbCache.getIfPresent(userId);
+        if (cached == null) {
+            try {
+                UserSettings settings = userSettingsMapper.findByUserId(userId);
+                if (settings == null) return -1;
+                cached = Map.of(
+                        "sensitivity", settings.getSensitivity(),
+                        "decayRate", settings.getDecayRate(),
+                        "regressionRate", settings.getRegressionRate()
+                );
+                emotionConfigDbCache.put(userId, cached);
+            } catch (Exception e) {
+                log.warn("从 MySQL 加载情绪引擎参数失败: userId={}", userId, e);
+                return -1;
+            }
+        }
+        Double val = cached.get(field);
+        return val != null ? val : -1;
+    }
+
+    // ==================== 情绪历史与演变 ====================
+
+    /**
+     * 获取用户性格演变事件列表
+     */
+    @Transactional(readOnly = true)
+    public List<EvolutionEventVO> getEvolutionEvents(String userId, int limit) {
+        List<Map<String, Object>> events = emotionAnchorMapper.selectEvolutionByUserId(userId, limit);
+        return events.stream().map(row -> {
+            EvolutionEventVO vo = new EvolutionEventVO();
+            vo.setTrigger((String) row.get("trigger_reason"));
+            String highlightTraits = (String) row.get("highlight_traits");
+            vo.setResult(highlightTraits != null && !highlightTraits.isEmpty()
+                    ? highlightTraits
+                    : (String) row.get("ai_reflection"));
+            Object startTimeObj = row.get("start_time");
+            LocalDateTime startTime = null;
+            if (startTimeObj instanceof LocalDateTime) {
+                startTime = (LocalDateTime) startTimeObj;
+            } else if (startTimeObj instanceof Date) {
+                startTime = ((Date) startTimeObj).toInstant().atZone(ZoneId.systemDefault()).toLocalDateTime();
+            }
+            vo.setTime(formatRelativeTime(startTime));
+            return vo;
+        }).collect(Collectors.toList());
+    }
+
+    /**
+     * 获取用户情绪历史记录
+     */
+    @Transactional(readOnly = true)
+    public List<EmotionHistoryVO> getEmotionHistory(String userId) {
+        return getEmotionHistory(userId, 200);
+    }
+
+    @Transactional(readOnly = true)
+    public List<EmotionHistoryVO> getEmotionHistory(String userId, int limit) {
+        int cappedLimit = Math.max(1, Math.min(limit, 500));
+        List<UserEmotionRecord> records = userEmotionMapper.selectByUserId(userId, 0, cappedLimit);
+        return records.stream().map(r -> {
+            EmotionHistoryVO vo = new EmotionHistoryVO();
+            vo.setId(r.getId());
+            vo.setPleasure(r.getPleasure());
+            vo.setArousal(r.getArousal());
+            vo.setDominance(r.getDominance());
+            vo.setMoodDescription(r.getMoodDescription());
+            vo.setCreatedAt(r.getCreatedAt());
+            return vo;
+        }).collect(Collectors.toList());
+    }
+
+    /**
+     * 格式化相对时间
+     */
+    private static String formatRelativeTime(LocalDateTime dateTime) {
+        if (dateTime == null) return "";
+        Duration duration = Duration.between(dateTime, LocalDateTime.now());
+        long minutes = duration.toMinutes();
+        if (minutes < 1) return "刚刚";
+        if (minutes < 60) return minutes + "分钟前";
+        long hours = duration.toHours();
+        if (hours < 24) return hours + "小时前";
+        long days = duration.toDays();
+        if (days < 30) return days + "天前";
+        return dateTime.toLocalDate().toString().replace("-", ".");
     }
 }

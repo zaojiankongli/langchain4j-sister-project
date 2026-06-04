@@ -8,6 +8,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 
 /**
  * 消息响应 DTO（适配前端）
@@ -80,10 +81,10 @@ public class MessageDTO {
             }
         }
 
-        // 格式化时间
+        // 格式化时间：发完整 ISO 字符串（始终含秒），前端自己分割日期和时分
         String timeStr = "";
         if (createdAt != null) {
-            timeStr = String.format("%02d:%02d", createdAt.getHour(), createdAt.getMinute());
+            timeStr = createdAt.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME);
         }
 
         // role

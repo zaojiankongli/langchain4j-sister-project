@@ -1,5 +1,6 @@
 package com.zjkl.user.domain.dto;
 
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 
 import java.time.LocalDate;
@@ -9,8 +10,12 @@ import java.time.LocalDate;
  */
 @Data
 public class UserProfileUpdateDTO {
-    
+
+    @Size(max = 50, message = "用户名不能超过50个字符")
     private String username;
+
     private LocalDate birthday;
+
+    @Size(max = 500, message = "兴趣爱好不能超过500个字符")
     private String hobbies;
 }

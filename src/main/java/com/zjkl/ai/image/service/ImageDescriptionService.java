@@ -63,7 +63,7 @@ public class ImageDescriptionService {
 
     private String callVisionModel(String imageUrl, String prompt) {
         try {
-            log.debug("开始提取图片描述: {}", imageUrl);
+            log.debug("开始提取图片描述");
 
             MultiModalConversationMessage userMessage = MultiModalConversationMessage.builder()
                     .role("user")
@@ -82,11 +82,11 @@ public class ImageDescriptionService {
             MultiModalConversationResult result = conversation.call(param);
 
             String description = extractText(result);
-            log.info("图片描述提取成功: {} -> {}", imageUrl, description);
+            log.info("图片描述提取成功: source=image-url, textLength={}", description.length());
             return description;
 
         } catch (ApiException | NoApiKeyException | UploadFileException e) {
-            log.error("图片描述提取失败: {}", imageUrl, e);
+            log.error("图片描述提取失败: source=image-url", e);
             return "[图片描述提取失败]";
         }
     }

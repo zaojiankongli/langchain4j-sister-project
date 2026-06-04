@@ -53,6 +53,9 @@ public class WanxImageService {
     /** 最大轮询次数（首次 2s + 后续 5s * 59 ≈ 5 分钟超时） */
     private static final int MAX_POLL_COUNT = 60;
 
+    /** 查询接口连续异常上限 */
+    private static final int MAX_CONSECUTIVE_QUERY_FAILURES = 5;
+
     /**
      * 生成图片（异步提交 + 轮询结果）
      *
@@ -63,7 +66,7 @@ public class WanxImageService {
         try {
             // Step 1: 构建 prompt
             String prompt = buildPrompt(elements);
-            log.info("开始调用通义万相（异步模式），prompt: {}", prompt);
+            log.info("开始调用通义万相（异步模式），promptLength={}", prompt.length());
 
             // Step 2: 提交异步任务
             String taskId = submitTask(prompt);
@@ -71,7 +74,7 @@ public class WanxImageService {
 
             // Step 3: 轮询查询结果
             String imageUrl = pollTaskResult(taskId);
-            log.info("通义万相生成图片成功：{}", imageUrl);
+            log.info("通义万相生成图片成功，taskId已完成");
             return imageUrl;
 
         } catch (Exception e) {
@@ -127,6 +130,7 @@ public class WanxImageService {
         );
 
         String queryUrl = TASK_QUERY_URL + taskId;
+        int consecutiveQueryFailures = 0;
 
         for (int i = 0; i < MAX_POLL_COUNT; i++) {
             try {
@@ -149,6 +153,7 @@ public class WanxImageService {
                 }
 
                 String status = output.has("task_status") ? output.get("task_status").asText() : "UNKNOWN";
+                consecutiveQueryFailures = 0;
 
                 switch (status) {
                     case "SUCCEEDED" -> {
@@ -157,7 +162,7 @@ public class WanxImageService {
                     case "FAILED", "CANCELED" -> {
                         String message = output.has("message") ? output.get("message").asText() : "未知原因";
                         String code = output.has("code") ? output.get("code").asText() : "UNKNOWN";
-                        throw new RuntimeException("任务" + status + "，code=" + code + "，message=" + message);
+                        throw new TerminalTaskException("任务" + status + "，code=" + code + "，message=" + message);
                     }
                     case "PENDING", "RUNNING" -> {
                         if (i % 6 == 0) {
@@ -168,12 +173,24 @@ public class WanxImageService {
                     default -> log.warn("未知任务状态，taskId={}，status={}", taskId, status);
                 }
 
+            } catch (TerminalTaskException e) {
+                throw e;
             } catch (Exception e) {
+                consecutiveQueryFailures++;
                 log.warn("查询任务结果异常，taskId={}，第{}次重试：{}", taskId, i + 1, e.getMessage());
+                if (consecutiveQueryFailures >= MAX_CONSECUTIVE_QUERY_FAILURES) {
+                    throw new RuntimeException("任务查询连续失败，taskId=" + taskId, e);
+                }
             }
         }
 
         throw new RuntimeException("任务超时，taskId=" + taskId + "，超过 " + (MAX_POLL_COUNT * POLL_INTERVAL_MS / 1000) + "s 未完成");
+    }
+
+    private static class TerminalTaskException extends RuntimeException {
+        TerminalTaskException(String message) {
+            super(message);
+        }
     }
 
     /**

@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zjkl.settings.mapper.UserSettingsMapper">
+
+    <!-- snake_case → camelCase 自动映射 -->
+    <resultMap id="settingsMap" type="com.zjkl.settings.model.UserSettings">
+        <result column="personality_preset" property="personalityPreset"/>
+        <result column="tts_enabled" property="ttsEnabled"/>
+        <result column="tts_volume" property="ttsVolume"/>
+        <result column="tts_speed" property="ttsSpeed"/>
+        <result column="proactive_enabled" property="proactiveEnabled"/>
+        <result column="proactive_interval_min" property="proactiveIntervalMin"/>
+        <result column="theme_id" property="themeId"/>
+        <result column="decay_rate" property="decayRate"/>
+        <result column="regression_rate" property="regressionRate"/>
+    </resultMap>
+
+    <select id="findByUserId" resultMap="settingsMap">
+        SELECT * FROM user_settings WHERE user_id = #{userId}
+    </select>
+
+    <insert id="upsert">
+        INSERT INTO user_settings (
+            user_id, personality_preset,
+            openness, conscientiousness, extraversion, agreeableness, neuroticism,
+            sensitivity, decay_rate, regression_rate,
+            tts_enabled, tts_volume, tts_speed,
+            proactive_enabled, proactive_interval_min,
+            theme_id
+        ) VALUES (
+            #{userId}, #{settings.personalityPreset},
+            #{settings.openness}, #{settings.conscientiousness},
+            #{settings.extraversion}, #{settings.agreeableness}, #{settings.neuroticism},
+            #{settings.sensitivity}, #{settings.decayRate}, #{settings.regressionRate},
+            #{settings.ttsEnabled}, #{settings.ttsVolume}, #{settings.ttsSpeed},
+            #{settings.proactiveEnabled}, #{settings.proactiveIntervalMin},
+            #{settings.themeId}
+        )
+        AS new
+        ON DUPLICATE KEY UPDATE
+            personality_preset     = new.personality_preset,
+            openness               = new.openness,
+            conscientiousness      = new.conscientiousness,
+            extraversion           = new.extraversion,
+            agreeableness          = new.agreeableness,
+            neuroticism            = new.neuroticism,
+            sensitivity            = new.sensitivity,
+            decay_rate             = new.decay_rate,
+            regression_rate        = new.regression_rate,
+            tts_enabled            = new.tts_enabled,
+            tts_volume             = new.tts_volume,
+            tts_speed              = new.tts_speed,
+            proactive_enabled      = new.proactive_enabled,
+            proactive_interval_min = new.proactive_interval_min,
+            theme_id               = new.theme_id
+    </insert>
+
+    <delete id="deleteByUserId">
+        DELETE FROM user_settings WHERE user_id = #{userId}
+    </delete>
+
+</mapper>

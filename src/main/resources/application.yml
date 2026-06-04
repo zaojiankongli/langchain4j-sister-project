@@ -1,8 +1,4 @@
 
-# ==================== 应用默认配置 ====================
-app:
-  default-image-url: ${APP_DEFAULT_IMAGE_URL}
-
 jwt:
   secret: ${JWT_SECRET}
   access-token-expiration: 7200000        # 2 小时
@@ -56,7 +52,9 @@ spring:
   task:
     scheduling:
       pool:
-        size: 2
+        size: 4
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
 
 # ==================== LangChain4j 配置 ====================
 langchain4j:
@@ -118,8 +116,8 @@ mybatis:
 # ==================== 日志配置 ====================
 logging:
   level:
-    dev.langchain4j: debug
-    com.zjkl: debug
+    dev.langchain4j: info
+    com.zjkl: info
 
 # ==================== MCP 密钥配置 ====================
 mcp:
@@ -160,16 +158,13 @@ info:
     version: 0.0.1-SNAPSHOT
     description: LangChain4j AI Companion Backend
 
-spring:
-  lifecycle:
-    timeout-per-shutdown-phase: 30s
-
 server:
   shutdown: graceful
   port: 8080
 
 # ==================== 结构化配置属性前缀映射（@ConfigurationProperties 绑定） ====================
 app:
+  default-image-url: ${APP_DEFAULT_IMAGE_URL}
   ai:
     chat-api-key: ${DASHSCOPE_API_KEY}
     chat-model-name: qwen3.5-flash
@@ -197,11 +192,20 @@ app:
     secret: ${JWT_SECRET}
     access-token-expiration: 7200000
     refresh-token-expiration: 604800000
+    whitelist:
+      - /api/auth/send-code
+      - /api/auth/login
+      - /api/auth/refresh
   milvus:
     host: ${MILVUS_HOST}
     port: ${MILVUS_PORT}
+    uri: http://${MILVUS_HOST}:${MILVUS_PORT}
     database: zjkl
     collection-name: zjkl_sister
+    memory-collection-name: memory_store
+    graph-entity-collection-name: vgrag_entities
+    graph-relation-collection-name: vgrag_relations
+    graph-passage-collection-name: vgrag_passages
   websocket:
     allowed-origins: ${WEBSOCKET_ALLOWED_ORIGINS}
   cors:

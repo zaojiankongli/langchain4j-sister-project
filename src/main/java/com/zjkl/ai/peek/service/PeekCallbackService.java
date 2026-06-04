@@ -6,6 +6,8 @@ import com.zjkl.ai.chat.entity.MessageContent;
 import com.zjkl.ai.chat.service.ConverMessageService;
 import com.zjkl.ai.chat.stomp.ChatPushService;
 import com.zjkl.ai.image.service.ImageDescriptionService;
+import com.zjkl.ai.prompt.service.PromptTemplateService;
+import com.zjkl.emotion.model.EmotionalState;
 import com.zjkl.emotion.model.VoiceSynthesisParam;
 import com.zjkl.emotion.service.EmotionService;
 import com.zjkl.emotion.service.VoiceSynthesisService;
@@ -20,6 +22,7 @@ import org.springframework.stereotype.Service;
 
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Peek 截图回调处理服务
@@ -35,11 +38,13 @@ import java.util.List;
 public class PeekCallbackService {
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static final String DEFAULT_PEEK_MESSAGE = "刚刚看了一下，你正在专注呢，我就不打扰啦～";
 
     private final ImageDescriptionService imageDescriptionService;
     private final PeekContentAgent peekContentAgent;
     private final EmotionService emotionService;
     private final VoiceSynthesisService voiceSynthesisService;
+    private final PromptTemplateService promptTemplateService;
     private final ConverMessageService converMessageService;
     private final ChatPushService chatPushService;
     private final PeekStateTool peekStateTool;
@@ -53,9 +58,9 @@ public class PeekCallbackService {
      * @param imageUrl 截图的 OSS URL
      * @param peekId   peek 任务 ID（用于日志追踪）
      */
-    @Async("taskExecutor")
+    @Async
     public void handlePeekCallback(String userId, String imageUrl, String peekId) {
-        log.info("开始处理 peek 回调：userId={}, peekId={}, imageUrl={}", userId, peekId, imageUrl);
+        log.info("开始处理 peek 回调：userId={}, peekId={}", userId, peekId);
 
         try {
             // 0. 离线重检 — 避免昂贵的 VLM/Agent/TTS 白做
@@ -66,15 +71,26 @@ public class PeekCallbackService {
 
             // 1. VLM 理解截图
             String screenshotDesc = imageDescriptionService.describeForPeek(imageUrl);
-            log.info("peek VLM 描述完成：userId={}, desc={}", userId, screenshotDesc);
+            log.info("peek VLM 描述完成：userId={}", userId);
 
             // 2. 获取上下文
             TimeContextTool.TimeContext timeContext = timeContextTool.getCurrentContext();
-            String moodDesc = emotionService.getMoodDescription(emotionService.getUserEmotion(userId));
+            EmotionalState currentEmotion = emotionService.getUserEmotion(userId);
+            String moodDesc = emotionService.getMoodDescription(currentEmotion);
             int activeMinutes = peekStateTool.getContinuousActiveMinutes(userId);
+
+            // 渲染 characterCore（角色身份 + 动态情绪参数）
+            String moodLabel = emotionService.getUserMoodLabel(userId);
+            String characterCore = promptTemplateService.render("character/core", Map.of(
+                "pleasure", String.format("%.3f", currentEmotion.getPleasure()),
+                "arousal", String.format("%.3f", currentEmotion.getArousal()),
+                "dominance", String.format("%.3f", currentEmotion.getDominance()),
+                "moodLabel", moodLabel != null ? moodLabel : ""
+            ));
 
             // 3. Agent 生成关怀文本（JSON 格式，含 voiceParams）
             String rawOutput = peekContentAgent.generateMessage(
+                    characterCore,
                     screenshotDesc,
                     timeContext.timeOfDay(),
                     timeContext.specialMoment(),
@@ -90,6 +106,7 @@ public class PeekCallbackService {
 
             String content;
             VoiceSynthesisParam voiceParams = null;
+            boolean isFallback = false;
             String trimmed = rawOutput.trim();
             if (trimmed.startsWith("{")) {
                 try {
@@ -105,21 +122,30 @@ public class PeekCallbackService {
                         if (vpNode.has("voice")) voiceParams.setVoice(vpNode.path("voice").asText(null));
                     }
                 } catch (Exception e) {
-                    log.warn("peek JSON 解析失败，尝试作为纯文本: {}", rawOutput, e);
-                    content = null;
+                    log.warn("peek JSON 解析失败，降级为纯文本: {}", rawOutput, e);
+                    content = trimmed.replaceAll("^[\"']+|[\"']+$", "");
+                    isFallback = true;
                 }
             } else {
                 content = trimmed.replaceAll("^[\"']+|[\"']+$", "");
+                isFallback = true;
             }
 
             content = content != null ? content.trim() : null;
 
             if (content == null || content.isBlank()) {
-                log.warn("peek Agent 提取消息为空：userId={}, peekId={}", userId, peekId);
-                return;
+                log.warn("peek Agent 提取消息为空，使用通用兜底文案：userId={}, peekId={}", userId, peekId);
+                content = DEFAULT_PEEK_MESSAGE;
+                isFallback = true;
             }
 
-            log.info("peek Agent 生成内容：userId={}, content={}, useLLMParams={}", userId, content, voiceParams != null);
+            // 仅对降级文本做安全兜底：如果仍像 JSON 片段（含 { 或 "），用通用消息替代
+            if (isFallback && content != null && (content.contains("\"") || content.contains("{"))) {
+                log.warn("peek 降级文本仍含 JSON 结构，垫通用消息：content={}", content);
+                content = DEFAULT_PEEK_MESSAGE;
+            }
+
+            log.info("peek Agent 生成内容：userId={}, content=***, useLLMParams={}", userId, voiceParams != null);
 
             // 4. TTS 合成
             ByteBuffer audioBuffer;
@@ -143,13 +169,17 @@ public class PeekCallbackService {
 
             // 6. 推送文本 + 语音
             chatPushService.pushText(userId, content, true);
-            if (audioData.length > 0) {
-                chatPushService.pushAudio(userId, audioData);
-            }
-
-            // 7. 记录 peek 时间 + 设置 wakeup 互斥（双向互斥，防止与 wakeup 同时触发）
+            // 7. 记录 peek 时间 + 设置 wakeup 互斥（文本已成功送达即可视为处理完成）
             peekStateTool.recordPeek(userId);
             userStateTool.recordWakeUp(userId);
+            if (audioData.length > 0) {
+                try {
+                    chatPushService.pushAudio(userId, audioData);
+                } catch (Exception audioEx) {
+                    log.warn("peek 语音推送失败，保留已发送文本：userId={}, peekId={}, error={}",
+                            userId, peekId, audioEx.getMessage());
+                }
+            }
 
             log.info("peek 处理完成（文本+语音已推送）：userId={}, peekId={}, textLength={}",
                     userId, peekId, content.length());

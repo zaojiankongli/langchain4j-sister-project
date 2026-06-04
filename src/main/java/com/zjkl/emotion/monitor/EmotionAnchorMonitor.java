@@ -81,6 +81,8 @@ public class EmotionAnchorMonitor {
                     state.lastMsgTime = LocalDateTime.now();
                 }
                 case MONITORING -> {
+                    state.lastMsgTime = LocalDateTime.now();
+
                     if (newA > state.peakArousal) {
                         state.peakArousal = newA;
                     }

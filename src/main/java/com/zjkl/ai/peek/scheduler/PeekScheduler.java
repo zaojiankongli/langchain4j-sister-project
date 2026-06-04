@@ -13,6 +13,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -28,6 +30,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 @RequiredArgsConstructor
 public class PeekScheduler {
 
+    private static final String PEEK_REQUEST_LOCK_KEY_PREFIX = "peek:request-lock:";
+    private static final int MAX_ACTIVE_USERS_TO_SCAN = 200;
     private final UserActivityTracker userActivityTracker;
     private final UserStateTool userStateTool;
     private final TimeContextTool timeContextTool;
@@ -48,7 +52,7 @@ public class PeekScheduler {
             return;
         }
 
-        Set<String> activeUsers = userActivityTracker.getActiveMemoryIdsInLastDays(1);
+        Set<String> activeUsers = userActivityTracker.getActiveMemoryIdsInLastDays(1, MAX_ACTIVE_USERS_TO_SCAN);
         if (activeUsers == null || activeUsers.isEmpty()) {
             log.debug("无今日活跃用户");
             return;
@@ -62,19 +66,24 @@ public class PeekScheduler {
         AtomicInteger passFilter = new AtomicInteger(0);
         AtomicInteger requestSent = new AtomicInteger(0);
 
-        CompletableFuture<?>[] futures = activeUsers.stream()
-                .map(userId -> CompletableFuture.runAsync(() -> {
-                    try {
-                        int result = processUserPeek(userId, timeContext);
-                        if (result >= 1) passFilter.incrementAndGet();
-                        if (result >= 2) requestSent.incrementAndGet();
-                    } catch (Exception e) {
-                        log.error("处理用户 peek 失败：userId={}", userId, e);
-                    }
-                }, PEEK_EXECUTOR))
-                .toArray(CompletableFuture[]::new);
+        List<String> users = new ArrayList<>(activeUsers);
+        int batchSize = Math.max(1, peekProperties.getMaxConcurrentRequests());
+        for (int i = 0; i < users.size(); i += batchSize) {
+            List<String> batch = users.subList(i, Math.min(i + batchSize, users.size()));
+            CompletableFuture<?>[] futures = batch.stream()
+                    .map(userId -> CompletableFuture.runAsync(() -> {
+                        try {
+                            int result = processUserPeek(userId, timeContext);
+                            if (result >= 1) passFilter.incrementAndGet();
+                            if (result >= 2) requestSent.incrementAndGet();
+                        } catch (Exception e) {
+                            log.error("处理用户 peek 失败：userId={}", userId, e);
+                        }
+                    }, PEEK_EXECUTOR))
+                    .toArray(CompletableFuture[]::new);
 
-        CompletableFuture.allOf(futures).join();
+            CompletableFuture.allOf(futures).join();
+        }
 
         log.info("peek 检查完成：总用户={}, 通过过滤={}, 发送请求={}",
                 activeUsers.size(), passFilter.get(), requestSent.get());
@@ -119,23 +128,44 @@ public class PeekScheduler {
                 userId, String.format("%.3f", probability),
                 peekStateTool.getContinuousActiveMinutes(userId));
 
+        String requestLockKey = PEEK_REQUEST_LOCK_KEY_PREFIX + userId;
+        Boolean requestLockAcquired = redisTemplate.opsForValue().setIfAbsent(
+                requestLockKey,
+                "1",
+                Duration.ofSeconds(peekProperties.getPeekRequestTtlSeconds())
+        );
+        if (!Boolean.TRUE.equals(requestLockAcquired)) {
+            log.debug("peek 用户请求互斥命中，跳过：userId={}", userId);
+            return 1;
+        }
+
         // 全局速率限制
         Long current = redisTemplate.opsForValue().increment(PEEK_RATE_LIMIT_KEY);
         if (current == 1) {
             redisTemplate.expire(PEEK_RATE_LIMIT_KEY, RATE_LIMIT_WINDOW);
         }
         if (current > peekProperties.getMaxConcurrentRequests()) {
+            redisTemplate.delete(requestLockKey);
             log.warn("peek 全局速率限制，跳过：userId={}", userId);
             return 1;
         }
 
-        String peekId = UUID.randomUUID().toString();
+        String redisKey = null;
+        try {
+            String peekId = UUID.randomUUID().toString();
 
-        String redisKey = PEEK_PENDING_KEY_PREFIX + peekId;
-        redisTemplate.opsForValue().set(redisKey, userId, Duration.ofSeconds(peekProperties.getPeekRequestTtlSeconds()));
-        chatPushService.pushPeekRequest(userId, peekId);
+            redisKey = PEEK_PENDING_KEY_PREFIX + peekId;
+            redisTemplate.opsForValue().set(redisKey, userId, Duration.ofSeconds(peekProperties.getPeekRequestTtlSeconds()));
+            chatPushService.pushPeekRequest(userId, peekId);
 
-        log.info("peek 请求已发送：userId={}, peekId={}", userId, peekId);
-        return 2;
+            log.info("peek 请求已发送：userId={}, peekId={}", userId, peekId);
+            return 2;
+        } catch (RuntimeException e) {
+            if (redisKey != null) {
+                redisTemplate.delete(redisKey);
+            }
+            redisTemplate.delete(requestLockKey);
+            throw e;
+        }
     }
 }

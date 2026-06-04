@@ -50,4 +50,9 @@ public interface EmotionAnchorMapper {
      * 查询用户性格演变事件（evolution 接口）
      */
     List<Map<String, Object>> selectEvolutionByUserId(@Param("userId") String userId, @Param("limit") int limit);
+
+    /**
+     * 关闭超过最大持续时长的未结束锚点事件（服务重启恢复时使用）
+     */
+    int closeStaleEvents(@Param("maxDurationMinutes") int maxDurationMinutes);
 }

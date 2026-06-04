@@ -40,8 +40,16 @@ public interface ConverMessageMapper {
      * 查询用户的消息历史（按时间范围）
      */
     List<ConverMessage> selectByUserIdAndTimeRange(@Param("userId") String userId,
-                                                   @Param("startTime") LocalDateTime startTime,
-                                                   @Param("endTime") LocalDateTime endTime);
+                                                    @Param("startTime") LocalDateTime startTime,
+                                                    @Param("endTime") LocalDateTime endTime);
+
+    /**
+     * 查询用户的消息历史（按时间范围，限制最近 N 条）
+     */
+    List<ConverMessage> selectLatestByUserIdAndTimeRange(@Param("userId") String userId,
+                                                          @Param("startTime") LocalDateTime startTime,
+                                                          @Param("endTime") LocalDateTime endTime,
+                                                          @Param("limit") int limit);
 
     /**
      * 查询用户最近的 N 条消息
@@ -50,7 +58,7 @@ public interface ConverMessageMapper {
                                              @Param("limit") int limit);
 
     /**
-     * 删除用户的所有消息
+     * 软删除用户的所有消息（设置 is_deleted = 1）
      */
     int deleteByUserId(@Param("userId") String userId);
 

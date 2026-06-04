@@ -8,9 +8,13 @@ import io.jsonwebtoken.security.Keys;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
+import lombok.extern.slf4j.Slf4j;
+
 import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
 import java.util.Date;
 
+@Slf4j
 @Component
 @RequiredArgsConstructor
 public class JwtUtil {
@@ -89,11 +93,7 @@ public class JwtUtil {
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
-
-            if (claims.getExpiration().before(new Date())) {
-                return null;
-            }
-
+            // Jwts.parser() 已自动验证过期时间，过期的 token 会抛出 ExpiredJwtException
             return claims.getSubject();
         } catch (Exception e) {
             return null;
@@ -108,11 +108,9 @@ public class JwtUtil {
             if (cachedSigningKey != null) {
                 return cachedSigningKey;
             }
-            byte[] keyBytes = authProperties.getSecret().getBytes();
+            byte[] keyBytes = authProperties.getSecret().getBytes(StandardCharsets.UTF_8);
             if (keyBytes.length < 32) {
-                byte[] padded = new byte[32];
-                System.arraycopy(keyBytes, 0, padded, 0, Math.min(keyBytes.length, 32));
-                keyBytes = padded;
+                throw new IllegalStateException("JWT 签名密钥长度不足 32 字节，拒绝启动/签发 Token");
             }
             cachedSigningKey = Keys.hmacShaKeyFor(keyBytes);
             return cachedSigningKey;

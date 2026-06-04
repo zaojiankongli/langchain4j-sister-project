@@ -1,21 +1,53 @@
+# ==================== 生产环境配置 ====================
+# 所有值来自 .env 文件，无硬编码
+# 启动: source .env.prod && java -jar app.jar
+
 spring:
+  task:
+    scheduling:
+      pool:
+        size: 2
   datasource:
-    url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/zjkl_sister?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
-    password: ${MYSQL_PASSWORD}
+    url: jdbc:mysql://${MYSQL_HOST:127.0.0.1}:${MYSQL_PORT:3306}/zjkl_sister?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
     hikari:
-      maximum-pool-size: 20
-      minimum-idle: 5
+      maximum-pool-size: 6
+      minimum-idle: 2
   data:
     redis:
-      host: ${REDIS_HOST}
-      port: ${REDIS_PORT}
-      database: ${REDIS_DATABASE}
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      database: ${REDIS_DATABASE:0}
   lifecycle:
     timeout-per-shutdown-phase: 30s
 
 milvus:
   host: ${MILVUS_HOST}
-  port: ${MILVUS_PORT}
+  port: ${MILVUS_PORT:19530}
+
+app:
+  milvus:
+    host: ${MILVUS_HOST}
+    port: ${MILVUS_PORT:19530}
+    database: zjkl
+    collection-name: zjkl_sister
+    connect-timeout-ms: ${MILVUS_CONNECT_TIMEOUT_MS:10000}
+    idle-timeout-ms: ${MILVUS_IDLE_TIMEOUT_MS:60000}
+  websocket:
+    allowed-origins: ${WEBSOCKET_ALLOWED_ORIGINS:http://localhost}
+    message-size-limit: 65536
+    send-buffer-size-limit: 524288
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost}
+  thread-pool:
+    websocket-sender-core-size: 2
+    websocket-sender-max-size: 4
+    websocket-sender-queue-capacity: 100
+    async-core-pool-size: 2
+    async-max-pool-size: 4
+    async-queue-capacity: 100
+    async-thread-name-prefix: async-task-
+    redisson-min-idle: 2
+    redisson-pool-size: 8
 
 server:
   port: 8080
@@ -25,14 +57,3 @@ logging:
   level:
     dev.langchain4j: warn
     com.zjkl: info
-
-management:
-  endpoints:
-    web:
-      exposure:
-        include: health,info,metrics,prometheus
-  endpoint:
-    health:
-      show-details: when-authorized
-      probes:
-        enabled: true

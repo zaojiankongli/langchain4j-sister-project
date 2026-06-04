@@ -1,14 +1,17 @@
-import { ref, onUnmounted } from 'vue'
+import { ref, computed, onUnmounted } from 'vue'
 
 const SAMPLE_RATE = 44100
+const DEFAULT_MIN_BUFFER = 8     // 预缓冲块数（原为 3，增大以降低慢连接卡顿）
+const BUFFER_LOW_WATERMARK = 4   // 低于此值时视为缓冲不足
 
-export function useStreamingAudioPlayer() {
+export function useStreamingAudioPlayer(minBufferSize = DEFAULT_MIN_BUFFER) {
   const audioContext = ref(null)
   const scriptProcessor = ref(null)
   const gainNode = ref(null)
   
   const isPlaying = ref(false)
   const isPaused = ref(false)
+  const isBuffering = ref(false)    // 缓冲不足，播放卡顿
   const volume = ref(1.0)
   
   const decodeQueue = []
@@ -16,10 +19,16 @@ export function useStreamingAudioPlayer() {
   const currentTime = ref(0)
   const totalSamples = ref(0)
   
+  const bufferHealth = computed(() => {
+    if (minBufferSize === 0) return 1
+    return Math.min(decodeQueue.length / minBufferSize, 1)
+  })
+
   const stats = ref({
     chunksReceived: 0,
     chunksDecoded: 0,
-    decodeErrors: 0
+    decodeErrors: 0,
+    bufferUnderruns: 0,      // 缓冲不足次数
   })
   
   const init = async () => {
@@ -43,24 +52,43 @@ export function useStreamingAudioPlayer() {
   
   function handleAudioProcess(event) {
     const outputBuffer = event.outputBuffer.getChannelData(0)
-    
+    let hadData = false
+
+    // 原子化取出所有待处理块，防止与 appendAudioChunk 的推入竞争
+    const queue = decodeQueue.splice(0)
+
     for (let i = 0; i < outputBuffer.length; i++) {
-      if (decodeQueue.length > 0) {
-        const chunk = decodeQueue[0]
+      if (queue.length > 0) {
+        const chunk = queue[0]
         if (chunk.position < chunk.data.length) {
           outputBuffer[i] = chunk.data[chunk.position]
           chunk.position++
           currentTime.value = (totalSamples.value + chunk.position) / SAMPLE_RATE
-          
+          hadData = true
+
           if (chunk.position >= chunk.data.length) {
-            decodeQueue.shift()
+            queue.shift()
             totalSamples.value += chunk.data.length
           }
         } else {
+          queue.shift()
           outputBuffer[i] = 0
         }
       } else {
         outputBuffer[i] = 0
+      }
+    }
+
+    // 未消费完的块放回队列（部分消费场景）
+    if (queue.length > 0) {
+      decodeQueue.unshift(...queue)
+    }
+
+    // 检测缓冲不足
+    if (!hadData && isPlaying.value) {
+      if (!isBuffering.value) {
+        isBuffering.value = true
+        stats.value.bufferUnderruns++
       }
     }
   }
@@ -88,8 +116,13 @@ export function useStreamingAudioPlayer() {
         position: 0
       })
 
-      if (!isPlaying.value && decodeQueue.length >= 3) {
+      if (!isPlaying.value && decodeQueue.length >= minBufferSize) {
         startPlayback()
+      }
+
+      // 检测缓冲恢复
+      if (isBuffering.value && decodeQueue.length >= BUFFER_LOW_WATERMARK) {
+        isBuffering.value = false
       }
       
     } catch (error) {
@@ -155,7 +188,9 @@ export function useStreamingAudioPlayer() {
   return {
     isPlaying,
     isPaused,
+    isBuffering,
     volume,
+    bufferHealth,
     currentTime,
     stats,
     init,

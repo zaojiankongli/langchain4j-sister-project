@@ -28,6 +28,9 @@ public class AuthController {
     private static final long REFRESH_WINDOW_MS = 60_000;   // 1 分钟窗口
     private static final int REFRESH_MAX = 3;               // 每分钟最多 3 次
 
+    private static final long COMPLETE_PROFILE_WINDOW_MS = 60_000;
+    private static final int COMPLETE_PROFILE_MAX = 5;
+
     private final AuthService authService;
     private final UserContext userContext;
     private final RateLimiter rateLimiter;
@@ -61,8 +64,9 @@ public class AuthController {
 
     @PostMapping("/refresh")
     public Result<Map<String, Object>> refresh(@RequestBody @Valid RefreshTokenRequest request) {
-        // 限流：每客户端每分钟最多 3 次刷新
-        String rateKey = "rate:refresh:" + request.refreshToken().hashCode();
+        // 限流：每客户端每分钟最多 3 次刷新（使用 token 前缀作为 key，避免 hashCode 碰撞）
+        String token = request.refreshToken();
+        String rateKey = "rate:refresh:" + token.substring(0, Math.min(token.length(), 20));
         if (!rateLimiter.tryAcquire(rateKey, REFRESH_MAX, REFRESH_WINDOW_MS)) {
             return Result.error(429, "刷新过于频繁，请稍后再试");
         }
@@ -81,6 +85,13 @@ public class AuthController {
     @PostMapping("/complete-profile")
     public Result<Void> completeProfile(@RequestBody @Valid CompleteProfileRequest request) {
         String userId = userContext.getUserId();
+        if (userId == null) {
+            return Result.unauthorized("请先登录");
+        }
+        String rateKey = "rate:complete-profile:" + userId;
+        if (!rateLimiter.tryAcquire(rateKey, COMPLETE_PROFILE_MAX, COMPLETE_PROFILE_WINDOW_MS)) {
+            return Result.error(429, "操作过于频繁，请稍后再试");
+        }
         authService.completeProfile(userId, request);
         return Result.success();
     }

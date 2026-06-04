@@ -4,56 +4,76 @@ import {
   connect,
   disconnect,
   sendChat,
-  setCallbacks
+  setCallbacks,
+  reconnectAttempts,
+  MAX_RECONNECT_ATTEMPTS
 } from '@/utils/chatWebSocket'
-import { useStreamingAudioPlayer } from '@/composables/useStreamingAudioPlayer'
-import { getUserId } from '@/utils/auth'
 import request from '@/utils/request'
 import { API } from '@/config/api'
+import { useStreamingAudioPlayer } from '@/composables/useStreamingAudioPlayer'
+import { useGsapAnimation } from '@/composables/useGsapAnimation'
+import { useChatMessages } from '@/composables/useChatMessages'
+import { useLive2dChat } from '@/composables/useLive2dChat'
+import { getUserId } from '@/utils/auth'
+import { OML2D_KEY } from '@/symbols'
+import ChatMessages from './ChatMessages.vue'
 
 // 从父组件（Dashboard.vue）注入 oml2d 实例（响应式 ref）
-const oml2dInstance = inject('oml2d', ref(null))
-const getOml2d = () => oml2dInstance.value
-// 累积完整回复，流式结束后一次性推送到 live2d 提示框
+const oml2dInstance = inject(OML2D_KEY, ref(null))
 let pendingLive2dText = ''
 
 const props = defineProps({
   isActive: { type: Boolean, default: true }
 })
-// 新增 open-history 事件
-const emit = defineEmits(['trigger-image-upload', 'open-history'])
+const emit = defineEmits(['open-history'])
 
 const chatState = ref('collapsed')
-const interactionState = ref('idle')
 const isBoosted = ref(false)
+// 刷新后恢复面板状态
+try {
+  const saved = localStorage.getItem('chat-ui-state')
+  if (saved) {
+    const parsed = JSON.parse(saved)
+    if (parsed.chatState === 'expanded') chatState.value = 'expanded'
+    if (parsed.isBoosted) isBoosted.value = true
+  }
+  } catch (e) { console.warn('ChatWindow:', e) }
 const inputText = ref('')
-const messages = ref([])
-const messageListRef = ref(null)
 const inputRef = ref(null)
 const fileInputRef = ref(null)
-
-// 今天的历史消息
-const historyMessages = ref([])
-const historyLoaded = ref(false)
+let sendTimeout = null // 发送超时定时器，防止 isSending 卡死
+let streamSaveTimer = null // 流式内容节流持久化
+let fileReplyTimer = null // 图片上传自动回复
+let scrollThrottled = false // 滚动加载节流
 
 // WebSocket 连接状态
 const connectionStatus = ref('disconnected')
 const connectionText = ref('')
-const isSending = ref(false)
 
 // 音频播放
 const { init: initAudio, appendAudioChunk, stop: stopAudio, stats: audioStats } = useStreamingAudioPlayer()
 
-// 当前正在接收的流式消息
-const currentMessage = ref(null)
+// ── 消息 composable ──
+const {
+  messages, historyMessages, earlierMessages,
+  isLoadingMore, noMoreMessages,
+  isSending, interactionState, currentMessage, messageListRef,
+  loadFromStorage, saveToStorage, fetchTodayMessages, loadEarlierMessages,
+  scrollToBottom, addImageMessage, addAiMessage, addErrorBubble,
+  completeCurrentMessage, setCurrentMessage,
+} = useChatMessages(() => _isAlive)
+
+// ── GSAP composable ──
+const { gsap, timeline, entryStagger } = useGsapAnimation()
+
+// ── Live2D 消息气泡联动 ──
+const { pushMessage: pushLive2dMessage, dispose: disposeLive2dChat } = useLive2dChat(oml2dInstance)
 
 // --- 外部调用接口 ---
 const activateFromBubble = () => {
   chatState.value = 'expanded'
   isBoosted.value = true
-  nextTick(() => {
-    inputRef.value?.focus()
-  })
+  nextTick(() => inputRef.value?.focus())
 }
 
 const collapse = () => {
@@ -61,39 +81,22 @@ const collapse = () => {
   isBoosted.value = false
 }
 
-// 切换聊天窗展开高度
 const toggleBoost = () => {
   if (chatState.value === 'collapsed') {
+    // 折叠态 → 展开 + 全屏
     chatState.value = 'expanded'
-  }
-  isBoosted.value = !isBoosted.value
-}
-
-// 打开全部记录
-const openHistory = () => {
-  emit('open-history')
-}
-
-// 加载今天的历史消息
-async function fetchTodayMessages() {
-  if (historyLoaded.value) return
-  const userId = getUserId()
-  if (!userId) return
-  try {
-    const today = new Date()
-    const dateStr = today.getFullYear() + '-' +
-      String(today.getMonth() + 1).padStart(2, '0') + '-' +
-      String(today.getDate()).padStart(2, '0')
-    const res = await request.get(API.MESSAGES_BY_DATE(userId), { params: { date: dateStr } })
-    if (res.code === 200 && res.data) {
-      historyMessages.value = res.data
-    }
-  } catch {
-    // 静默失败
-  } finally {
-    historyLoaded.value = true
+    isBoosted.value = true
+  } else if (isBoosted.value) {
+    // 展开 + 全屏 → 收起
+    isBoosted.value = false
+    chatState.value = 'collapsed'
+  } else {
+    // 展开（非全屏）→ 全屏
+    isBoosted.value = true
   }
 }
+
+const openHistory = () => emit('open-history')
 
 defineExpose({ activateFromBubble, collapse })
 
@@ -101,63 +104,77 @@ defineExpose({ activateFromBubble, collapse })
 let disposeCallbacks = null
 
 function handleTextMessage(message) {
+  if (!_isAlive || !message?.payload) return
   const { content, isComplete } = message.payload
-  const oml2d = getOml2d()
 
-  if (!currentMessage.value || isComplete) {
-    if (currentMessage.value && isComplete) {
+  // 确保聊天面板展开
+  if (chatState.value === 'collapsed') chatState.value = 'expanded'
+
+  if (currentMessage.value && !isComplete) {
+    // === 场景 1：流式追加（已有 currentMessage，未结束） ===
+    currentMessage.value.content += content
+    pendingLive2dText += content
+    // 节流失效化：每 2s 落盘一次，防止刷新丢太多
+    if (!streamSaveTimer) {
+      streamSaveTimer = setTimeout(() => {
+        streamSaveTimer = null
+        saveToStorage()
+      }, 2000)
+    }
+  } else if (isComplete) {
+    // === 场景 2：流式结束 / 单条完整消息 ===
+    if (currentMessage.value) {
+      // 流式结束：标记已有消息为完成态
       currentMessage.value.isComplete = true
       currentMessage.value.isTemp = false
-      currentMessage.value = null
-      isSending.value = false
-      interactionState.value = 'idle'
-      // 流式结束，将累积的完整回复一次性推送到 live2d 提示框
-      if (pendingLive2dText && oml2d) {
-        oml2d.tipsMessage(pendingLive2dText, 8000, 4)
-      }
-      pendingLive2dText = ''
     } else {
-      const newMessage = {
+      // 单条完整消息（非流式，如 WakeUp 主动推送）
+      const msg = {
         id: message.messageId || Date.now(),
-        role: 'ai',
-        type: 'text',
-        content: content,
-        isTemp: !isComplete,
-        isComplete: isComplete,
+        role: 'ai', type: 'text',
+        content, isTemp: false, isComplete: true,
         timestamp: new Date().toISOString()
       }
-      messages.value.push(newMessage)
+      messages.value.push(msg)
       pendingLive2dText = content
-      if (isComplete) {
-        // 单块响应（无后续流式块），立即清理状态
-        currentMessage.value = null
-        isSending.value = false
-        interactionState.value = 'idle'
-        if (pendingLive2dText && oml2d) {
-          oml2d.tipsMessage(pendingLive2dText, 8000, 4)
-        }
-        pendingLive2dText = ''
-      } else {
-        currentMessage.value = newMessage
-        // 第一个片段，重置累积文本并立即显示
-        if (content && oml2d) {
-          oml2d.tipsMessage(content, 8000, 4)
-        }
-      }
+    }
+    // 统一收尾：停止音频播放，清理状态
+    stopAudio()
+    if (sendTimeout) clearTimeout(sendTimeout)
+    if (streamSaveTimer) { clearTimeout(streamSaveTimer); streamSaveTimer = null }
+    currentMessage.value = null
+    isSending.value = false
+    interactionState.value = 'idle'
+    saveToStorage()  // 流式结束，持久化完整消息
+    if (pendingLive2dText) {
+      pushLive2dMessage(pendingLive2dText, 'ai')
+      pendingLive2dText = ''
     }
   } else {
-    currentMessage.value.content += content
-    // 流式中间片段，累积但不更新提示框（避免闪烁）
-    pendingLive2dText += content
+    // === 场景 3：首条流式片段（无 currentMessage，未结束） ===
+    const newMessage = {
+      id: message.messageId || Date.now(),
+      role: 'ai', type: 'text',
+      content, isTemp: true, isComplete: false,
+      timestamp: new Date().toISOString()
+    }
+    messages.value.push(newMessage)
+    currentMessage.value = newMessage
+    pendingLive2dText = content
+    saveToStorage()  // 首条片段写入缓存
+    // Live2D 先展示简短提示
+    if (content) pushLive2dMessage(content.length > 50 ? content.substring(0, 50) + '…' : content, 'ai')
   }
 
   scrollToBottom()
 }
 
 async function handleAudioChunk(arrayBuffer) {
+  if (!_isAlive) return
   try {
     if (audioStats.value.chunksReceived === 0) {
       await initAudio()
+      if (!_isAlive) { stopAudio(); return }
     }
     await appendAudioChunk(arrayBuffer)
   } catch (e) {
@@ -166,62 +183,136 @@ async function handleAudioChunk(arrayBuffer) {
 }
 
 function handleError(error) {
+  if (!_isAlive) return
+  if (sendTimeout) clearTimeout(sendTimeout)
   isSending.value = false
   interactionState.value = 'idle'
   // 重置流式消息状态，避免残留的 temp 标记
   currentMessage.value = null
   pendingLive2dText = ''
+  // 通知用户发生了错误
+  addErrorBubble(error?.message || '连接异常，请重试')
+  scrollToBottom()
 }
 
 function handleStatusChange(status) {
+  if (!_isAlive) return
+  const prevStatus = connectionStatus.value
   connectionStatus.value = status
   if (status === 'connected') {
     connectionText.value = ''
+    // 从断开状态恢复后，重新拉取今日消息（补全离线期间遗漏）
+    if (prevStatus === 'disconnected' || prevStatus === 'error') {
+      fetchTodayMessages()
+    }
   } else if (status === 'connecting') {
-    connectionText.value = '正在连接...'
+    connectionText.value = reconnectAttempts.value > 0
+      ? `重新连接 (${reconnectAttempts.value}/${MAX_RECONNECT_ATTEMPTS})...`
+      : '正在连接...'
   } else {
-    connectionText.value = '连接已断开'
+    connectionText.value = reconnectAttempts.value > 0
+      ? `连接已断开 (${reconnectAttempts.value}/${MAX_RECONNECT_ATTEMPTS})`
+      : '连接已断开'
   }
+}
+
+// ── 系统消息：AI 主动唤醒 / 通知（来自 WakeUpScheduler） ──
+function handleSystemMessage(message) {
+  if (!_isAlive) return
+  const content = message.payload?.content || message.payload?.text || ''
+  if (!content) return
+
+  // 显示在聊天中（作为 AI 消息）
+  addAiMessage(content, true)
+
+  // 推送 Live2D 气泡（系统通知）
+  pushLive2dMessage(content, 'system')
+
+  // 展开聊天窗让用户看到
+  chatState.value = 'expanded'
+  scrollToBottom()
+}
+
+// ── 情绪更新 ──
+const latestEmotion = ref(null)
+function handleEmotionUpdate(emotion) {
+  if (!_isAlive) return
+  latestEmotion.value = emotion
 }
 
 // --- 交互逻辑 ---
 const handleFocus = () => {
   chatState.value = 'expanded'
+  // 确保输入框可用（防止 isSending 卡死后用户无法重新聚焦）
+  if (isSending.value) {
+    isSending.value = false
+    interactionState.value = 'idle'
+    // 不移除 currentMessage，避免后续 WS 分块进入 Scenario 3 产生幽灵消息
+    if (sendTimeout) clearTimeout(sendTimeout)
+  }
 }
 
+let _inputDebounceTimer = null
 const handleInput = () => {
-  interactionState.value = inputText.value.trim() ? 'typing' : 'idle'
+  if (_inputDebounceTimer) clearTimeout(_inputDebounceTimer)
+  _inputDebounceTimer = setTimeout(() => {
+    interactionState.value = inputText.value.trim() ? 'typing' : 'idle'
+    _inputDebounceTimer = null
+  }, 150)
 }
+
+let userMessageIdCounter = 0
 
 const handleSend = () => {
+  if (!_isAlive || isSending.value) return  // 防止重复发送
   const text = inputText.value.trim()
-  // 【修复 3】: 移除 connectionStatus 阻断，让代码能往下走到报错气泡逻辑
   if (!text) return
 
-  messages.value.push({
-    id: Date.now(),
-    role: 'user',
-    type: 'text',
+  // 确保面板展开
+  chatState.value = 'expanded'
+
+  // 清除图片上传的延迟回复，防止它在文本发送后乱入
+  if (fileReplyTimer) { clearTimeout(fileReplyTimer); fileReplyTimer = null }
+
+  // 追踪这条用户消息，避免 WS 消息插入后用 pop() 误删
+  const sentMsgId = `user-${Date.now()}-${++userMessageIdCounter}`
+  const sentMsg = {
+    id: sentMsgId,
+    role: 'user', type: 'text',
     content: text,
     timestamp: new Date().toISOString()
-  })
+  }
+  messages.value.push(sentMsg)
+  saveToStorage()
 
-  inputText.value = ''
+  inputText.value = ''  // 清空输入框
   interactionState.value = 'responding'
   isSending.value = true
   scrollToBottom()
 
-  // 评估发送状态
+  // 30 秒超时保护：防止 AI 不回复导致 isSending 卡死
+  if (sendTimeout) clearTimeout(sendTimeout)
+  sendTimeout = setTimeout(() => {
+    if (isSending.value) {
+      isSending.value = false
+      interactionState.value = 'idle'
+      currentMessage.value = null
+      addErrorBubble('回复超时，请重试')
+      scrollToBottom()
+    }
+  }, 30000)
+
   const success = connectionStatus.value === 'connected' ? sendChat(text, true) : false
 
   if (!success) {
-    messages.value.push({
-      id: Date.now(),
-      role: 'ai',
-      type: 'text',
-      content: '发送失败：WebSocket 未连接',
-      timestamp: new Date().toISOString()
-    })
+    clearTimeout(sendTimeout)
+    // 按 ID 精确删除，不依赖 pop()——避免 WS 消息插入后误删
+    const idx = messages.value.findIndex(m => m.id === sentMsgId)
+    if (idx !== -1) {
+      messages.value.splice(idx, 1)
+      saveToStorage()
+    }
+    addErrorBubble('发送失败：WebSocket 未连接')
     isSending.value = false
     interactionState.value = 'idle'
     scrollToBottom()
@@ -233,68 +324,166 @@ const triggerImageUpload = () => {
   fileInputRef.value.click()
 }
 
-const handleFileChange = (e) => {
+const fileUrlRef = ref('')
+
+const handleFileChange = async (e) => {
+  if (!_isAlive || isSending.value) return  // 防止发送中重复上传
   const file = e.target.files[0]
   if (!file) return
-  emit('trigger-image-upload', file)
+
+  // 释放上一个 blob URL（防内存泄漏）
+  if (fileUrlRef.value) URL.revokeObjectURL(fileUrlRef.value)
 
   const fileUrl = URL.createObjectURL(file)
-
-  messages.value.push({
-    id: Date.now(),
-    role: 'user',
-    type: 'image',
-    content: fileUrl
-  })
+  fileUrlRef.value = fileUrl
+  addImageMessage(fileUrl)
   interactionState.value = 'responding'
+  isSending.value = true
   scrollToBottom()
 
-  setTimeout(() => {
-    messages.value.push({ id: Date.now() + 1, role: 'ai', type: 'text', content: '画面已经刻录，有什么想对我说的吗？' })
+  try {
+    // 上传图片到 OSS
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await request.post(API.UPLOAD_MESSAGE_IMAGE, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 30000
+    })
+    if (!_isAlive) return
+    if (res.code === 200 && res.data?.url) {
+      const imageUrl = res.data.url
+      // 替换本地 blob URL 为真实 URL
+      const imgMsg = messages.value.find(m => m.type === 'image' && m.content === fileUrl)
+      if (imgMsg) imgMsg.content = imageUrl
+      // 通过 WebSocket 发送（可能带用户已输入的文本）
+      const text = inputText.value.trim()
+      inputText.value = ''
+      const wsOk = sendChat(text, true, imageUrl)
+      if (!wsOk) {
+        // WebSocket 未连接，显示提示
+        addErrorBubble('图片已上传，但 WebSocket 未连接，AI 将无法处理')
+        fallbackImageReply()
+        return
+      }
+    } else {
+      fallbackImageReply()
+    }
+  } catch (e) {
+    console.error('图片上传失败:', e)
+    fallbackImageReply()
+  } finally {
+    isSending.value = false
+    if (interactionState.value !== 'typing') interactionState.value = 'idle'
+    e.target.value = ''
+  }
+}
+
+function fallbackImageReply() {
+  if (fileReplyTimer) clearTimeout(fileReplyTimer)
+  fileReplyTimer = setTimeout(() => {
+    fileReplyTimer = null
+    addAiMessage('画面已经刻录，有什么想对我说的吗？', true)
     interactionState.value = 'idle'
     scrollToBottom()
   }, 1500)
-
-  e.target.value = ''
 }
 
-let scrollToBottomTimer = null
-const scrollToBottom = async () => {
-  // 防抖：高频调用（如流式消息逐段追加）合并为一次
-  if (scrollToBottomTimer) clearTimeout(scrollToBottomTimer)
-  scrollToBottomTimer = setTimeout(async () => {
-    scrollToBottomTimer = null
-    await nextTick()
-    if (messageListRef.value) {
-      messageListRef.value.scrollTop = messageListRef.value.scrollHeight
-    }
-  }, 16) // ~1 frame at 60fps
+let scrollThrottleTimer = null
+
+// ── 懒加载：滚动到顶部触发 ──
+const handleScroll = () => {
+  if (!_isAlive || scrollThrottled) return
+  const el = messageListRef.value
+  if (!el || isLoadingMore.value || noMoreMessages.value) return
+  scrollThrottled = true
+  if (el.scrollTop < 100) {
+    const prevHeight = el.scrollHeight
+    loadEarlierMessages().then(found => {
+      if (found) nextTick(() => { el.scrollTop = el.scrollHeight - prevHeight })
+    }).catch(() => {})
+  }
+  scrollThrottleTimer = setTimeout(() => { scrollThrottled = false }, 100)
 }
+
+// 持久化面板状态（300ms 防抖，避免高频切换触发同步 IO）
+let _uiPersistTimer = null
+watch([chatState, isBoosted], () => {
+  if (_uiPersistTimer) clearTimeout(_uiPersistTimer)
+  _uiPersistTimer = setTimeout(() => {
+    try {
+      localStorage.setItem('chat-ui-state', JSON.stringify({
+        chatState: chatState.value,
+        isBoosted: isBoosted.value,
+      }))
+    } catch (e) { console.warn('ChatWindow:', e) }
+    _uiPersistTimer = null
+  }, 300)
+})
 
 watch(() => props.isActive, (newVal) => {
   if (!newVal) collapse()
 })
 
+// --- 组件存活守卫：防止 unmount 后 async 回调继续操作 ref ---
+let _isAlive = true
+onBeforeUnmount(() => { _isAlive = false })
+
 // --- 生命周期 ---
-onMounted(() => {
-  fetchTodayMessages()
+onMounted(async () => {
+  await fetchTodayMessages()
+  // 如果组件在 fetchTodayMessages 期间被卸载，放弃后续操作
+  if (!_isAlive) return
+
   const userId = getUserId() || 'unknown'
 
-  // 注册 WebSocket 回调 (组件级，避免模块级副作用)
+  // 注册 WebSocket 回调
   disposeCallbacks = setCallbacks({
     onTextMessage: handleTextMessage,
     onAudioChunk: handleAudioChunk,
+    onEmotionUpdate: handleEmotionUpdate,
+    onSystemMessage: handleSystemMessage,
+    onAuthSuccess: (payload) => import.meta.env.DEV && console.log('[WS] 认证成功:', payload),
+    onPeekRequest: (payload) => {
+      if (import.meta.env.DEV) console.log('[WS] 偷看请求:', payload)
+      const peekText = payload?.text || '正在悄悄看着你...'
+      addAiMessage(`🔍 ${peekText}`, true)
+      scrollToBottom()
+    },
     onError: handleError,
     onStatusChange: handleStatusChange,
   })
 
   connect(userId)
+
+  // Scroll to bottom after messages are loaded and WS is connected
+  await nextTick(() => {
+    if (_isAlive) scrollToBottom()
+  })
+
+  if (!_isAlive) return
+
+  // GSAP 入场动画
+  nextTick(() => {
+    if (!_isAlive) return
+    entryStagger('.message-item', { y: 15, stagger: 0.04, duration: 0.4 })
+    timeline().to('.right-action.can-send', {
+      scale: 1.05, duration: 1.5, repeat: -1, yoyo: true, ease: 'sine.inOut'
+    })
+  })
 })
 
 onBeforeUnmount(() => {
+  if (sendTimeout) clearTimeout(sendTimeout)
+  if (streamSaveTimer) { clearTimeout(streamSaveTimer); streamSaveTimer = null }
+  if (fileReplyTimer) { clearTimeout(fileReplyTimer); fileReplyTimer = null }
+  if (scrollThrottleTimer) { clearTimeout(scrollThrottleTimer); scrollThrottleTimer = null }
+  if (_inputDebounceTimer) { clearTimeout(_inputDebounceTimer); _inputDebounceTimer = null }
+  if (_uiPersistTimer) { clearTimeout(_uiPersistTimer); _uiPersistTimer = null }
   if (disposeCallbacks) disposeCallbacks()
+  if (fileUrlRef.value) { URL.revokeObjectURL(fileUrlRef.value); fileUrlRef.value = '' }
   disconnect()
   stopAudio()
+  disposeLive2dChat()
 })
 </script>
 
@@ -315,10 +504,10 @@ onBeforeUnmount(() => {
         @change="handleFileChange"
     />
 
-    <div class="glass-morph-bg"></div>
+    <div class="glass-morph-bg" @click.stop></div>
 
     <transition name="content-fade">
-      <div v-show="chatState === 'expanded'" class="chat-panel">
+      <div v-show="chatState === 'expanded'" class="chat-panel" @click.stop>
         <div class="terminal-decor">
           <div class="decor-left">
             <span class="decor-dot"></span>
@@ -326,75 +515,34 @@ onBeforeUnmount(() => {
             <span class="decor-text">SECURE_LINK // ACTIVE</span>
           </div>
           <div class="decor-actions">
-            <button class="decor-btn" @mousedown.prevent="toggleBoost">
+            <button class="decor-btn" @mousedown.prevent.stop="toggleBoost">
               {{ isBoosted ? '收起 ↘' : '展开 ↗' }}
             </button>
-            <button class="decor-btn highlight" @mousedown.prevent="openHistory">
+            <button class="decor-btn highlight" @mousedown.prevent.stop="openHistory">
               查看全部记录 ≡
             </button>
           </div>
         </div>
 
-        <div class="message-list" ref="messageListRef">
-          <div v-if="connectionStatus !== 'connected'" class="connection-hint">
-            <span class="conn-dot" :class="connectionStatus"></span>
-            <span class="conn-text">{{ connectionText }}</span>
-          </div>
-
-          <div
-              v-for="(msg, i) in historyMessages"
-              :key="'h-' + msg.id"
-              class="message-item"
-              :class="msg.role"
-          >
-            <div class="message-content">
-              <div v-if="msg.role === 'ai'" class="ai-tag">AI //</div>
-              <div class="text-wrapper" :class="{ 'image-wrapper': msg.type === 'image' }">
-                <img v-if="msg.type === 'image'" :src="msg.content" class="chat-image" alt="history image" />
-                <template v-else>
-                  {{ msg.content }}
-                </template>
-              </div>
-            </div>
-          </div>
-
-          <div v-if="historyMessages.length > 0 && messages.length > 0" class="history-divider">
-            <span>— 今日历史 —</span>
-          </div>
-
-          <div
-              v-for="(msg, i) in messages"
-              :key="msg.id || i"
-              class="message-item"
-              :class="[msg.role, { 'is-temp': msg.isTemp }]"
-          >
-            <div class="message-content">
-              <div v-if="msg.role === 'ai'" class="ai-tag">AI //</div>
-              <div class="text-wrapper" :class="{ 'image-wrapper': msg.type === 'image' }">
-                <img v-if="msg.type === 'image'" :src="msg.content" class="chat-image" alt="uploaded image" />
-                <template v-else>
-                  {{ msg.content }}
-                </template>
-                <span v-if="msg.isTemp" class="temp-indicator">...</span>
-              </div>
-            </div>
-          </div>
-
-          <div v-if="interactionState === 'responding' && (!currentMessage || !currentMessage.isTemp)" class="message-item ai typing-indicator">
-            <div class="typing-dots">
-              <span></span><span></span><span></span>
-            </div>
-          </div>
-
-          <div v-if="messages.length === 0 && historyMessages.length === 0 && connectionStatus === 'connected'" class="empty-state">
-            <p>“ 在这里，记录你的每一个思绪 ”</p>
-          </div>
+        <div class="message-list" ref="messageListRef" @scroll="handleScroll">
+          <ChatMessages
+            :messages="messages"
+            :history-messages="historyMessages"
+            :earlier-messages="earlierMessages"
+            :is-loading-more="isLoadingMore"
+            :no-more-messages="noMoreMessages"
+            :is-sending="isSending"
+            :current-message="currentMessage"
+            :connection-status="connectionStatus"
+            :connection-text="connectionText"
+            :latest-emotion="latestEmotion"
+          />
         </div>
       </div>
     </transition>
 
-    <div class="input-bar" :class="{ 'is-expanded': chatState === 'expanded' }">
-      <div class="left-action action-btn" @mousedown.prevent="triggerImageUpload" title="上传图片">
+    <div class="input-bar" :class="{ 'is-expanded': chatState === 'expanded' }" @click.stop>
+      <div class="left-action action-btn" @mousedown.prevent.stop="triggerImageUpload" title="上传图片">
         <span class="icon-star">✦</span>
       </div>
 
@@ -414,7 +562,7 @@ onBeforeUnmount(() => {
       <div
           class="right-action action-btn"
           :class="{ 'can-send': inputText.trim() || interactionState === 'responding' }"
-          @mousedown.prevent="handleSend"
+          @mousedown.prevent.stop="handleSend"
       >
         <div v-if="interactionState === 'responding'" class="send-loading">
           <div class="loading-ring"></div>
@@ -439,7 +587,10 @@ onBeforeUnmount(() => {
   transition: all 0.5s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.chat-window-container.is-hidden { opacity: 0; transform: translate(-50%, 40px); }
+.chat-window-container.is-hidden { opacity: 0; transform: translate(-50%, 40px); pointer-events: none; }
+.chat-window-container.is-hidden .chat-panel,
+.chat-window-container.is-hidden .input-bar,
+.chat-window-container.is-hidden .glass-morph-bg { pointer-events: none; }
 
 .glass-morph-bg {
   position: absolute; inset: 0;
@@ -497,30 +648,14 @@ onBeforeUnmount(() => {
 }
 .message-list::-webkit-scrollbar { display: none; }
 
-.message-item { display: flex; width: 100%; }
-.message-item.user { justify-content: flex-end; }
-.message-item.ai { justify-content: flex-start; }
-
-.message-content { max-width: 85%; position: relative; }
-.ai-tag { font-size: 9px; color: #999; margin-bottom: 4px; letter-spacing: 1px; }
-
-.text-wrapper {
-  font-size: 15px; line-height: 1.7; color: #333;
-  font-weight: 400;
-}
-.user .text-wrapper { text-align: right; border-right: 2px solid #333; padding-right: 15px; }
-.ai .text-wrapper { border-left: 2px solid #333; padding-left: 15px; }
-
-.text-wrapper.image-wrapper { padding: 0; border: none !important; }
-.chat-image {
-  max-width: 220px; max-height: 180px; object-fit: contain;
-  border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-  display: block;
-}
+/* ── GPU 分层 ── */
+.glass-morph-bg { will-change: transform, opacity; contain: layout style; }
 
 .input-bar {
   height: 65px; display: flex; align-items: center;
   pointer-events: auto; padding: 0 20px; flex-shrink: 0;
+  /* 确保输入栏不受容器 is-hidden 的 opacity 影响 */
+  opacity: 1; visibility: visible;
 }
 .input-field { flex: 1; position: relative; margin: 0 15px; height: 100%; display: flex; align-items: center; }
 .input-field input {
@@ -551,26 +686,6 @@ onBeforeUnmount(() => {
   animation: spin 1s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
-
-.typing-dots { display: flex; gap: 4px; padding-left: 15px; border-left: 2px solid #ddd; }
-.typing-dots span { width: 4px; height: 4px; background: #aaa; border-radius: 50%; animation: bounce 1.4s infinite; }
-@keyframes bounce { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
-
-.empty-state p { color: #ccc; font-size: 13px; text-align: center; width: 100%; }
-
-.history-divider {
-  display: flex; justify-content: center; align-items: center;
-  position: relative; margin: 10px 0;
-}
-.history-divider span {
-  font-size: 10px; color: #bbb; letter-spacing: 2px;
-  background: rgba(255,255,255,0.5); padding: 0 10px;
-  position: relative; z-index: 1;
-}
-.history-divider::before {
-  content: ''; position: absolute; left: 0; right: 0; top: 50%;
-  height: 1px; background: rgba(0,0,0,0.08);
-}
 
 .content-fade-enter-active, .content-fade-leave-active { transition: all 0.3s ease; }
 .content-fade-enter-from, .content-fade-leave-to { opacity: 0; transform: translateY(5px); }

@@ -2,10 +2,10 @@ package com.zjkl.ai.peek.controller;
 
 import com.zjkl.ai.oss.service.OssService;
 import com.zjkl.ai.peek.service.PeekCallbackService;
+import com.zjkl.common.Result;
 import com.zjkl.common.config.properties.PeekProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.ResponseEntity;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -43,16 +43,16 @@ public class PeekController {
      * @return 202=已接受处理, 400=参数错误, 404=peekId 无效
      */
     @PostMapping("/callback")
-    public ResponseEntity<Map<String, Object>> handleScreenshotCallback(
+    public Result<Map<String, Object>> handleScreenshotCallback(
             @RequestParam String peekId,
             @RequestParam("screenshot") MultipartFile screenshot) {
 
         // 1. 校验参数
         if (peekId == null || peekId.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "peekId 不能为空"));
+            return Result.error(400, "peekId 不能为空");
         }
         if (screenshot == null || screenshot.isEmpty()) {
-            return ResponseEntity.badRequest().body(Map.of("error", "截图文件不能为空"));
+            return Result.error(400, "截图文件不能为空");
         }
 
         // 2. 原子消费 peekId（getAndDelete，防止重复上传）
@@ -61,7 +61,7 @@ public class PeekController {
 
         if (userId == null) {
             log.warn("peek 回调收到无效或已过期的 peekId：{}", peekId);
-            return ResponseEntity.status(404).body(Map.of("error", "peekId 无效或已过期"));
+            return Result.error(404, "peekId 无效或已过期");
         }
 
         log.info("收到 peek 截图回调：userId={}, peekId={}, fileSize={} bytes",
@@ -76,8 +76,8 @@ public class PeekController {
             // 4. 异步处理（VLM → Agent → TTS → 推送）
             peekCallbackService.handlePeekCallback(userId, imageUrl, peekId);
 
-            // 5. 立即返回 202，不等待异步处理完成
-            return ResponseEntity.accepted().body(Map.of(
+            // 5. 立即返回，不等待异步处理完成
+            return Result.success(Map.of(
                     "success", true,
                     "peekId", peekId,
                     "message", "截图已接收，正在处理"
@@ -88,9 +88,11 @@ public class PeekController {
             if (imageUrl != null) {
                 try {
                     ossService.deleteFile(imageUrl);
-                } catch (Exception ignored) {}
+                } catch (Exception ex) {
+                    log.warn("回滚删除OSS文件失败: imageUrl={}", imageUrl, ex);
+                }
             }
-            return ResponseEntity.status(500).body(Map.of("error", "截图上传失败：" + e.getMessage()));
+            return Result.error(500, "截图上传失败，请稍后重试");
         }
     }
 }

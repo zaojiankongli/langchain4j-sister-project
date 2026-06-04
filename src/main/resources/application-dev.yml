@@ -1,5 +1,6 @@
 # ==================== 开发环境配置 ====================
 # 开发环境下覆盖默认配置，降低日志级别、放宽限制
+# 基础设施：192.168.100.128（MySQL:3307 / Redis:6380 / Milvus:19530）
 
 logging:
   level:
@@ -10,6 +11,19 @@ spring:
   threads:
     virtual:
       enabled: true
+  datasource:
+    url: jdbc:mysql://192.168.100.128:3307/zjkl_sister?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+  data:
+    redis:
+      host: 192.168.100.128
+      port: 6380
+
+# Milvus 向量数据库
+app:
+  milvus:
+    host: 192.168.100.128
+    port: 19530
+    uri: http://192.168.100.128:19530
 
 peek:
   enabled: true

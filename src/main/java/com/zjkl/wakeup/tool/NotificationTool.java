@@ -38,7 +38,8 @@ public class NotificationTool {
             // 3. 记录本次唤醒时间
             userStateTool.recordWakeUp(userId);
 
-            log.info("主动唤醒消息已发送：userId={}, content={}", userId, content);
+            log.info("主动唤醒消息已发送：userId={}, contentLength={}", userId,
+                    content != null ? content.length() : 0);
             return true;
         } catch (Exception e) {
             log.error("发送主动唤醒消息失败：userId={}", userId, e);
@@ -55,7 +56,8 @@ public class NotificationTool {
     public void sendTextMessage(String userId, String content) {
         try {
             chatPushService.pushSystem(userId, content);
-            log.debug("文本消息已发送：userId={}, content={}", userId, content);
+            log.debug("文本消息已发送：userId={}, contentLength={}", userId,
+                    content != null ? content.length() : 0);
         } catch (Exception e) {
             log.error("发送文本消息失败：userId={}", userId, e);
         }

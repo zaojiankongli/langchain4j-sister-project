@@ -87,6 +87,10 @@ public class ImageElementExtractor {
                             .build())
                     .build());
             
+            if (response == null || response.aiMessage() == null || response.aiMessage().text() == null) {
+                log.warn("LLM 返回为空，无法提取场景元素，使用默认值");
+                return createDefaultElements();
+            }
             String json = response.aiMessage().text();
             
             // 解析 JSON

@@ -1,51 +1,33 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import request from '@/utils/request'
 import { getUserId } from '@/utils/auth'
+import { API } from '@/config/api'
+import { useAsyncData } from '@/composables/useAsyncData'
+import { useUiStore } from '@/stores/ui'
+import { useUserStore } from '@/stores/user'
+
+let _isMounted = true
+onBeforeUnmount(() => { _isMounted = false })
+
+const uiStore = useUiStore()
+const userStore = useUserStore()
 
 // ==========================================
 // 一、数据获取与初始化
 // ==========================================
-const loading = ref(false)
-
-onMounted(async () => {
-  await fetchUserData()
+const { data: user, loading, error, execute: fetchUserData } = useAsyncData(async () => {
+  const userId = getUserId()
+  if (!userId) return
+  const res = await request.get(API.MY_PROFILE)
+  if (res.code === 200 && res.data) return res.data
+  throw new Error(res.message || '获取用户数据失败')
 })
-
-const fetchUserData = async () => {
-  loading.value = true
-  try {
-    const userId = getUserId()
-    if (!userId) return
-    const res = await request.get('/user/profile')
-    if (res.code === 200 && res.data) {
-      const data = res.data
-      Object.assign(user.value, {
-        id: data.id || user.value.id,
-        username: data.username || user.value.username,
-        avatar_url: data.avatar_url || user.value.avatar_url,
-        gender: data.gender ?? user.value.gender,
-        birthday: data.birthday || user.value.birthday,
-        hobbies: data.hobbies || user.value.hobbies,
-        user_profile: data.user_profile || user.value.user_profile,
-        ai_type: data.ai_type ?? user.value.ai_type,
-        created_at: data.created_at || user.value.created_at,
-        updated_at: data.updated_at || user.value.updated_at,
-        ai_tags: data.interestTags || user.value.ai_tags
-      })
-    }
-  } catch (error) {
-    console.error('Failed to fetch user data', error)
-  } finally {
-    loading.value = false
-    }
-  }
-}
 
 // ==========================================
 // 二、数据结构 (Data Model Mapping)
 // ==========================================
-const user = ref({
+const userDefault = ref({
   id: '1024',
   username: 'Master',
   avatar_url: '',
@@ -61,19 +43,46 @@ const user = ref({
   updated_at: new Date().toISOString()
 })
 
+// Merge fetched data with defaults
+const mergedUser = ref({})
+// Watch for user data changes and merge with defaults
+// 字段映射：后端返回 snake_case，前端使用 camelCase 默认值
+watch(() => user.value, (newVal) => {
+  if (newVal) {
+    mergedUser.value = {
+      ...userDefault.value,
+      ...newVal,
+      // 映射后端 interest_tags → 前端 ai_tags
+      ai_tags: newVal.interestTags || newVal.interest_tags || userDefault.value.ai_tags,
+      // 后端 avatar_url → 前端 avatar_url（@JsonProperty 已映射）
+      // 后端无 ai_image_url 字段，保留默认空值，由"重新绘制"按钮填充
+    }
+  } else {
+    mergedUser.value = { ...userDefault.value }
+  }
+}, { immediate: true })
+
 // ==========================================
 // 三、前端派生数据
 // ==========================================
 const age = computed(() => {
-  if (!user.value.birthday) return null
-  const birthYear = new Date(user.value.birthday).getFullYear()
+  if (!mergedUser.value.birthday) return null
+  const birthYear = new Date(mergedUser.value.birthday).getFullYear()
   return new Date().getFullYear() - birthYear
 })
-const hobbyList = computed(() => user.value.hobbies ? user.value.hobbies.split(',') : [])
+let _prevHobbies = undefined
+let _cachedHobbyList = []
+const hobbyList = computed(() => {
+  const hobbies = mergedUser.value.hobbies
+  if (hobbies === _prevHobbies) return _cachedHobbyList
+  _prevHobbies = hobbies
+  _cachedHobbyList = hobbies ? hobbies.split(',') : []
+  return _cachedHobbyList
+})
 const aiTypeMap = {  2: '妹妹' }
-const aiTypeLabel = computed(() => aiTypeMap[user.value.ai_type])
+const aiTypeLabel = computed(() => aiTypeMap[mergedUser.value.ai_type])
 const daysTogether = computed(() => {
-  const start = new Date(user.value.created_at)
+  const start = new Date(mergedUser.value.created_at)
   return Math.floor((new Date() - start) / (1000 * 60 * 60 * 24))
 })
 
@@ -101,65 +110,109 @@ const handleAvatarChange = async (event) => {
     const res = await request.post(API.USER_AVATAR, formData, {
       headers: { 'Content-Type': 'multipart/form-data' }
     })
+    if (!_isMounted) return
     if (res.code === 200 && res.data) {
-      user.value.avatar_url = res.data
+      mergedUser.value.avatar_url = res.data
     }
-  } catch {
-    // 静默失败
+  } catch (err) {
+    if (!_isMounted) return
+    console.error('Failed to upload avatar', err)
+    uiStore.error('头像上传失败，请重试')
   }
   event.target.value = ''
 }
 const toggleEditProfile = () => {
   if (!isEditingProfile.value) {
-    profileForm.value.username = user.value.username
-    profileForm.value.gender = user.value.gender
+    profileForm.value.username = mergedUser.value.username
+    profileForm.value.gender = mergedUser.value.gender
     isEditingProfile.value = true
   } else { isEditingProfile.value = false }
 }
 const saveProfile = async () => {
-  try {
-    const res = await request.post(API.USER_UPDATE_BASIC, {
-      username: profileForm.value.username,
-      gender: profileForm.value.gender
-    })
-    if (res.code === 200) {
-      user.value.username = profileForm.value.username
-      user.value.gender = profileForm.value.gender
-      isEditingProfile.value = false
-    }
-  } catch {
-    // 静默失败
-  }
-}
-const removeHobby = async (index) => {
-  const list = [...hobbyList.value]; list.splice(index, 1)
-  user.value.hobbies = list.join(',')
-  try {
-    await request.post(API.USER_UPDATE_HOBBIES, { hobbies: user.value.hobbies })
-  } catch {
-    // 静默失败
-  }
-}
-const addHobby = async () => {
-  if (hobbyInputValue.value.trim()) {
-    const list = [...hobbyList.value, hobbyInputValue.value.trim()]
-    user.value.hobbies = list.join(',')
     try {
-      await request.post(API.USER_UPDATE_HOBBIES, { hobbies: user.value.hobbies })
-    } catch {
-    // 静默失败
+      await userStore.updateBasic({
+        username: profileForm.value.username,
+        gender: profileForm.value.gender
+      })
+      if (!_isMounted) return
+      mergedUser.value.username = profileForm.value.username
+      mergedUser.value.gender = profileForm.value.gender
+      isEditingProfile.value = false
+    } catch (err) {
+      console.error('Failed to save profile', err)
+      uiStore.error('保存资料失败，请重试')
     }
   }
-  hobbyInputValue.value = ''
-  isAddingHobby.value = false
-}
+const removeHobby = async (index) => {
+    const prevHobbies = mergedUser.value.hobbies // 保存旧值用于回滚
+    const list = [...hobbyList.value]; list.splice(index, 1)
+    mergedUser.value.hobbies = list.join(',')
+    try {
+      await userStore.updateHobbies(mergedUser.value.hobbies)
+      if (!_isMounted) { mergedUser.value.hobbies = prevHobbies; return }
+    } catch (err) {
+      mergedUser.value.hobbies = prevHobbies // 回滚
+      console.error('Failed to remove hobby', err)
+      uiStore.error('删除兴趣标签失败，请重试')
+    }
+  }
+const addHobby = async () => {
+   if (hobbyInputValue.value.trim()) {
+     const prevHobbies = mergedUser.value.hobbies // 保存旧值用于回滚
+     const list = [...hobbyList.value, hobbyInputValue.value.trim()]
+     mergedUser.value.hobbies = list.join(',')
+      try {
+        await userStore.updateHobbies(mergedUser.value.hobbies)
+        if (!_isMounted) { mergedUser.value.hobbies = prevHobbies; return }
+     } catch (err) {
+         mergedUser.value.hobbies = prevHobbies // 回滚
+        console.error('Failed to add hobby', err)
+        uiStore.error('添加兴趣标签失败，请重试')
+      }
+   }
+   hobbyInputValue.value = ''
+   isAddingHobby.value = false
+ }
 const changeAIType = async (type) => {
-  user.value.ai_type = type
+  const prevType = mergedUser.value.ai_type // 保存旧值用于回滚
+  mergedUser.value.ai_type = type
   showAITypeSelector.value = false
   try {
     await request.post(API.USER_UPDATE_AI_TYPE, { ai_type: type })
-  } catch {
-    // 静默失败
+    if (!_isMounted) { mergedUser.value.ai_type = prevType; return }
+  } catch (err) {
+    mergedUser.value.ai_type = prevType // 回滚
+    console.error('Failed to change AI type', err)
+    uiStore.error('变更AI类型失败，请重试')
+  }
+}
+
+// ==========================================
+// 五、AI 图片重新绘制
+// ==========================================
+import { useImageGeneration } from '@/composables/useImageGeneration'
+const { loading: genLoading, error: genError, generateFromContent } = useImageGeneration(() => _isMounted)
+
+const isRedrawing = ref(false)
+
+async function handleRedraw() {
+  if (!_isMounted || isRedrawing.value) return
+  isRedrawing.value = true
+  try {
+    const content = mergedUser.value.user_profile || mergedUser.value.userProfile || ''
+    const url = await generateFromContent({ content })
+    if (!_isMounted) return
+    if (url) {
+      mergedUser.value.ai_image_url = url
+      uiStore.success('画像已更新')
+    } else {
+      uiStore.error(genError.value || '绘制失败')
+    }
+  } catch (e) {
+    uiStore.error('重新绘制失败')
+    console.error('重新绘制失败:', e)
+  } finally {
+    if (_isMounted) isRedrawing.value = false
   }
 }
 </script>
@@ -170,12 +223,16 @@ const changeAIType = async (type) => {
       <div class="loading-spinner"></div>
       <p class="loading-text">加载用户数据...</p>
     </div>
+    <div v-else-if="error" class="error-overlay">
+      <p class="error-text">加载失败：{{ error.message || '未知错误' }}</p>
+      <span class="action-btn" @click="fetchUserData()">重试 //</span>
+    </div>
 
     <div class="glass-section data-grid stagger-1 relative-section">
       <div class="section-tag">IDENTITY_CARD //</div>
       <div class="profile-main">
         <div class="avatar-area" @click="triggerAvatarUpload">
-          <img v-if="user.avatar_url" :src="user.avatar_url" class="avatar-circle avatar-img" alt="avatar" />
+          <img v-if="mergedUser.avatar_url" :src="mergedUser.avatar_url" class="avatar-circle avatar-img" alt="avatar" />
           <div v-else class="avatar-circle avatar-placeholder"><span class="upload-icon">+</span></div>
           <input type="file" ref="avatarInput" accept="image/*" class="hidden-file-input" @change="handleAvatarChange" />
         </div>
@@ -190,10 +247,10 @@ const changeAIType = async (type) => {
             </div>
           </template>
           <template v-else>
-            <div class="info-row"><span class="label">昵称</span><span class="value">{{ user.username }}</span></div>
+            <div class="info-row"><span class="label">昵称</span><span class="value">{{ mergedUser.username }}</span></div>
             <div class="info-row">
               <span class="label">核心属性</span>
-              <span class="value">{{ user.gender === 1 ? 'MALE' : 'FEMALE' }}</span>
+              <span class="value">{{ mergedUser.gender === 1 ? 'MALE' : 'FEMALE' }}</span>
               <span class="value-divider">/</span>
               <span class="value">{{ age }} YEARS OLD</span>
             </div>
@@ -237,11 +294,18 @@ const changeAIType = async (type) => {
       <div class="section-tag">AI_PERCEPTION //</div>
       <div class="perception-flex">
         <div class="perception-info">
-          <div class="memo-box">{{ user.user_profile }}</div>
-          <div class="action-row"><span class="action-btn">重新绘制 //</span></div>
+          <div class="memo-box">{{ mergedUser.user_profile }}</div>
+          <div class="action-row">
+            <span class="action-btn" :class="{ 'is-disabled': isRedrawing }" @click="handleRedraw">
+              {{ isRedrawing ? '绘制中...' : '重新绘制 //' }}
+            </span>
+          </div>
         </div>
-        <div v-if="user.ai_image_url" class="perception-poster">
-          <img :src="user.ai_image_url" alt="AI Perception" />
+        <div class="perception-poster">
+          <img v-if="mergedUser.ai_image_url" :src="mergedUser.ai_image_url" alt="AI Perception" />
+          <div v-else class="perception-placeholder">
+            <span class="placeholder-hint">{{ isRedrawing ? '✦' : '✧' }}</span>
+          </div>
           <div class="poster-overlay"></div>
         </div>
       </div>
@@ -251,7 +315,7 @@ const changeAIType = async (type) => {
       <div class="section-tag">AI_IMPRESSION_TAGS //</div>
       <div class="memo-box">她眼中的你</div>
       <div class="tag-cloud readonly">
-        <span v-for="(tag, index) in user.ai_tags" :key="'ai-tag-' + tag + '-' + index" class="ai-pixel-tag">
+        <span v-for="(tag, index) in mergedUser.ai_tags" :key="'ai-tag-' + tag + '-' + index" class="ai-pixel-tag">
           <span class="prefix">#</span>{{ tag }}
         </span>
       </div>
@@ -263,8 +327,8 @@ const changeAIType = async (type) => {
         ACTIVITY_LOG // <span class="toggle-icon">{{ isActivityCollapsed ? '[+]' : '[-]' }}</span>
       </div>
       <div v-if="!isActivityCollapsed" class="status-list">
-        <div class="status-item">CREATED_AT: {{ new Date(user.created_at).toLocaleDateString() }}</div>
-        <div class="status-item">UPDATED_AT: {{ new Date(user.updated_at).toLocaleDateString() }}</div>
+        <div class="status-item">CREATED_AT: {{ new Date(mergedUser.created_at).toLocaleDateString() }}</div>
+        <div class="status-item">UPDATED_AT: {{ new Date(mergedUser.updated_at).toLocaleDateString() }}</div>
       </div>
     </div>
 
@@ -328,6 +392,13 @@ const changeAIType = async (type) => {
   flex-shrink: 0;
 }
 .perception-poster img { width: 100%; height: 100%; object-fit: cover; }
+.perception-placeholder {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,0.03);
+}
+.placeholder-hint { font-size: 28px; color: rgba(255,255,255,0.15); }
+.action-btn.is-disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
 .poster-overlay {
   position: absolute; top: 0; left: 0; width: 100%; height: 100%;
   background: linear-gradient(to top, rgba(0,0,0,0.4), transparent);

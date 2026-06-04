@@ -1,6 +1,7 @@
 package com.zjkl.ai.chat.service;
 
 import com.zjkl.ai.chat.dto.MessageDTO;
+import com.zjkl.ai.chat.dto.SessionPreviewVO;
 import com.zjkl.ai.chat.entity.ConverMessage;
 import com.zjkl.ai.chat.entity.MessageContent;
 import com.zjkl.ai.chat.mapper.ConverMessageMapper;
@@ -10,8 +11,11 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,6 +32,7 @@ public class ConverMessageService {
     /**
      * 保存单条消息
      */
+    @Transactional(rollbackFor = Exception.class)
     public ConverMessage saveMessage(String userId, String role, List<MessageContent> contents) {
         ConverMessage message = ConverMessage.builder()
                 .id(UUID.randomUUID().toString())
@@ -43,6 +48,7 @@ public class ConverMessageService {
     /**
      * 批量保存消息
      */
+    @Transactional(rollbackFor = Exception.class)
     public int batchSaveMessages(List<ConverMessage> messages) {
         if (messages == null || messages.isEmpty()) {
             return 0;
@@ -80,7 +86,12 @@ public class ConverMessageService {
      */
     @Transactional(readOnly = true)
     public List<ConverMessage> getByDate(String userId, String date) {
-        LocalDateTime startTime = LocalDate.parse(date).atStartOfDay();
+        LocalDateTime startTime;
+        try {
+            startTime = LocalDate.parse(date).atStartOfDay();
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException("日期格式错误", e);
+        }
         LocalDateTime endTime = startTime.plusDays(1);
         return converMessageMapper.selectByUserIdAndTimeRange(userId, startTime, endTime);
     }
@@ -91,6 +102,17 @@ public class ConverMessageService {
     @Transactional(readOnly = true)
     public List<ConverMessage> getByTimeRange(String userId, LocalDateTime startTime, LocalDateTime endTime) {
         return converMessageMapper.selectByUserIdAndTimeRange(userId, startTime, endTime);
+    }
+
+    /**
+     * 按时间范围查询最近 N 条消息（结果按时间升序返回）
+     */
+    @Transactional(readOnly = true)
+    public List<ConverMessage> getLatestByTimeRange(String userId, LocalDateTime startTime, LocalDateTime endTime, int limit) {
+        int cappedLimit = Math.max(1, limit);
+        List<ConverMessage> messages = converMessageMapper.selectLatestByUserIdAndTimeRange(userId, startTime, endTime, cappedLimit);
+        Collections.reverse(messages);
+        return messages;
     }
 
     /**
@@ -107,5 +129,25 @@ public class ConverMessageService {
                         m.getCreatedAt(),
                         m.getContents()))
                 .toList();
+    }
+
+    /**
+     * 获取用户会话预览列表
+     */
+    @Transactional(readOnly = true)
+    public List<SessionPreviewVO> getSessionPreviews(String userId, int limit) {
+        List<Map<String, Object>> rows = converMessageMapper.selectSessionPreviews(userId, limit);
+        return rows.stream().map(row -> {
+            SessionPreviewVO vo = new SessionPreviewVO();
+            Object dateVal = row.get("date");
+            vo.setDate(dateVal != null ? dateVal.toString() : null);
+            Object previewVal = row.get("preview_text");
+            String preview = previewVal != null ? previewVal.toString() : "";
+            if (preview.length() >= 50) {
+                preview = preview.substring(0, 50) + "...";
+            }
+            vo.setPreview(preview);
+            return vo;
+        }).toList();
     }
 }

@@ -28,7 +28,7 @@ public class WakeUpScorer {
             String reason = node.path("reason").asText("无理由");
             return new WakeUpScoreResult(score, reason);
         } catch (Exception e) {
-            log.warn("解析评分 JSON 失败: {}", json, e);
+            log.warn("解析评分 JSON 失败: jsonLength={}", json != null ? json.length() : 0, e);
             return new WakeUpScoreResult(5, "解析失败");
         }
     }

@@ -164,6 +164,75 @@ body {
   outline-offset: 2px;
 }
 
+/* ── Live2D 提示框 — 二次元治愈系 ── */
+#oml2d-tips {
+  /* 上移至人物头顶，稍稍左移 */
+  transform: translate(-160px, calc(-100% + 10px)) !important;
+  transform-origin: bottom center !important;
+  transition: opacity 0.25s ease, transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
+  z-index: 1000 !important;
+  pointer-events: none !important;
+  user-select: none !important;
+
+  /* 白色圆润气泡 + 粉色点缀 */
+  background: #fffbf7 !important;
+  border: 1.5px solid rgba(244, 114, 182, 0.15) !important;
+  border-radius: 20px !important;
+  box-shadow:
+    0 4px 16px rgba(244, 114, 182, 0.08),
+    0 0 0 1px rgba(244, 114, 182, 0.05) !important;
+  color: #4a4a5a !important;
+  padding: 10px 20px !important;
+  font-size: 14px !important;
+  line-height: 1.7 !important;
+  font-family: "PingFang SC", "Microsoft YaHei", "Hiragino Sans", sans-serif !important;
+  min-height: 36px !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+
+  /* 底部粉色小尾巴 ↓ 指向人物 */
+  &::after {
+    content: '';
+    position: absolute;
+    bottom: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0; height: 0;
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-top: 8px solid #fffbf7;
+    filter: drop-shadow(0 2px 2px rgba(0,0,0,0.04));
+  }
+}
+
+/* 内层文本 */
+#oml2d-tips-content {
+  display: block !important;
+  position: relative !important;
+  z-index: 1 !important;
+  text-align: center !important;
+
+  /* 末尾粉色爱心 */
+  &::after {
+    content: ' ♡';
+    display: inline;
+    color: #f472b6;
+    opacity: 0.5;
+    font-size: 12px;
+    animation: tip-heart 1.8s ease-in-out infinite;
+  }
+}
+
+@keyframes tip-heart {
+  0%, 100% { opacity: 0.3; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.2); }
+}
+
+/* ── Live2D 舞台 ── */
+.oml2d-stage {
+  pointer-events: none !important;
+}
+
 /* ── 响应式断点参考（组件内使用 media query） ── */
 /* 桌面: > 1024px (默认)     */
 /* 平板: 768px - 1024px      */

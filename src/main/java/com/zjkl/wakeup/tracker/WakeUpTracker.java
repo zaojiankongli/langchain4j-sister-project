@@ -40,23 +40,28 @@ public class WakeUpTracker {
     }
 
     public SwapResult maybeSwap(List<String> candidates, int[] scores, int bestIndex) {
+        return maybeSwap(candidates, scores, bestIndex, ThreadLocalRandom.current().nextDouble(), null);
+    }
+
+    SwapResult maybeSwap(List<String> candidates, int[] scores, int bestIndex,
+                         double randomValue, Integer forcedSwapIndex) {
         List<Integer> validIndices = new ArrayList<>();
         for (int i = 0; i < candidates.size(); i++) {
             if (candidates.get(i) != null) validIndices.add(i);
         }
         if (validIndices.isEmpty()) {
-            return new SwapResult(bestIndex, null, false);
+            return new SwapResult(bestIndex, -1, null, false);
         }
         int actualBestIdx = validIndices.contains(bestIndex) ? bestIndex : validIndices.get(0);
         if (validIndices.size() < 2) {
-            return new SwapResult(actualBestIdx, candidates.get(actualBestIdx), false);
+            return new SwapResult(actualBestIdx, actualBestIdx, candidates.get(actualBestIdx), false);
         }
-        if (ThreadLocalRandom.current().nextDouble() >= AB_TEST_RATIO) {
-            return new SwapResult(actualBestIdx, candidates.get(actualBestIdx), false);
+        if (randomValue >= AB_TEST_RATIO) {
+            return new SwapResult(actualBestIdx, actualBestIdx, candidates.get(actualBestIdx), false);
         }
-        int swapIndex = findSwapCandidate(validIndices, actualBestIdx);
+        int swapIndex = forcedSwapIndex != null ? forcedSwapIndex : findSwapCandidate(validIndices, actualBestIdx);
         log.info("A/B 测试采样：最佳索引={}, 实际发送索引={}", actualBestIdx, swapIndex);
-        return new SwapResult(actualBestIdx, candidates.get(swapIndex), true);
+        return new SwapResult(actualBestIdx, swapIndex, candidates.get(swapIndex), true);
     }
 
     private int findSwapCandidate(List<Integer> validIndices, int bestIndex) {
@@ -129,6 +134,23 @@ public class WakeUpTracker {
         }
     }
 
+    /**
+     * 获取距上次唤醒的分钟数
+     */
+    private static final String LAST_WAKEUP_KEY_PREFIX = "user:last_wakeup:";
+
+    public Integer getMinutesSinceLastWakeup(String userId) {
+        String key = LAST_WAKEUP_KEY_PREFIX + userId;
+        String value = redisTemplate.opsForValue().get(key);
+        if (value == null) return 999;
+        try {
+            long lastWakeup = Long.parseLong(value);
+            return (int) ((System.currentTimeMillis() - lastWakeup) / 60000);
+        } catch (NumberFormatException e) {
+            return 999;
+        }
+    }
+
     @Data
     public static class WakeUpRecord {
         private long timestamp;
@@ -143,11 +165,13 @@ public class WakeUpTracker {
     @Data
     public static class SwapResult {
         private final int originalBestIndex;
+        private final int actualSentIndex;
         private final String message;
         private final boolean isSwapped;
 
-        public SwapResult(int originalBestIndex, String message, boolean isSwapped) {
+        public SwapResult(int originalBestIndex, int actualSentIndex, String message, boolean isSwapped) {
             this.originalBestIndex = originalBestIndex;
+            this.actualSentIndex = actualSentIndex;
             this.message = message;
             this.isSwapped = isSwapped;
         }

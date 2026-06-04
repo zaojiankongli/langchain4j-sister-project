@@ -138,16 +138,15 @@ public class PeekStateTool {
 
     /**
      * 获取用户连续活跃时长（分钟）
-     * 由于 processUserPeek 前置已通过 isUserActive（最近 5 分钟有操作）过滤，
-     * 此时用户必定属于连续活跃状态，直接返回距离上次活跃的时长。
-     * 注意：未利用历史轨迹回溯，近似值可能略小于真实连续时长。
+     * 会话起点在 UserActivityTracker 中维护：如果距离上次活跃超过 activeThresholdMinutes，
+     * 则开启新会话；否则沿用原会话起点。
      */
     public int getContinuousActiveMinutes(String userId) {
-        Long lastActive = userActivityTracker.getLastActiveTime(userId);
-        if (lastActive == null) {
+        Long sessionStart = userActivityTracker.getSessionStartTime(userId);
+        if (sessionStart == null) {
             return 0;
         }
-        return (int) ((System.currentTimeMillis() - lastActive) / 60000);
+        return (int) ((System.currentTimeMillis() - sessionStart) / 60000);
     }
 
     // ========== 读写方法 ==========

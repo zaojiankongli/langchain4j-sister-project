@@ -19,7 +19,7 @@ import java.util.Set;
 @Slf4j
 public class RecommendAccumulator {
 
-    private static final double PASS_THRESHOLD = 0.6;
+    private static final double PASS_THRESHOLD = RecommendationConstants.PASS_THRESHOLD;
 
     @Agent(value = "筛选达标推荐项，按 URL 去重，合并到已有结果", outputKey = RecommendationConstants.OUTPUT_KEY_PASSING_RECOMMENDATIONS)
     public String accumulate(@V(RecommendationConstants.OUTPUT_KEY_SCORED_RESULT) String scoredResult,

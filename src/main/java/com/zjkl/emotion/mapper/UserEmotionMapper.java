@@ -15,7 +15,7 @@ public interface UserEmotionMapper {
                                             @Param("offset") int offset,
                                             @Param("limit") int limit);
 
-    List<UserEmotionRecord> selectByUserIdNoLimit(@Param("userId") String userId);
+    List<UserEmotionRecord> selectByUserIdLargeBatch(@Param("userId") String userId);
 
     long countByUserId(@Param("userId") String userId);
 }

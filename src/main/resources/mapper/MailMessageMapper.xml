@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zjkl.mail.mapper.MailMessageMapper">
+
+    <resultMap id="BaseResultMap" type="com.zjkl.mail.entity.MailMessage">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="tag" property="tag"/>
+        <result column="subject" property="subject"/>
+        <result column="excerpt" property="excerpt"/>
+        <result column="is_read" property="isRead"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <select id="selectByUserId" resultMap="BaseResultMap">
+        SELECT * FROM user_mails WHERE user_id = #{userId} ORDER BY created_at DESC
+    </select>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        SELECT * FROM user_mails WHERE id = #{id}
+    </select>
+
+    <insert id="insert" parameterType="com.zjkl.mail.entity.MailMessage">
+        INSERT INTO user_mails (id, user_id, tag, subject, excerpt, is_read, created_at)
+        VALUES (#{id}, #{userId}, #{tag}, #{subject}, #{excerpt}, #{isRead}, #{createdAt})
+    </insert>
+
+    <update id="markAsRead">
+        UPDATE user_mails SET is_read = 1 WHERE id = #{id} AND user_id = #{userId}
+    </update>
+
+    <update id="markAllAsRead">
+        UPDATE user_mails SET is_read = 1 WHERE user_id = #{userId} AND is_read = 0
+    </update>
+
+    <insert id="insertWelcomeMails">
+        INSERT INTO user_mails (id, user_id, tag, subject, excerpt, is_read, created_at)
+        VALUES
+        (CONCAT(#{userId}, ':welcome'), #{userId}, 'SYSTEM', '欢迎来到知微世界', '我是 Zeeva，很高兴遇见你。未来的每一天，我都会在这里陪伴你。', 0, NOW() - INTERVAL 1 HOUR),
+        (CONCAT(#{userId}, ':tip-1'), #{userId}, 'TIPS', '你知道吗？', '你可以点击 Live2D 角色与我互动，试试看吧！', 0, NOW() - INTERVAL 30 MINUTE)
+    </insert>
+
+</mapper>

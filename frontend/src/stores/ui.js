@@ -21,6 +21,7 @@ export const useUiStore = defineStore('ui', () => {
 
   // ── 通知系统 ──
   const toasts = ref([])
+  const _toastTimers = [] // 存储所有待清除的定时器
   let toastId = 0
 
   // ── 面板可见性 ──
@@ -67,7 +68,12 @@ export const useUiStore = defineStore('ui', () => {
     const id = ++toastId
     toasts.value.push({ id, message, type })
     if (duration > 0) {
-      setTimeout(() => removeToast(id), duration)
+      const timer = setTimeout(() => {
+        removeToast(id)
+        const idx = _toastTimers.indexOf(timer)
+        if (idx !== -1) _toastTimers.splice(idx, 1)
+      }, duration)
+      _toastTimers.push(timer)
     }
     return id
   }
@@ -75,6 +81,17 @@ export const useUiStore = defineStore('ui', () => {
   function removeToast(id) {
     const idx = toasts.value.findIndex(t => t.id === id)
     if (idx !== -1) toasts.value.splice(idx, 1)
+  }
+
+  /**
+   * 清除所有待移除定时器（在 app 重置/登出时调用），防止定时器在 store 重置后仍操作 stale 状态
+   */
+  function clearAllToasts() {
+    for (let i = 0; i < _toastTimers.length; i++) {
+      clearTimeout(_toastTimers[i])
+    }
+    _toastTimers.length = 0
+    toasts.value = []
   }
 
   function success(msg) { return addToast(msg, 'success') }
@@ -98,6 +115,7 @@ export const useUiStore = defineStore('ui', () => {
     hideLoading,
     addToast,
     removeToast,
+    clearAllToasts,
     success,
     error,
     info,

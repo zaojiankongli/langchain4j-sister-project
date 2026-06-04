@@ -58,7 +58,16 @@ public class RedisChatMemoryStore implements ChatMemoryStore {
             String json = ChatMessageSerializer.messagesToJson(messages);
             redisTemplate.opsForValue().set(MemoryRedisKeys.HISTORY_KEY + memoryId, json, MemoryRedisKeys.EXPIRATION_1_DAY);
             
-            summaryMemoryService.generateSummaryAsync(memoryIdStr, messagesSnapshot);
+            // Redis SETNX 去重：5 分钟内不重复触发同一用户的摘要生成
+            String dedupKey = MemoryRedisKeys.SUMMARY_DEDUP_KEY + memoryIdStr;
+            Boolean acquired = redisTemplate.opsForValue()
+                    .setIfAbsent(dedupKey, "1", MemoryRedisKeys.SUMMARY_DEDUP_TTL);
+            if (Boolean.TRUE.equals(acquired)) {
+                summaryMemoryService.generateSummaryAsync(memoryIdStr, messagesSnapshot);
+            } else {
+                log.debug("用户 {} 摘要生成去重跳过（{} 分钟内已触发）", memoryIdStr,
+                        MemoryRedisKeys.SUMMARY_DEDUP_TTL.toMinutes());
+            }
         } else {
             String json = ChatMessageSerializer.messagesToJson(messages);
             redisTemplate.opsForValue().set(MemoryRedisKeys.HISTORY_KEY + memoryId, json, MemoryRedisKeys.EXPIRATION_1_DAY);
@@ -130,6 +139,7 @@ public class RedisChatMemoryStore implements ChatMemoryStore {
         String historyKey = MemoryRedisKeys.HISTORY_KEY + memoryId;
         String summaryKey = MemoryRedisKeys.SUMMARY_KEY + memoryId;
         String lastCompressedSizeKey = MemoryRedisKeys.LAST_COMPRESSED_SIZE_KEY + memoryId;
-        redisTemplate.delete(Arrays.asList(historyKey, summaryKey, lastCompressedSizeKey));
+        String summaryDedupKey = MemoryRedisKeys.SUMMARY_DEDUP_KEY + memoryId;
+        redisTemplate.delete(Arrays.asList(historyKey, summaryKey, lastCompressedSizeKey, summaryDedupKey));
     }
 }

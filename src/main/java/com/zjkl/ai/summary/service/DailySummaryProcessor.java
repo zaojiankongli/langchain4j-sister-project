@@ -28,6 +28,8 @@ import static com.zjkl.ai.summary.config.RedisStreamConfig.IMAGE_STREAM;
 @Slf4j
 public class DailySummaryProcessor {
 
+    private static final long IMAGE_STREAM_MAX_LENGTH = 10_000;
+
     private final DailySummaryWorkflow dailySummaryWorkflow;
     private final SummaryMemoryService summaryMemoryService;
     private final StringRedisTemplate redisTemplate;
@@ -52,10 +54,14 @@ public class DailySummaryProcessor {
         );
         log.info("摘要生成完成：userId={}, title={}", userId, result.title());
 
-        // 2. 保存摘要到 Milvus 向量库
+        // 2. 保存摘要到 Milvus 向量库（含情感标签）
         try {
-            summaryMemoryService.saveToVectorStore(userId, result.title(), result.summary());
-            log.info("摘要已存入向量数据库：userId={}, title={}", userId, result.title());
+            String emotionLabel = result.emotionLabel() != null ? result.emotionLabel() : "平静";
+            double sentimentScore = result.sentimentScore();
+            summaryMemoryService.saveToVectorStore(userId, result.title(), result.summary(),
+                    emotionLabel, sentimentScore);
+            log.info("摘要已存入向量数据库：userId={}, title={}, 情绪={}, 情感分={}",
+                    userId, result.title(), emotionLabel, sentimentScore);
         } catch (Exception e) {
             log.error("摘要存入向量数据库失败（不影响后续流程）：userId={}", userId, e);
         }
@@ -90,7 +96,9 @@ public class DailySummaryProcessor {
         messageBody.put("createdAt", task.getCreatedAt().toString());
 
         redisTemplate.opsForStream().add(IMAGE_STREAM, messageBody);
+        redisTemplate.opsForStream().trim(IMAGE_STREAM, IMAGE_STREAM_MAX_LENGTH, true);
 
         log.info("图片任务已发送：taskId={}", task.getTaskId());
     }
+
 }

@@ -13,14 +13,19 @@ public interface WakeUpGenerator3Agent {
             用户情绪：{{moodDescription}}（愉悦度={{moodScore}}），
             用户沉默约{{silentHours}}小时，
             锚点信息：{{anchorHint}}，
+            用户名：{{userName}}，
+            用户兴趣：{{userHobbies}}，
             用户ID：{{userId}}
             """)
     @Agent(description = "侧重情绪锚点的问候生成")
-    String generate(@V("timeOfDay") String timeOfDay,
+    String generate(@V("characterCore") String characterCore,
+                    @V("timeOfDay") String timeOfDay,
                     @V("specialMoment") String specialMoment,
                     @V("moodDescription") String moodDescription,
                     @V("moodScore") Double moodScore,
                     @V("silentHours") Double silentHours,
                     @V("anchorHint") String anchorHint,
+                    @V("userName") String userName,
+                    @V("userHobbies") String userHobbies,
                     @V("userId") String userId);
 }

@@ -11,6 +11,8 @@ public interface ChatPushService {
 
     void pushText(String userId, String content, boolean isComplete);
 
+    void pushEmotionUpdate(String userId, double pleasure, double arousal, double dominance, String moodLabel, String moodDescription);
+
     void pushSystem(String userId, String content);
 
     void pushError(String userId, String errMsg);

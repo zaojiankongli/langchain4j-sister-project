@@ -5,7 +5,9 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 public class JsonUtils {
 
     private static final Gson GSON = new Gson();
@@ -31,7 +33,7 @@ public class JsonUtils {
                 return el.getAsJsonArray();
             }
         } catch (Exception e) {
-            // fall through
+            log.warn("JSON 解析失败（数组）: {}", e.getMessage());
         }
         return new JsonArray();
     }
@@ -43,7 +45,7 @@ public class JsonUtils {
                 return el.getAsJsonObject();
             }
         } catch (Exception e) {
-            // fall through
+            log.warn("JSON 解析失败（对象）: {}", e.getMessage());
         }
         return new JsonObject();
     }

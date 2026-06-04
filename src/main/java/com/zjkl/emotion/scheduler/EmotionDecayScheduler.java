@@ -17,13 +17,15 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class EmotionDecayScheduler {
 
+    private static final int MAX_ACTIVE_USERS_TO_SCAN = 200;
+
     private final EmotionService emotionService;
     private final UserActivityTracker userActivityTracker;
 
     @Scheduled(fixedRate = 1800000)
     public void decayActiveUsers() {
         try {
-            Set<String> activeUsers = userActivityTracker.getActiveMemoryIdsInLastDays(1);
+            Set<String> activeUsers = userActivityTracker.getActiveMemoryIdsInLastDays(1, MAX_ACTIVE_USERS_TO_SCAN);
             if (activeUsers.isEmpty()) {
                 return;
             }

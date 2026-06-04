@@ -26,7 +26,6 @@ public class HeartbeatChecker {
     @PostConstruct
     public void init() {
         log.info("HeartbeatChecker 初始化");
-        startHeartbeatChecker();
     }
 
     @PreDestroy
@@ -43,9 +42,8 @@ public class HeartbeatChecker {
         lastActiveTime.put(userId, System.currentTimeMillis());
     }
 
-    private void startHeartbeatChecker() {
-        // Using @Scheduled instead of manual ScheduledExecutorService
-        // This method is kept for compatibility but the actual scheduling is done via @Scheduled annotation
+    public void clearActiveTime(String userId) {
+        lastActiveTime.remove(userId);
     }
 
     // Heartbeat check runs every 30 seconds
@@ -58,6 +56,7 @@ public class HeartbeatChecker {
                 if (lastTime == null) continue;
                 if (System.currentTimeMillis() - lastTime > 90000) {
                     log.warn("用户心跳超时：userId={}", userId);
+                    lastActiveTime.remove(userId);
                     connectionStateManager.onUserDisconnected(userId);
                 }
             }

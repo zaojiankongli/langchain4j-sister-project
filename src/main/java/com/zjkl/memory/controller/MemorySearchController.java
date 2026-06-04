@@ -3,17 +3,20 @@ package com.zjkl.memory.controller;
 import com.zjkl.common.context.UserContext;
 import com.zjkl.memory.service.SummaryMemoryService;
 import com.zjkl.common.Result;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 /**
  * 记忆搜索测试接口
  */
 @RestController
 @RequestMapping("/api/memory/search")
+@Validated
 public class MemorySearchController {
 
     private final SummaryMemoryService summaryMemoryService;
@@ -27,8 +30,11 @@ public class MemorySearchController {
     @GetMapping
     public Result<Map<String, Object>> search(
             @RequestParam String query,
-            @RequestParam(defaultValue = "5") int limit) {
-        String userId = Objects.requireNonNull(userContext.getUserId(), "用户未登录");
+            @RequestParam(defaultValue = "5") @Min(1) @Max(20) int limit) {
+        String userId = userContext.getUserId();
+        if (userId == null) {
+            return Result.unauthorized("请先登录");
+        }
         List<String> results = summaryMemoryService.searchRelevantMemories(userId, query, limit);
         return Result.success(Map.of("userId", userId, "query", query, "results", results, "count", results.size()));
     }
@@ -38,8 +44,11 @@ public class MemorySearchController {
             @RequestParam String query,
             @RequestParam String startDate,
             @RequestParam String endDate,
-            @RequestParam(defaultValue = "5") int limit) {
-        String userId = Objects.requireNonNull(userContext.getUserId(), "用户未登录");
+            @RequestParam(defaultValue = "5") @Min(1) @Max(20) int limit) {
+        String userId = userContext.getUserId();
+        if (userId == null) {
+            return Result.unauthorized("请先登录");
+        }
         List<String> results = summaryMemoryService.searchMemoriesByDateRange(userId, query, startDate, endDate, limit);
         return Result.success(Map.of("userId", userId, "query", query,
                 "startDate", startDate, "endDate", endDate,
