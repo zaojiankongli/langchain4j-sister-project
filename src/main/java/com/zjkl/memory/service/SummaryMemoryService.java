@@ -10,6 +10,7 @@ import com.zjkl.common.util.MilvusQueryUtil;
 import com.zjkl.common.context.UserContext;
 import com.zjkl.emotion.model.EmotionalState;
 import com.zjkl.emotion.service.EmotionService;
+import com.zjkl.memory.config.MilvusCollectionManager;
 import com.zjkl.memory.constant.MemoryRedisKeys;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.message.*;
@@ -52,8 +53,8 @@ public class SummaryMemoryService {
     /**
      * 混合检索内部结果：包含记忆文本列表和 embedding 向量（供 topScore 查询复用，避免二次 embedding）
      */
-    private record HybridSearchResult(List<String> memories, List<Float> embeddingVector) {
-        static HybridSearchResult empty() { return new HybridSearchResult(List.of(), List.of()); }
+    private record HybridSearchResult(List<String> memories, List<Float> embeddingVector, double topScore) {
+        static HybridSearchResult empty() { return new HybridSearchResult(List.of(), List.of(), 0.0); }
     }
 
     // ========== 依赖注入 ==========
@@ -65,6 +66,7 @@ public class SummaryMemoryService {
     private final PromptTemplateService promptTemplateService;
     private final EmotionService emotionService;
     private final UserContext userContext;
+    private final MilvusCollectionManager milvusCollectionManager;
     private final Gson gson = new Gson();
 
     // ========== 常量定义 ==========
@@ -88,10 +90,11 @@ public class SummaryMemoryService {
                                 MilvusClientV2 milvusClientV2,
                                 MilvusProperties milvusProperties,
                                 EmbeddingModel embeddingModel,
-                                @Qualifier("summaryService") SummaryService summaryService,
-                                PromptTemplateService promptTemplateService,
-                                EmotionService emotionService,
-                                UserContext userContext) {
+                                 @Qualifier("summaryService") SummaryService summaryService,
+                                 PromptTemplateService promptTemplateService,
+                                 EmotionService emotionService,
+                                 UserContext userContext,
+                                 MilvusCollectionManager milvusCollectionManager) {
         this.stringRedisTemplate = stringRedisTemplate;
         this.milvusClientV2 = milvusClientV2;
         this.milvusCollectionName = milvusProperties.getMemoryCollectionName();
@@ -100,6 +103,7 @@ public class SummaryMemoryService {
         this.promptTemplateService = promptTemplateService;
         this.emotionService = emotionService;
         this.userContext = userContext;
+        this.milvusCollectionManager = milvusCollectionManager;
     }
 
     // ==================== 同步方法 ====================
@@ -123,7 +127,7 @@ public class SummaryMemoryService {
 
     // ==================== 异步方法 ====================
 
-    @Async
+    @Async("llmTaskExecutor")
     public void generateSummaryAsync(String memoryId, List<ChatMessage> messagesSnapshot) {
         log.debug("开始异步生成用户 {} 的摘要，消息数：{}", memoryId, messagesSnapshot.size());
 
@@ -172,6 +176,10 @@ public class SummaryMemoryService {
      */
     private HybridSearchResult hybridSearchInternal(String userId, String query, int limit) {
         try {
+            if (!milvusCollectionManager.isCollectionReady()) {
+                log.debug("记忆集合未就绪，跳过 native RAG: userId={}", userId);
+                return HybridSearchResult.empty();
+            }
             // 1. dense embedding
             long embedStart = System.currentTimeMillis();
             Embedding embedding = embeddingModel.embed(query).content();
@@ -205,7 +213,7 @@ public class SummaryMemoryService {
                     .searchRequests(searchRequests)
                     .ranker(new RRFRanker(60))    // 工程最佳实践 k=60
                     .limit(topK)                   // v2.6.x 新增：RRF 后最终返回数
-                    .outFields(Arrays.asList("id", "content", "title", "metadata"))
+                    .outFields(Arrays.asList("id", "content", "title", "user_id", "create_time", "emotion_label", "sentiment_score", "metadata"))
                     .consistencyLevel(ConsistencyLevel.BOUNDED)
                     .build();
 
@@ -217,8 +225,10 @@ public class SummaryMemoryService {
             }
 
             // 4. 后处理：阈值过滤 + 去重 + 压缩
-            List<String> memories = postProcess(searchResults.get(0), userId, RRF_SCORE_THRESHOLD, limit);
-            return new HybridSearchResult(memories, denseList);
+            List<SearchResp.SearchResult> firstResults = searchResults.get(0);
+            double topScore = firstResults.isEmpty() ? 0.0 : firstResults.get(0).getScore();
+            List<String> memories = postProcess(firstResults, userId, RRF_SCORE_THRESHOLD, limit);
+            return new HybridSearchResult(memories, denseList, topScore);
 
         } catch (Exception e) {
             log.error("混合检索失败: userId={}, query={}", userId, query, e);
@@ -318,29 +328,7 @@ public class SummaryMemoryService {
             return MemoryBlockResult.empty();
         }
 
-        // 复用已有的 embedding 获取 top score，避免二次调用 embeddingModel.embed()
-        // TODO: 性能优化 — 此处为获取 topScore 执行了第二次 Milvus 查询，
-        // 应从 hybridSearchInternal 的结果中直接提取 RRF 分数以消除冗余查询
-        double topScore = 0.0;
-        List<Float> embeddingVector = searchResult.embeddingVector();
-        if (!embeddingVector.isEmpty()) {
-            try {
-                String userFilter = MilvusQueryUtil.userFilter(userId);
-                SearchReq scoreReq = SearchReq.builder()
-                        .collectionName(milvusCollectionName)
-                        .data(Collections.singletonList(new FloatVec(embeddingVector)))
-                        .topK(1)
-                        .filter(userFilter)
-                        .build();
-                SearchResp scoreResp = milvusClientV2.search(scoreReq);
-                if (scoreResp.getSearchResults() != null && !scoreResp.getSearchResults().isEmpty()
-                        && !scoreResp.getSearchResults().get(0).isEmpty()) {
-                    topScore = scoreResp.getSearchResults().get(0).get(0).getScore();
-                }
-            } catch (Exception e) {
-                log.debug("记忆 topScore 获取失败，使用默认 0", e);
-            }
-        }
+        double topScore = searchResult.topScore();
 
         String footer = "\n\n用这些记忆自然地融入回复，仿佛你真的记住了这些事。不要生硬地引用\"我记得之前...\"——让记忆成为你回应的底色。";
         // ≤3 条无需压缩
@@ -391,6 +379,10 @@ public class SummaryMemoryService {
             row.addProperty("id", id);
             row.addProperty("content", summary);
             row.addProperty("title", title);
+            row.addProperty("user_id", userId);
+            row.addProperty("create_time", today);
+            row.addProperty("emotion_label", emotionLabel != null ? emotionLabel : "平静");
+            row.addProperty("sentiment_score", safeScore);
             row.add("dense_vector", gson.toJsonTree(denseList));
             row.addProperty("metadata", gson.toJson(metaJson));
 
@@ -432,6 +424,10 @@ public class SummaryMemoryService {
 
     private boolean matchesUserId(SearchResp.SearchResult result, String userId) {
         try {
+            Object userIdObj = result.getEntity().get("user_id");
+            if (userIdObj != null) {
+                return userId.equals(userIdObj.toString());
+            }
             Object metaObj = result.getEntity().get("metadata");
             if (metaObj == null) return false; // no metadata → exclude (safer)
             String metaStr = metaObj.toString();
@@ -460,10 +456,15 @@ public class SummaryMemoryService {
             // Gson 解析 metadata 提取日期
             String date = "????.??.??";
             try {
-                String metaStr = result.getEntity().get("metadata").toString();
+                Object createTime = result.getEntity().get("create_time");
+                if (createTime != null && !createTime.toString().isBlank()) {
+                    date = createTime.toString().replace("-", ".");
+                } else {
+                    String metaStr = result.getEntity().get("metadata").toString();
                 JsonObject meta = gson.fromJson(metaStr, JsonObject.class);
                 if (meta != null && meta.has("create_time")) {
                     date = meta.get("create_time").getAsString().replace("-", ".");
+                }
                 }
             } catch (Exception ignored) {
                 log.debug("记忆元数据日期解析失败，使用默认值");

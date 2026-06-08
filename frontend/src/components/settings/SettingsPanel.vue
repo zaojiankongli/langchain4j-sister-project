@@ -15,7 +15,7 @@
     </div>
 
     <template v-else>
-      <SettingsPersonality :form="form" :presets="presets" />
+      <SettingsPersonality :form="form" :presets="presets" @select-preset="applyPreset" />
 
       <!-- ============ 2. 情绪引擎 ============ -->
       <section class="settings-section">
@@ -179,6 +179,7 @@
 </template>
 
 <script setup>
+defineOptions({ name: 'SettingsPanel' })
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
 import SettingsPersonality from './SettingsPersonality.vue'
@@ -221,7 +222,6 @@ const loadError = ref('')
 const saving = ref(false)
 const saveError = ref('')
 const saved = ref(false)
-const _formInitialized = ref(false)
 let _isAlive = true
 onBeforeUnmount(() => { _isAlive = false })
 
@@ -239,17 +239,25 @@ const proactiveIntervalPercent = computed(() => {
 })
 
 // ── 从后端加载设置 ──
+// 始终响应 store 变更（支持外部更新、跨标签同步），用深比较避免用户编辑被覆盖
+let _lastAppliedJson = ''
 watch(() => settingsStore.settings, (newSettings) => {
-  if (newSettings && !_formInitialized.value) {
+  if (!newSettings) return
+  const incoming = JSON.stringify(newSettings)
+  // 仅当 store 数据真正变化时才覆盖表单（避免覆盖用户正在编辑的内容）
+  if (incoming !== _lastAppliedJson) {
+    _lastAppliedJson = incoming
     form.value = { ...form.value, ...newSettings }
-    _formInitialized.value = true
   }
 }, { immediate: true })
 
 const initLoad = async () => {
   loadError.value = ''
   try {
-    await settingsStore.fetchSettings()
+    await Promise.all([
+      settingsStore.fetchSettings(),
+      settingsStore.fetchPresets(),
+    ])
     if (!_isAlive) return
   } catch (e) {
     if (!_isAlive) return
@@ -268,6 +276,7 @@ const handleSave = async () => {
     if (!_isAlive) return
     if (success) {
       saved.value = true
+      _lastAppliedJson = JSON.stringify({ ...form.value })
       if (_savedTimer.value) clearTimeout(_savedTimer.value)
       _savedTimer.value = setTimeout(() => { saved.value = false; _savedTimer.value = null }, 3000)
     } else {
@@ -289,6 +298,10 @@ const handleReset = () => {
   saveError.value = ''
   saved.value = false
   if (settingsStore.settings) form.value = { ...form.value, ...settingsStore.settings }
+}
+
+const applyPreset = (updates) => {
+  form.value = { ...form.value, ...updates }
 }
 
 onMounted(() => { initLoad() })
@@ -351,7 +364,7 @@ onMounted(() => { initLoad() })
   border-radius: 20px;
   cursor: pointer;
   font-size: 12px;
-  transition: all 0.3s;
+  transition: background-color 0.3s ease, color 0.3s ease;
 }
 .retry-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
 
@@ -360,7 +373,7 @@ onMounted(() => { initLoad() })
   border: 1px solid rgba(255,255,255,0.06);
   border-radius: 10px;
   padding: 20px;
-  transition: all 0.3s ease;
+  transition: background-color 0.3s ease, opacity 0.3s ease;
 }
 .param-card:hover { background: rgba(255,255,255,0.06); }
 .param-card.disabled { opacity: 0.35; pointer-events: none; }
@@ -481,7 +494,6 @@ onMounted(() => { initLoad() })
 .theme-card {
   cursor: pointer;
   text-align: center;
-  transition: all 0.3s ease;
 }
 .theme-preview {
   width: 100%;
@@ -522,7 +534,7 @@ onMounted(() => { initLoad() })
   border-radius: 4px;
   letter-spacing: 2px;
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: background-color 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), border-color 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), color 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
   font-size: 13px;
   border: none;
 }

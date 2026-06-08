@@ -51,6 +51,7 @@ export function useGsapAnimation() {
    */
   function rippleEffect(el) {
     if (!el || !(el instanceof Element)) return () => {}
+    const ripples = new Set()
     function handler(e) {
       const rect = el.getBoundingClientRect()
       const size = Math.max(rect.width, rect.height)
@@ -63,18 +64,31 @@ export function useGsapAnimation() {
         width: ${size}px; height: ${size}px; left: ${x}px; top: ${y}px;
         background: rgba(255,255,255,0.25); transform: scale(0);
       `
-      el.style.position = 'relative'
+      // 仅在元素为 static 定位时才设为 relative，避免覆盖已有布局
+      if (getComputedStyle(el).position === 'static') {
+        el.style.position = 'relative'
+      }
       el.style.overflow = 'hidden'
       el.appendChild(ripple)
+      ripples.add(ripple)
 
       gsap.to(ripple, {
         scale: 2, opacity: 0, duration: 0.6, ease: 'power2.out',
-        onComplete: () => ripple.remove()
+        onComplete: () => { ripple.remove(); ripples.delete(ripple) }
       })
     }
     el.addEventListener('mousedown', handler)
-    ctx.add(() => () => el.removeEventListener('mousedown', handler))
-    return () => el.removeEventListener('mousedown', handler)
+    ctx.add(() => () => {
+      el.removeEventListener('mousedown', handler)
+      // 清理所有残留的 ripple DOM 节点（防止 ctx.revert() 杀死 tween 后 onComplete 不触发）
+      ripples.forEach(r => r.remove())
+      ripples.clear()
+    })
+    return () => {
+      el.removeEventListener('mousedown', handler)
+      ripples.forEach(r => r.remove())
+      ripples.clear()
+    }
   }
 
   return {

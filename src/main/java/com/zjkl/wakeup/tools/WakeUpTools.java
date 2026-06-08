@@ -3,7 +3,7 @@ package com.zjkl.wakeup.tools;
 import com.zjkl.ai.chat.entity.ConverMessage;
 import com.zjkl.ai.chat.entity.MessageContent;
 import com.zjkl.ai.chat.service.ConverMessageService;
-import com.zjkl.emotion.service.EmotionAnchorService;
+import com.zjkl.anchor.service.AnchorEventService;
 import com.zjkl.memory.service.SummaryMemoryService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
@@ -23,7 +23,7 @@ import java.util.stream.Collectors;
 public class WakeUpTools {
 
     private final SummaryMemoryService memoryService;
-    private final EmotionAnchorService anchorService;
+    private final AnchorEventService anchorService;
     private final ConverMessageService converMessageService;
 
     @Tool("搜索用户的历史对话记忆，用于生成个性化的问候消息")

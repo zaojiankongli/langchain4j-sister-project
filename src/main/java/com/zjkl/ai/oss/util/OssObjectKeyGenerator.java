@@ -43,6 +43,17 @@ public class OssObjectKeyGenerator {
     }
 
     /**
+     * 生成语音文件的 OSS 对象键
+     * 格式：voices/{userId}/{yyyy/MM/dd}/{uuid}.{ext}
+     */
+    public String generateVoiceObjectKey(String userId, String originalFilename) {
+        String extension = getFileExtension(originalFilename);
+        String date = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"));
+        String uniqueFilename = UUID.randomUUID().toString().replace("-", "");
+        return String.format("voices/%s/%s/%s.%s", userId, date, uniqueFilename, extension);
+    }
+
+    /**
      * 生成通用对象键
      * 格式：{folder}/{yyyy/MM/dd}/{uuid}.{ext}
      */

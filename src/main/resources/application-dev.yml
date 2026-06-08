@@ -1,6 +1,7 @@
 # ==================== 开发环境配置 ====================
-# 开发环境下覆盖默认配置，降低日志级别、放宽限制
+# 激活方式: --spring.profiles.active=dev
 # 基础设施：192.168.100.128（MySQL:3307 / Redis:6380 / Milvus:19530）
+# 仅保留 application.yml + application-dev.yml 两份配置文件。
 
 logging:
   level:
@@ -8,24 +9,74 @@ logging:
     com.zjkl: debug
 
 spring:
-  threads:
-    virtual:
-      enabled: true
   datasource:
     url: jdbc:mysql://192.168.100.128:3307/zjkl_sister?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:}
   data:
     redis:
       host: 192.168.100.128
       port: 6380
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+  mail:
+    host: ${MAIL_HOST:smtp.qq.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
 
-# Milvus 向量数据库
+langchain4j:
+  community:
+    dashscope:
+      embedding-model:
+        api-key: ${DASHSCOPE_API_KEY:dev-placeholder-key}
+      chat-model:
+        api-key: ${DASHSCOPE_API_KEY:dev-placeholder-key}
+      streaming-chat-model:
+        api-key: ${DASHSCOPE_API_KEY:dev-placeholder-key}
+      vision-model:
+        api-key: ${DASHSCOPE_API_KEY:dev-placeholder-key}
+
+aliyun:
+  oss:
+    endpoint: ${OSS_ENDPOINT:oss-cn-beijing.aliyuncs.com}
+    access-key-id: ${OSS_ACCESS_KEY_ID:}
+    access-key-secret: ${OSS_ACCESS_KEY_SECRET:}
+    bucket-name: ${OSS_BUCKET_NAME:}
+    region: ${OSS_REGION:cn-beijing}
+
 app:
+  default-image-url: ${APP_DEFAULT_IMAGE_URL:https://placehold.co/512x512}
+  ai:
+    chat-api-key: ${DASHSCOPE_API_KEY:dev-placeholder-key}
+    vision-api-key: ${DASHSCOPE_API_KEY:dev-placeholder-key}
+    wanx-reference-image-url: ${WANX_REFERENCE_IMAGE_URL:https://placehold.co/512x512}
+  auth:
+    secret: ${JWT_SECRET:zjkl-sister-dev-jwt-secret-2026}
+  wechat:
+    appid: ${WECHAT_APPID:dev-wechat-appid-placeholder}
+    secret: ${WECHAT_SECRET:dev-wechat-secret-placeholder}
+    code-to-session-url: https://api.weixin.qq.com/sns/jscode2session
+  redis:
+    host: 192.168.100.128
+    port: 6380
+    password: ${REDIS_PASSWORD:}
+    database: ${REDIS_DATABASE:0}
   milvus:
     host: 192.168.100.128
     port: 19530
     uri: http://192.168.100.128:19530
-
-peek:
-  enabled: true
-  base-probability: 0.15              # 开发环境提高概率便于测试
-  cooldown-minutes: 15
+  websocket:
+    allowed-origins: http://localhost:81,http://localhost:3000,http://localhost:5173,http://192.168.100.128
+  cors:
+    allowed-origins: http://localhost:81,http://localhost:3000,http://localhost:5173,http://192.168.100.128
+  tts:
+    model: ${TTS_MODEL:cosyvoice-v3.5-flash}
+    voice: ${TTS_VOICE:cosyvoice-v3.5-flash-bailian-44f6c28eb15c4f80a5631c7e1abc21a9}
+  mcp:
+    firecrawl-api-key: ${FIRECRAWL_API_KEY:}
+    context7-api-key: ${CONTEXT7_API_KEY:}
+  peek:
+    enabled: true
+    base-probability: 0.15
+    cooldown-minutes: 15

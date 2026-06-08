@@ -16,7 +16,7 @@ public class GraphAnchorListener {
 
     private final GraphEntityService graphEntityService;
 
-    @Async
+    @Async("llmTaskExecutor")
     @EventListener
     public void onAnchorEnded(AnchorEndedEvent event) {
         try {

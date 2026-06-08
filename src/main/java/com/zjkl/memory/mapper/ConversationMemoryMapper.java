@@ -44,6 +44,8 @@ public interface ConversationMemoryMapper {
         @Param("excludeToday") boolean excludeToday
     );
 
+    List<ConversationMemory> selectAllByUserId(@Param("userId") String userId);
+
     /**
      * 更新图片 URL
      */

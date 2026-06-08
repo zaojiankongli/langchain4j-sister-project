@@ -64,6 +64,8 @@ public class GraphMilvusCollectionManager {
         schema.addField(varcharField("text", 1024, false));
         schema.addField(varcharField("type", 64, false));
         schema.addField(varcharField("source_ids", 2000, false));
+        schema.addField(varcharField("passage_ids", 8000, false));
+        schema.addField(varcharField("relation_ids", 8000, false));
         schema.addField(int64Field("mention_count"));
         schema.addField(int64Field("first_seen"));
         schema.addField(int64Field("last_seen"));
@@ -95,6 +97,8 @@ public class GraphMilvusCollectionManager {
         schema.addField(varcharField("object", 1024, false));
         schema.addField(varcharField("relation_type", 64, false));
         schema.addField(varcharField("source_id", 256, false));
+        schema.addField(varcharField("entity_ids", 1000, false));
+        schema.addField(varcharField("passage_ids", 8000, false));
         schema.addField(floatField("confidence"));
         schema.addField(int64Field("timestamp"));
         schema.addField(vectorField("vector", GRAPH_VECTOR_DIM));
@@ -121,10 +125,16 @@ public class GraphMilvusCollectionManager {
         schema.addField(varcharField("user_id", 128, false));
         schema.addField(varcharField("text", 65535, false));
         schema.addField(varcharField("source_type", 64, false));
+        schema.addField(varcharField("source_ref_id", 256, false));
+        schema.addField(varcharField("entity_ids", 8000, false));
+        schema.addField(varcharField("relation_ids", 8000, false));
+        schema.addField(int64Field("timestamp"));
+        schema.addField(vectorField("vector", GRAPH_VECTOR_DIM));
 
         client.createCollection(CreateCollectionReq.builder()
                 .collectionName(collectionName)
                 .collectionSchema(schema)
+                .indexParams(List.of(vectorIndex("vector")))
                 .consistencyLevel(ConsistencyLevel.BOUNDED)
                 .build());
         load(collectionName);

@@ -1,4 +1,6 @@
 <script setup>
+import { getOptimizedImageUrl } from '@/utils/image'
+
 defineProps({
   messages: { type: Array, default: () => [] },
   historyMessages: { type: Array, default: () => [] },
@@ -71,10 +73,10 @@ function isNewDateGroup(msg, prevMsg) {
     <div v-if="isNewDateGroup(msg, eIdx > 0 ? earlierMessages[eIdx - 1] : null)" class="date-divider">
       <span>{{ formatDateLabel(msg.timestamp) }}</span>
     </div>
-    <div class="message-item" :class="msg.role" v-memo="[msg.id, msg.content, msg.type, msg.timestamp]">
+    <div class="message-item" :class="msg.role">
       <div class="message-content">
         <div class="text-wrapper" :class="{ 'image-wrapper': msg.type === 'image' }">
-          <img v-if="msg.type === 'image'" :src="msg.content" class="chat-image" alt="earlier" loading="lazy" @error="handleImgError" />
+          <img v-if="msg.type === 'image'" :src="getOptimizedImageUrl(msg.content, { width: 440 })" class="chat-image" alt="earlier" loading="lazy" decoding="async" @error="handleImgError" />
           <template v-else><span class="msg-text" v-text="msg.content"></span></template>
         </div>
         <span class="msg-time" v-if="msg.timestamp">{{ formatTime(msg.timestamp) }}</span>
@@ -89,10 +91,10 @@ function isNewDateGroup(msg, prevMsg) {
 
   <!-- 今日历史 -->
   <template v-for="msg in historyMessages" :key="'h-' + msg.id">
-    <div class="message-item" :class="msg.role" v-memo="[msg.id, msg.content, msg.type, msg.timestamp]">
+    <div class="message-item" :class="msg.role">
       <div class="message-content">
         <div class="text-wrapper" :class="{ 'image-wrapper': msg.type === 'image' }">
-          <img v-if="msg.type === 'image'" :src="msg.content" class="chat-image" alt="history" loading="lazy" @error="handleImgError" />
+          <img v-if="msg.type === 'image'" :src="getOptimizedImageUrl(msg.content, { width: 440 })" class="chat-image" alt="history" loading="lazy" decoding="async" @error="handleImgError" />
           <template v-else><span class="msg-text" v-text="msg.content"></span></template>
         </div>
         <span class="msg-time" v-if="msg.timestamp">{{ formatTime(msg.timestamp) }}</span>
@@ -107,14 +109,14 @@ function isNewDateGroup(msg, prevMsg) {
 
   <!-- 当前消息 -->
   <template v-for="msg in messages" :key="msg.id">
-    <div class="message-item" :class="[msg.role, { 'is-temp': msg.isTemp, 'is-error': msg.isError }]" v-memo="[msg.id, msg.content, msg.isTemp, msg.isComplete, msg.isError, msg.type, msg.timestamp]">
+    <div class="message-item" :class="[msg.role, { 'is-temp': msg.isTemp, 'is-error': msg.isError }]">
       <div class="message-content">
         <div v-if="msg.role === 'ai' && latestEmotion && msg.isComplete && msg === messages[messages.length - 1]" class="mood-badge">
           <span class="mood-dot" :style="{ background: moodColor(latestEmotion) }"></span>
           <span class="mood-label">{{ latestEmotion.moodLabel }}</span>
         </div>
         <div class="text-wrapper" :class="{ 'image-wrapper': msg.type === 'image' }">
-          <img v-if="msg.type === 'image'" :src="msg.content" class="chat-image" alt="upload" loading="lazy" @error="handleImgError" />
+          <img v-if="msg.type === 'image'" :src="getOptimizedImageUrl(msg.content, { width: 440 })" class="chat-image" alt="upload" loading="lazy" decoding="async" @error="handleImgError" />
           <template v-else><span class="msg-text" v-text="msg.content"></span></template>
           <span v-if="msg.isTemp" class="temp-indicator">...</span>
         </div>

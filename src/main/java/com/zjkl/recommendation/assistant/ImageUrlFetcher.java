@@ -3,6 +3,7 @@ package com.zjkl.recommendation.assistant;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.zjkl.common.util.RemoteUrlValidator;
 import com.zjkl.recommendation.util.JsonUtils;
 import com.zjkl.recommendation.util.RecommendationConstants;
 import dev.langchain4j.agentic.Agent;
@@ -13,8 +14,6 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.HttpURLConnection;
-import java.net.Inet6Address;
-import java.net.InetAddress;
 import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -96,27 +95,14 @@ public class ImageUrlFetcher {
     /**
      * 通过 HTTP GET 请求页面 HTML，提取 OG:image 或 Twitter:image
      *
-     * DNS rebinding 防护说明：validateRemoteUrl 已对域名做 DNS 解析并校验为公网 IP，
-     * 但 URL.openConnection() 会重新解析域名，存在 TOCTOU 风险。
-     * 此处使用已验证的 IP 地址直接建立连接，绕过第二次 DNS 解析。
+     * 先校验公网 HTTP(S) URL，再使用原始域名连接，避免 HTTPS SNI/证书校验被 IP 直连破坏。
      */
     private String fetchOgImage(String urlStr) {
         HttpURLConnection conn = null;
         try {
-            URI uri = new URI(urlStr);
-            validateRemoteUrl(uri);
-
-            // 使用已验证的 IP 地址直接连接，防止 DNS rebinding
-            InetAddress resolvedIp = InetAddress.getByName(uri.getHost());
-            int port = uri.getPort() != -1 ? uri.getPort()
-                    : ("https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80);
-            String ipUrl = uri.getScheme() + "://" + resolvedIp.getHostAddress()
-                    + ":" + port + (uri.getRawPath() != null ? uri.getRawPath() : "/")
-                    + (uri.getRawQuery() != null ? "?" + uri.getRawQuery() : "");
-            URL url = new URI(ipUrl).toURL();
+            URI uri = RemoteUrlValidator.requirePublicHttpUrl(urlStr, false);
+            URL url = uri.toURL();
             conn = (HttpURLConnection) url.openConnection();
-            // 设置原始 Host 头，确保虚拟主机正确路由
-            conn.setRequestProperty("Host", uri.getHost());
             conn.setRequestMethod("GET");
             conn.setRequestProperty("User-Agent", "Mozilla/5.0 (compatible; ZjklBot/1.0)");
             conn.setRequestProperty("Accept", "text/html,application/xhtml+xml");
@@ -125,6 +111,7 @@ public class ImageUrlFetcher {
             conn.setInstanceFollowRedirects(false);
 
             int responseCode = conn.getResponseCode();
+            RemoteUrlValidator.validatePublicHost(uri.getHost());
             if (responseCode >= 300 && responseCode < 400) {
                 log.debug("ImageUrlFetcher 重定向跳过: urlLength={}", urlStr != null ? urlStr.length() : 0);
                 return null;
@@ -177,25 +164,6 @@ public class ImageUrlFetcher {
         }
     }
 
-    private void validateRemoteUrl(URI uri) throws Exception {
-        String scheme = uri.getScheme();
-        if (scheme == null || (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))) {
-            throw new IllegalArgumentException("unsupported scheme");
-        }
-
-        String host = uri.getHost();
-        if (host == null || host.isBlank()) {
-            throw new IllegalArgumentException("missing host");
-        }
-
-        InetAddress[] addresses = InetAddress.getAllByName(host);
-        for (InetAddress address : addresses) {
-            if (isLocalOrPrivateAddress(address)) {
-                throw new IllegalArgumentException("local/private address blocked");
-            }
-        }
-    }
-
     /**
      * Validate an extracted OG:image URL for safe scheme and non-private host.
      * Returns the URL if valid, null otherwise.
@@ -203,25 +171,10 @@ public class ImageUrlFetcher {
     private String validateOgImageUrl(String ogUrl) {
         if (ogUrl == null || ogUrl.isBlank()) return null;
         try {
-            URI uri = new URI(ogUrl);
-            validateRemoteUrl(uri);
-            return ogUrl;
+            return RemoteUrlValidator.requirePublicHttpUrl(ogUrl, false).toString();
         } catch (Exception e) {
             log.debug("ImageUrlFetcher OG:image URL validation failed: {}", e.getMessage());
             return null;
         }
-    }
-
-    private boolean isLocalOrPrivateAddress(InetAddress address) {
-        if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress() || address.isSiteLocalAddress()) {
-            return true;
-        }
-
-        if (address instanceof Inet6Address) {
-            byte[] bytes = address.getAddress();
-            return bytes.length == 16 && (bytes[0] & (byte) 0xFE) == (byte) 0xFC;
-        }
-
-        return false;
     }
 }

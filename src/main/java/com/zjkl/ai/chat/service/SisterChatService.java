@@ -6,6 +6,7 @@ import com.zjkl.ai.image.service.ImageDescriptionService;
 import com.zjkl.common.constant.PromptConstants;
 import com.zjkl.common.ErrorCode;
 import com.zjkl.common.exception.BusinessException;
+import com.zjkl.common.util.RemoteUrlValidator;
 import com.zjkl.memory.service.PromptCacheService;
 import com.zjkl.memory.service.GraphSnapshotService;
 import com.zjkl.memory.service.SummaryMemoryService;
@@ -23,7 +24,11 @@ import dev.langchain4j.memory.chat.ChatMemoryProvider;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Sinks;
@@ -34,7 +39,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.regex.Pattern;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 聊天服务
@@ -54,7 +60,9 @@ public class SisterChatService {
     private final GraphSnapshotService graphSnapshotService;
     private final GraphQueryService graphQueryService;
     private final RagRouter ragRouter;
-    private final java.util.concurrent.Executor asyncExecutor;
+    private final Executor llmTaskExecutor;
+    private final Executor milvusTaskExecutor;
+    private final MeterRegistry meterRegistry;
 
     public SisterChatService(QwenStreamingChatModel qwenStreamingChatModel,
                              ChatMemoryProvider chatMemoryProvider,
@@ -64,10 +72,12 @@ public class SisterChatService {
                              ImageDescriptionService imageDescriptionService,
                              UserProfileService userProfileService,
                              SummaryMemoryService summaryMemoryService,
-                             GraphSnapshotService graphSnapshotService,
-                             GraphQueryService graphQueryService,
-                             RagRouter ragRouter,
-                             java.util.concurrent.Executor asyncExecutor) {
+                              GraphSnapshotService graphSnapshotService,
+                              GraphQueryService graphQueryService,
+                               RagRouter ragRouter,
+                               @Qualifier("llmTaskExecutor") Executor llmTaskExecutor,
+                               @Qualifier("milvusTaskExecutor") Executor milvusTaskExecutor,
+                               MeterRegistry meterRegistry) {
         this.qwenStreamingChatModel = qwenStreamingChatModel;
         this.chatMemoryProvider = chatMemoryProvider;
         this.emotionService = emotionService;
@@ -79,7 +89,9 @@ public class SisterChatService {
         this.graphSnapshotService = graphSnapshotService;
         this.graphQueryService = graphQueryService;
         this.ragRouter = ragRouter;
-        this.asyncExecutor = asyncExecutor;
+        this.llmTaskExecutor = llmTaskExecutor;
+        this.milvusTaskExecutor = milvusTaskExecutor;
+        this.meterRegistry = meterRegistry;
     }
 
     private static final String SYSTEM_PROMPT_KEY = PromptConstants.CHARACTER_SYSTEM_PROMPT;
@@ -144,6 +156,9 @@ public class SisterChatService {
         String memoryBlock = "";
         // M30: 提前加载 chatMemory，避免后续 buildMessages 重复加载
         var chatMemory = chatMemoryProvider.get(memoryId);
+        RagTrace ragTrace = new RagTrace();
+        long ragStartNanos = System.nanoTime();
+        String ragOutcome = "success";
         try {
             java.util.List<String> recentMessages = new java.util.ArrayList<>();
             if (chatMemory != null) {
@@ -158,7 +173,13 @@ public class SisterChatService {
                     }
                 }
             }
+            ragTrace.recentMessages = recentMessages.size();
             RouterResult route = ragRouter.analyzeQuery(userInput, recentMessages);
+            ragTrace.routeMemory = route.needMemorySearch();
+            ragTrace.routeGraph = route.needGraphSearch();
+            ragTrace.primarySource = normalizePrimarySource(route.primarySource());
+            ragTrace.hasFilters = route.hasFilters();
+            recordRouteMetric(ragTrace);
 
             // 双路 RAG 并行执行（共享 asyncExecutor），单路时仅执行对应路
             // M4: 使用注入的共享 executor，避免每次请求创建 ExecutorService
@@ -167,7 +188,7 @@ public class SisterChatService {
                 final CompletableFuture<MemoryBlockResult> memoryFuture = route.needMemorySearch()
                     ? CompletableFuture.supplyAsync(
                         () -> summaryMemoryService.buildMemoryBlockWithScore(memoryId, userInput, route.toFilters()),
-                        asyncExecutor)
+                        milvusTaskExecutor)
                     : CompletableFuture.completedFuture(MemoryBlockResult.empty());
 
                 // Graph RAG 异步执行（snapshot 从 Redis 取，graphBlock 需要 LLM 调用）
@@ -175,9 +196,9 @@ public class SisterChatService {
                 final CompletableFuture<GraphResult> graphFuture;
                 if (route.needGraphSearch()) {
                     snapshotFuture = CompletableFuture.supplyAsync(
-                        () -> graphSnapshotService.getSnapshot(memoryId), asyncExecutor);
+                        () -> graphSnapshotService.getSnapshot(memoryId), milvusTaskExecutor);
                     graphFuture = CompletableFuture.supplyAsync(
-                        () -> graphQueryService.buildGraphBlock(memoryId, userInput), asyncExecutor);
+                        () -> graphQueryService.buildGraphBlock(memoryId, userInput), llmTaskExecutor);
                 } else {
                     snapshotFuture = CompletableFuture.completedFuture("");
                     graphFuture = CompletableFuture.completedFuture(GraphResult.empty());
@@ -191,25 +212,39 @@ public class SisterChatService {
                     memoryFuture.cancel(true);
                     snapshotFuture.cancel(true);
                     graphFuture.cancel(true);
+                    ragTrace.timeout = true;
+                    ragOutcome = "timeout";
                     log.warn("RAG pipeline 超时（15s），取消未完成的任务", te);
                 } catch (Exception e) {
+                    ragTrace.failure = true;
+                    ragOutcome = "failure";
                     log.warn("RAG pipeline 异常，使用已完成的结果继续", e);
                 }
 
-                MemoryBlockResult memResult = memoryFuture.isDone() ? memoryFuture.get() : MemoryBlockResult.empty();
-                String graphSnapshot = snapshotFuture.isDone() ? snapshotFuture.get() : "";
-                GraphResult graphResult = graphFuture.isDone() ? graphFuture.get() : GraphResult.empty();
+                MemoryBlockResult memResult = safeFutureResult(memoryFuture, MemoryBlockResult.empty(), "memory");
+                String graphSnapshot = safeFutureResult(snapshotFuture, "", "graphSnapshot");
+                GraphResult graphResult = safeFutureResult(graphFuture, GraphResult.empty(), "graph");
+                ragTrace.memoryHit = !isBlank(memResult.block());
+                ragTrace.graphHit = !isBlank(graphResult.block());
+                ragTrace.snapshotUsed = !isBlank(graphSnapshot);
+                ragTrace.memoryScore = memResult.topScore();
+                ragTrace.graphScore = graphResult.topScore();
 
                 // 跨路融合排序 + 去重
                 memoryBlock = mergeRagResults(route.primarySource(),
                         graphSnapshot, graphResult, memResult);
+                ragTrace.injectedChars = memoryBlock.length();
 
                 log.debug("RAG 融合结果：userId={}, memoryScore={}, graphScore={}, snapshot={}, memoryBlock={}",
                         memoryId, memResult.topScore(), graphResult.topScore(),
                         !graphSnapshot.isBlank(), !memoryBlock.isBlank());
             }
         } catch (Exception e) {
+            ragTrace.failure = true;
+            ragOutcome = "failure";
             log.debug("RAG 路由/记忆搜索失败，跳过记忆注入: {}", e.getMessage());
+        } finally {
+            recordRagTrace(ragTrace, ragOutcome, System.nanoTime() - ragStartNanos);
         }
 
         return chat(promptText, memoryId, imageUrl, moodDesc, current, userName, userHobbies, userBio, memoryBlock, chatMemory);
@@ -253,7 +288,7 @@ public class SisterChatService {
             imageDescFuture = CompletableFuture.supplyAsync(() -> {
                 log.debug("开始 VLM 理解图片: {}", imageUrl);
                 return imageDescriptionService.describe(imageUrl);
-            }, asyncExecutor);
+            }, llmTaskExecutor);
             log.debug("已启动异步 VLM 任务，预计 1-3 秒完成");
         } else {
             imageDescFuture = null;
@@ -460,10 +495,95 @@ public class SisterChatService {
         return s == null || s.isBlank();
     }
 
+    private <T> T safeFutureResult(CompletableFuture<T> future, T fallback, String name) {
+        if (future == null || !future.isDone() || future.isCancelled()) {
+            return fallback;
+        }
+        try {
+            return future.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return fallback;
+        } catch (Exception e) {
+            log.debug("RAG {} 结果不可用，使用降级值: {}", name, e.getMessage());
+            return fallback;
+        }
+    }
+
     private String appendTwo(String first, String second) {
         if (isBlank(first)) return isBlank(second) ? "" : second.trim();
         if (isBlank(second)) return first.trim();
         return first.trim() + "\n\n" + second.trim();
+    }
+
+    private void recordRouteMetric(RagTrace trace) {
+        meterRegistry.counter("rag.route.total",
+                "primary", trace.primarySource,
+                "memory", Boolean.toString(trace.routeMemory),
+                "graph", Boolean.toString(trace.routeGraph),
+                "filters", Boolean.toString(trace.hasFilters)
+        ).increment();
+    }
+
+    private void recordRagTrace(RagTrace trace, String outcome, long durationNanos) {
+        Timer.builder("rag.pipeline.duration")
+                .tag("outcome", outcome)
+                .tag("primary", trace.primarySource)
+                .register(meterRegistry)
+                .record(durationNanos, TimeUnit.NANOSECONDS);
+        meterRegistry.counter("rag.pipeline.total",
+                "outcome", outcome,
+                "primary", trace.primarySource
+        ).increment();
+        if (trace.timeout) {
+            meterRegistry.counter("rag.pipeline.timeout", "primary", trace.primarySource).increment();
+        }
+        if (trace.failure) {
+            meterRegistry.counter("rag.pipeline.failure", "primary", trace.primarySource).increment();
+        }
+        DistributionSummary.builder("rag.context.injected.chars")
+                .tag("outcome", outcome)
+                .tag("primary", trace.primarySource)
+                .register(meterRegistry)
+                .record(trace.injectedChars);
+
+        log.info("RAG_TRACE outcome={} primary={} routeMemory={} routeGraph={} filters={} recentMessages={} " +
+                        "memoryHit={} graphHit={} snapshotUsed={} memoryScore={} graphScore={} injectedChars={} timeout={} failure={} durationMs={}",
+                outcome, trace.primarySource, trace.routeMemory, trace.routeGraph, trace.hasFilters, trace.recentMessages,
+                trace.memoryHit, trace.graphHit, trace.snapshotUsed,
+                formatMetric(trace.memoryScore), formatMetric(trace.graphScore), trace.injectedChars,
+                trace.timeout, trace.failure, TimeUnit.NANOSECONDS.toMillis(durationNanos));
+    }
+
+    private String normalizePrimarySource(String primarySource) {
+        if (primarySource == null || primarySource.isBlank()) {
+            return "none";
+        }
+        String normalized = primarySource.trim().toLowerCase(java.util.Locale.ROOT);
+        return switch (normalized) {
+            case "memory", "graph", "both" -> normalized;
+            default -> "other";
+        };
+    }
+
+    private String formatMetric(double value) {
+        return String.format(java.util.Locale.ROOT, "%.4f", value);
+    }
+
+    private static final class RagTrace {
+        private boolean routeMemory;
+        private boolean routeGraph;
+        private String primarySource = "none";
+        private boolean hasFilters;
+        private int recentMessages;
+        private boolean memoryHit;
+        private boolean graphHit;
+        private boolean snapshotUsed;
+        private double memoryScore;
+        private double graphScore;
+        private int injectedChars;
+        private boolean timeout;
+        private boolean failure;
     }
 
     /**
@@ -471,17 +591,12 @@ public class SisterChatService {
      */
     private void validateImageUrl(String url) {
         if (url == null || url.isBlank()) return;
-        if (!url.startsWith("https://")) {
-            throw new BusinessException(ErrorCode.BAD_REQUEST, "图片URL必须以https开头");
-        }
-        if (!IMAGE_URL_PATTERN.matcher(url).matches()) {
+        try {
+            RemoteUrlValidator.requirePublicHttpUrl(url, true);
+        } catch (IllegalArgumentException e) {
             throw new BusinessException(ErrorCode.FORBIDDEN, "不允许访问内网地址");
         }
     }
-
-    private static final Pattern IMAGE_URL_PATTERN = Pattern.compile(
-        "^https://(?!localhost|127\\.0\\.0\\.1|0\\.0\\.0\\.0|169\\.254\\.|10\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.|192\\.168\\.|\\[::|\\[0:).+"
-    );
 
     private String wrapSnapshot(String graphSnapshot) {
         if (graphSnapshot == null || graphSnapshot.isBlank()) {

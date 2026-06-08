@@ -44,8 +44,9 @@ const isEmailValid = computed(() => {
 const triggerError = (field, message) => {
   errorField.value = field;
   errorMessage.value = message;
+  successMessage.value = ''; // Clear stale successMessage to prevent it showing after error fades
   if (_errorTimer) clearTimeout(_errorTimer);
-  _errorTimer = setTimeout(() => { errorField.value = ''; _errorTimer = null; }, 400);
+  _errorTimer = setTimeout(() => { errorMessage.value = ''; errorField.value = ''; _errorTimer = null; }, 400);
 };
 
 const clearError = () => {
@@ -285,7 +286,7 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(15px);
+  backdrop-filter: blur(8px);
   z-index: 0;
 }
 
@@ -294,7 +295,7 @@ onBeforeUnmount(() => {
    ========================================== */
 .login-card {
   background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(25px);
+  backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 12px;
   padding: 50px 40px;
@@ -341,7 +342,7 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid rgba(255, 255, 255, 0.3);
   background: transparent;
   color: #fff;
-  transition: all 0.3s;
+  transition: border-bottom-color 0.3s ease, color 0.3s ease;
 }
 
 .wave-group .input:focus { outline: none; }
@@ -360,7 +361,7 @@ onBeforeUnmount(() => {
 }
 
 .wave-group .label-char {
-  transition: 0.2s cubic-bezier(0.4, 0, 0.2, 1) all;
+  transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1), font-size 0.2s cubic-bezier(0.4, 0, 0.2, 1), color 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   transition-delay: calc(var(--index) * .03s);
 }
 
@@ -388,7 +389,7 @@ onBeforeUnmount(() => {
   bottom: 0px;
   position: absolute;
   background: #fff;
-  transition: 0.3s ease all;
+  transition: width 0.3s ease;
 }
 
 .wave-group .bar:before { left: 50%; }
@@ -416,7 +417,7 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   font-size: 12px;
   cursor: pointer;
-  transition: all 0.3s;
+  transition: background-color 0.3s ease, border-color 0.3s ease, opacity 0.3s ease;
   white-space: nowrap;
   margin-bottom: 25px; /* 对齐 wave input 的底部边缘 */
   min-width: 80px;
@@ -463,8 +464,8 @@ onBeforeUnmount(() => {
   font-size: 14px;
   letter-spacing: 2px;
   cursor: pointer;
-  transition: all 0.3s;
-  backdrop-filter: blur(5px);
+  transition: background-color 0.3s ease, box-shadow 0.3s ease, opacity 0.3s ease;
+  backdrop-filter: blur(3px);
 }
 
 .login-btn-primary:hover:not(:disabled) {
@@ -476,10 +477,10 @@ onBeforeUnmount(() => {
 /* 页脚 */
 .register-footer { text-align: center; margin-top: 24px; font-size: 12px; }
 .footer-text { color: rgba(255, 255, 255, 0.5); }
-.link { color: #fff; text-decoration: none; margin-left: 6px; border-bottom: 1px solid rgba(255,255,255,0.3); padding-bottom: 1px; transition: 0.3s;}
+.link { color: #fff; text-decoration: none; margin-left: 6px; border-bottom: 1px solid rgba(255,255,255,0.3); padding-bottom: 1px; transition: border-color 0.3s ease;}
 .link:hover { border-color: #fff; }
 
-.fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
+.fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease, transform 0.3s ease; }
 .fade-enter-from, .fade-leave-to { opacity: 0; transform: translateY(-5px); }
 
 @media (max-width: 480px) {

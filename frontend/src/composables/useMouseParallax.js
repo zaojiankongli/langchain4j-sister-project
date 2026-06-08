@@ -1,4 +1,4 @@
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount } from 'vue'
 
 /**
  * 鼠标位置追踪 composable
@@ -11,15 +11,18 @@ import { ref, onMounted, onUnmounted } from 'vue'
 export function useMouseParallax() {
   const mouseX = ref(window.innerWidth / 2)
   const mouseY = ref(window.innerHeight / 2)
-  const ticking = ref(false)
+  let ticking = false
 
   const updateMouse = (e) => {
-    if (ticking.value) return
-    ticking.value = true
+    // Extract coordinates immediately before the event object is reused
+    const clientX = e.clientX
+    const clientY = e.clientY
+    if (ticking) return
+    ticking = true
     requestAnimationFrame(() => {
-      mouseX.value = e.clientX
-      mouseY.value = e.clientY
-      ticking.value = false
+      mouseX.value = clientX
+      mouseY.value = clientY
+      ticking = false
     })
   }
 
@@ -27,7 +30,7 @@ export function useMouseParallax() {
     window.addEventListener('mousemove', updateMouse, { passive: true })
   })
 
-  onUnmounted(() => {
+  onBeforeUnmount(() => {
     window.removeEventListener('mousemove', updateMouse)
   })
 

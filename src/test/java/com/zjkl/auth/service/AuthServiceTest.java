@@ -1,13 +1,19 @@
 package com.zjkl.auth.service;
 
+import com.zjkl.auth.dto.BindEmailRequest;
 import com.zjkl.auth.dto.LoginRequest;
 import com.zjkl.auth.exception.UnauthorizedException;
 import com.zjkl.common.config.properties.AuthProperties;
+import com.zjkl.common.config.properties.WechatProperties;
+import com.zjkl.common.exception.BusinessException;
 import com.zjkl.common.util.HashUtil;
 import com.zjkl.common.util.JwtUtil;
 import com.zjkl.user.domain.User;
+import com.zjkl.user.domain.UserWechatBinding;
 import com.zjkl.user.mapper.UserMapper;
+import com.zjkl.user.mapper.UserWechatBindingMapper;
 import com.zjkl.user.service.UserProfileManageService;
+import com.zjkl.user.service.UserProfileService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -19,6 +25,7 @@ import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.core.env.Environment;
+import org.springframework.web.client.RestClient;
 
 import java.util.Map;
 import java.util.List;
@@ -33,6 +40,9 @@ class AuthServiceTest {
 
     @Mock
     private UserMapper userMapper;
+
+    @Mock
+    private UserWechatBindingMapper userWechatBindingMapper;
 
     @Mock
     private JwtUtil jwtUtil;
@@ -50,7 +60,16 @@ class AuthServiceTest {
     private UserProfileManageService userProfileManageService;
 
     @Mock
+    private UserProfileService userProfileService;
+
+    @Mock
     private AuthProperties authProperties;
+
+    @Mock
+    private WechatProperties wechatProperties;
+
+    @Mock
+    private RestClient restClient;
 
     @Mock
     private ValueOperations<String, String> valueOperations;
@@ -68,7 +87,19 @@ class AuthServiceTest {
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         lenient().when(authProperties.getRefreshTokenExpiration()).thenReturn(604800000L); // 7 days in ms
         // Manually construct after env mock is set up (env.getProperty called in constructor)
-        authService = new AuthService(userMapper, jwtUtil, redisTemplate, mailSender, env, userProfileManageService, authProperties);
+        authService = new AuthService(
+                userMapper,
+                userWechatBindingMapper,
+                jwtUtil,
+                redisTemplate,
+                mailSender,
+                env,
+                userProfileManageService,
+                userProfileService,
+                authProperties,
+                wechatProperties,
+                restClient
+        );
     }
 
     @Test
@@ -173,6 +204,57 @@ class AuthServiceTest {
             authService.login(request);
         });
         assertEquals("验证码已过期，请重新获取", exception.getMessage());
+    }
+
+    @Test
+    void bindEmailWithNewEmailCreatesUserAndWechatBinding() {
+        BindEmailRequest request = new BindEmailRequest("bind-token", TEST_EMAIL, TEST_CODE);
+        User createdUser = new User();
+        createdUser.setId(TEST_USER_ID);
+        createdUser.setEmail(TEST_EMAIL);
+        createdUser.setUsername(TEST_USERNAME);
+        createdUser.setAiType(1);
+
+        when(valueOperations.get("auth:wx:bind:bind-token")).thenReturn("wx-appid|wx-openid|wx-unionid");
+        when(redisTemplate.execute(any(), anyList(), eq(TEST_CODE))).thenReturn(1L);
+        when(userMapper.findByEmail(TEST_EMAIL)).thenReturn(null);
+        when(userProfileManageService.createUser(TEST_EMAIL, "test")).thenReturn(createdUser);
+        when(jwtUtil.generateAccessToken(createdUser)).thenReturn("access-token");
+        when(jwtUtil.generateRefreshToken(createdUser)).thenReturn("refresh-token");
+        when(userProfileManageService.buildUserInfo(createdUser)).thenReturn(Map.of("id", TEST_USER_ID));
+
+        Map<String, Object> result = authService.bindEmail(request);
+
+        assertEquals("LOGGED_IN", result.get("status"));
+        assertEquals("access-token", result.get("accessToken"));
+        assertTrue((Boolean) result.get("isNewUser"));
+
+        ArgumentCaptor<UserWechatBinding> bindingCaptor = ArgumentCaptor.forClass(UserWechatBinding.class);
+        verify(userWechatBindingMapper).insert(bindingCaptor.capture());
+        UserWechatBinding binding = bindingCaptor.getValue();
+        assertEquals(TEST_USER_ID, binding.getUserId());
+        assertEquals("wx-appid", binding.getWechatAppid());
+        assertEquals("wx-openid", binding.getOpenid());
+        assertEquals("wx-unionid", binding.getUnionid());
+        assertEquals("bound", binding.getBindStatus());
+        verify(redisTemplate).delete("auth:wx:bind:bind-token");
+    }
+
+    @Test
+    void bindEmailShouldRejectWhenWechatAlreadyBound() {
+        BindEmailRequest request = new BindEmailRequest("bind-token", TEST_EMAIL, TEST_CODE);
+        UserWechatBinding existingBinding = new UserWechatBinding();
+        existingBinding.setUserId("other-user");
+
+        when(valueOperations.get("auth:wx:bind:bind-token")).thenReturn("wx-appid|wx-openid|wx-unionid");
+        when(redisTemplate.execute(any(), anyList(), eq(TEST_CODE))).thenReturn(1L);
+        when(userWechatBindingMapper.findBoundByAppidAndOpenid("wx-appid", "wx-openid")).thenReturn(existingBinding);
+
+        BusinessException exception = assertThrows(BusinessException.class, () -> authService.bindEmail(request));
+
+        assertEquals(409, exception.getCode());
+        assertEquals("该微信已绑定其他账号", exception.getMessage());
+        verify(userWechatBindingMapper, never()).insert(any());
     }
 
     @Test

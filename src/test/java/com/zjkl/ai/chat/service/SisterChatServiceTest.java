@@ -8,7 +8,6 @@ import com.zjkl.memory.service.GraphSnapshotService;
 import com.zjkl.memory.service.PromptCacheService;
 import com.zjkl.memory.service.SummaryMemoryService;
 import com.zjkl.memory.service.SummaryMemoryService.MemoryBlockResult;
-import com.zjkl.user.domain.vo.UserProfileVO;
 import com.zjkl.user.service.UserProfileService;
 import dev.langchain4j.community.model.dashscope.QwenStreamingChatModel;
 import dev.langchain4j.data.message.ChatMessage;
@@ -17,6 +16,7 @@ import dev.langchain4j.memory.chat.ChatMemoryProvider;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -46,7 +46,8 @@ class SisterChatServiceTest {
     private GraphSnapshotService graphSnapshotService;
     private GraphQueryService graphQueryService;
     private RagRouter ragRouter;
-    private Executor asyncExecutor;
+    private Executor llmTaskExecutor;
+    private Executor milvusTaskExecutor;
     private SisterChatService service;
 
     @BeforeEach
@@ -62,7 +63,8 @@ class SisterChatServiceTest {
         graphSnapshotService = mock(GraphSnapshotService.class);
         graphQueryService = mock(GraphQueryService.class);
         ragRouter = mock(RagRouter.class);
-        asyncExecutor = Runnable::run; // synchronous executor for testing
+        llmTaskExecutor = Runnable::run; // synchronous executor for testing
+        milvusTaskExecutor = Runnable::run; // synchronous executor for testing
 
         service = new SisterChatService(
                 qwenStreamingChatModel,
@@ -76,18 +78,16 @@ class SisterChatServiceTest {
                 graphSnapshotService,
                 graphQueryService,
                 ragRouter,
-                asyncExecutor
+                llmTaskExecutor,
+                milvusTaskExecutor,
+                new SimpleMeterRegistry()
         );
 
         when(emotionService.getUserEmotion(anyString())).thenReturn(new EmotionalState(0.1, 0.2, 0.3));
         when(emotionService.getUserMoodDescription(anyString())).thenReturn("平静");
         when(promptTemplateService.render(anyString(), any())).thenReturn("user prompt");
         when(promptCacheService.getTemplate(anyString())).thenReturn("system prompt");
-        UserProfileVO profile = new UserProfileVO();
-        profile.setUsername("哥哥");
-        profile.setHobbies("摄影");
-        profile.setUserProfile("测试用户");
-        when(userProfileService.getProfile(anyString())).thenReturn(profile);
+        when(userProfileService.getProfileForChat(anyString())).thenReturn(new String[]{"哥哥", "摄影", "测试用户"});
         when(chatMemoryProvider.get(anyString())).thenReturn(null);
         doAnswer(invocation -> {
             StreamingChatResponseHandler handler = invocation.getArgument(1);

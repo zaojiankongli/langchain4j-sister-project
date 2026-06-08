@@ -47,7 +47,8 @@
                 <p class="mail-excerpt">{{ mail.excerpt }}</p>
               </div>
 
-              <div v-if="mailList.length === 0" class="empty-tip">暂无任何信件</div>
+              <div v-if="mailLoading && mailList.length === 0" class="empty-tip">加载中...</div>
+              <div v-else-if="mailList.length === 0" class="empty-tip">暂无任何信件</div>
             </div>
           </div>
         </div>
@@ -68,6 +69,7 @@ onBeforeUnmount(() => { _isMounted = false })
 // --- 状态定义 ---
 const isOverlayOpen = ref(false)
 const mailList = ref([])
+const mailLoading = ref(false)
 const uiStore = useUiStore()
 
 // --- 计算属性 ---
@@ -86,6 +88,7 @@ const latestMessage = computed(() => {
 
 // 1. 初始化获取邮件列表（后端从 UserContext 获取当前用户）
 const fetchMails = async () => {
+  mailLoading.value = true
   try {
     const res = await request.get(API.MAIL_LIST)
     if (!_isMounted) return
@@ -96,6 +99,8 @@ const fetchMails = async () => {
     if (!_isMounted) return
     console.error("邮件加载失败", error)
     uiStore.error('邮件加载失败，请稍后重试')
+  } finally {
+    if (_isMounted) mailLoading.value = false
   }
 }
 
@@ -210,7 +215,7 @@ onMounted(() => {
   position: fixed;
   inset: 0;
   background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(30px);
+  backdrop-filter: blur(12px);
   z-index: 2000;
   padding: 80px 120px;
   display: flex;
@@ -247,7 +252,7 @@ onMounted(() => {
   font-size: 12px;
   cursor: pointer;
   font-weight: bold;
-  transition: all 0.2s;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .batch-read-btn:hover {
@@ -277,7 +282,7 @@ onMounted(() => {
   padding: 30px;
   border: 1px solid rgba(0,0,0,0.1);
   background: #fff;
-  transition: all 0.3s;
+  transition: opacity 0.3s ease, background-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
   cursor: pointer;
   position: relative;
   overflow: hidden;
@@ -323,11 +328,10 @@ onMounted(() => {
 
 /* 动画过渡 */
 .fade-blur-enter-active, .fade-blur-leave-active {
-  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1), filter 0.5s cubic-bezier(0.16, 1, 0.3, 1), transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 .fade-blur-enter-from, .fade-blur-leave-to {
   opacity: 0;
-  filter: blur(20px);
   transform: scale(1.02);
 }
 </style>

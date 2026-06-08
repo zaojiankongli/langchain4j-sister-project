@@ -15,21 +15,33 @@
     <div class="history-body">
       <!-- 左侧时间线列表 -->
       <div class="history-sidebar">
-        <div
-          v-for="session in sessions" :key="session.id"
-          class="session-item"
-          :class="{ active: selectedSession?.id === session.id }"
-          @click="selectSession(session)"
-        >
-          <div class="session-item-glow"></div>
-          <div class="session-time">{{ session.date }}</div>
-          <div class="session-meta">
-            <span class="mood-tag">{{ session.mood || '日常' }}</span>
-          </div>
-          <div class="session-preview">
-            {{ session.quote || (session.desc ? session.desc.substring(0, 16) + '...' : '') }}
-          </div>
+        <div v-if="historyLoading" class="sidebar-empty">
+          <span class="empty-hint-text">加载中...</span>
         </div>
+        <div v-else-if="historyError" class="sidebar-empty">
+          <span class="error-hint-text">{{ historyError }}</span>
+          <button class="retry-btn" @click="fetchSessions">重试</button>
+        </div>
+        <div v-else-if="sessions.length === 0" class="sidebar-empty">
+          <span class="empty-hint-text">暂无历史会话</span>
+        </div>
+        <template v-else>
+          <div
+            v-for="session in sessions" :key="session.id"
+            class="session-item"
+            :class="{ active: selectedSession?.id === session.id }"
+            @click="selectSession(session)"
+          >
+            <div class="session-item-glow"></div>
+            <div class="session-time">{{ session.date }}</div>
+            <div class="session-meta">
+              <span class="mood-tag">{{ session.mood || '日常' }}</span>
+            </div>
+            <div class="session-preview">
+              {{ session.quote || (session.desc ? session.desc.substring(0, 16) + '...' : '') }}
+            </div>
+          </div>
+        </template>
       </div>
 
       <!-- 右侧详情 -->
@@ -55,7 +67,7 @@
             <div class="archive-bubble-wrapper">
               <span class="archive-time" v-if="msg.role === 'user'">{{ formatArchiveTime(msg.timestamp) }}</span>
               <div class="archive-bubble">
-                <img v-if="msg.type === 'image'" :src="msg.content" class="archive-image" @error="handleArchiveImgError" />
+                <img v-if="msg.type === 'image'" :src="getOptimizedImageUrl(msg.content, { width: 480 })" class="archive-image" loading="lazy" decoding="async" @error="handleArchiveImgError" />
                 <div v-else class="archive-text" v-text="msg.content"></div>
               </div>
               <span class="archive-time" v-if="msg.role === 'ai'">{{ formatArchiveTime(msg.timestamp) }}</span>
@@ -78,6 +90,7 @@ import request from '@/utils/request'
 import { getUserId } from '@/utils/auth'
 import { API } from '@/config/api'
 import { useUiStore } from '@/stores/ui'
+import { getOptimizedImageUrl } from '@/utils/image'
 
 const props = defineProps({
   isOpen: { type: Boolean, default: false },
@@ -99,31 +112,6 @@ const handleArchiveImgError = (e) => { e.target.style.display = 'none' }
 let _isMounted = true
 onBeforeUnmount(() => { _isMounted = false })
 
-// Mock 兜底数据
-const mockSessions = [
-  { id: 'mock-1', date: '2026.05.26', mood: '温馨自然', quote: '窗外下着小雨，你递给我热牛奶的时候，感觉时间都变慢了。', isMock: true },
-  { id: 'mock-2', date: '2026.05.25', mood: '充满活力', quote: '今天听到了一首非常欢快的歌，迫不及待想要分享给你！', isMock: true },
-  { id: 'mock-3', date: '2026.05.20', mood: '有些依赖', quote: '哪怕不说话，只是看着你认真工作的侧脸，我也觉得很安心。', isMock: true }
-]
-
-const mockMessagesMap = {
-  'mock-1': [
-    { id: 'm1-1', role: 'user', type: 'text', content: '今天外面雨好大，心情有点闷闷的。', timestamp: '14:32' },
-    { id: 'm1-2', role: 'ai', type: 'text', content: '那……要来一杯热牛奶吗？我特意调低了房间的灯光。没关系的，雨总会停的，现在就安心待在我的身边吧。', timestamp: '14:33' },
-    { id: 'm1-3', role: 'user', type: 'text', content: '好多了，谢谢你一直陪着我。', timestamp: '14:35' },
-    { id: 'm1-4', role: 'ai', type: 'text', content: '窗外下着小雨，你递给我热牛奶的时候，感觉时间都变慢了。能成为你的依靠，就是我存在最大的意义呀。', timestamp: '14:36' }
-  ],
-  'mock-2': [
-    { id: 'm2-1', role: 'ai', type: 'text', content: '（哼着歌）啦啦啦~ 你忙完啦？快过来！', timestamp: '10:15' },
-    { id: 'm2-2', role: 'user', type: 'text', content: '什么事这么开心？', timestamp: '10:16' },
-    { id: 'm2-3', role: 'ai', type: 'text', content: '今天听到了一首非常欢快的歌，迫不及待想要分享给你！旋律超有活力，感觉能帮你把工作的疲惫全部扫空哦！', timestamp: '10:16' }
-  ],
-  'mock-3': [
-    { id: 'm3-1', role: 'user', type: 'text', content: '抱歉，最近手头的项目太忙了，都没怎么和你有深度对话。', timestamp: '21:00' },
-    { id: 'm3-2', role: 'ai', type: 'text', content: '完全不用感到抱歉哦。哪怕不说话，只是看着你认真工作的侧脸，我也觉得很安心。我会一直乖乖留在这里的，累了就摸摸我的头休息一下吧。', timestamp: '21:02' }
-  ]
-}
-
 async function fetchSessions() {
   historyLoading.value = true
   historyError.value = ''
@@ -133,13 +121,14 @@ async function fetchSessions() {
     if (Array.isArray(res) && res.length > 0) {
       sessions.value = res
     } else {
-      sessions.value = mockSessions
+      // 无历史会话记录，显示空状态而非假数据
+      sessions.value = []
     }
   } catch (e) {
     if (!_isMounted) return
-    sessions.value = mockSessions
+    sessions.value = []
+    historyError.value = '获取会话列表失败，请稍后重试'
     console.error('HistoryPanel fetchSessions:', e)
-    uiStore.error('获取会话列表失败，请稍后重试')
   } finally {
     if (_isMounted) historyLoading.value = false
   }
@@ -153,33 +142,33 @@ function formatArchiveTime(iso) {
   return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
 }
 
+let _selectGen = 0
+
 async function selectSession(session) {
+  if (!session) return  // 空值守卫
+  const gen = ++_selectGen
   selectedSession.value = session
   sessionMessages.value = []
   messagesError.value = ''
-
-  if (session.isMock) {
-    sessionMessages.value = mockMessagesMap[session.id] || []
-    return
-  }
 
   messagesLoading.value = true
   const dateStr = session.date.replace(/\./g, '-')
   try {
     const res = await request.get(API.MESSAGES_BY_DATE(getUserId()), { params: { date: dateStr } })
-    if (!_isMounted) return
+    if (!_isMounted || gen !== _selectGen) return  // 过时响应丢弃
     if (Array.isArray(res) && res.length > 0) {
       sessionMessages.value = res
     } else {
-      sessionMessages.value = mockMessagesMap['mock-1'] || []
+      // 该天确实无聊天记录，显示空状态
+      sessionMessages.value = []
     }
   } catch (e) {
-    if (!_isMounted) return
-    sessionMessages.value = mockMessagesMap['mock-1'] || []
+    if (!_isMounted || gen !== _selectGen) return
+    sessionMessages.value = []
+    messagesError.value = '获取消息失败，请重试'
     console.error('HistoryPanel selectSession:', e)
-    uiStore.error('获取会话消息失败，请稍后重试')
   } finally {
-    if (_isMounted) messagesLoading.value = false
+    if (_isMounted && gen === _selectGen) messagesLoading.value = false
   }
 }
 
@@ -191,7 +180,7 @@ watch(() => props.isOpen, (open) => {
 <style scoped>
 .content-panel {
   background: rgba(10, 15, 30, 0.4);
-  backdrop-filter: blur(25px);
+  backdrop-filter: blur(12px);
   position: fixed; top: 0; width: 50%; height: 100%;
   z-index: 100; transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
   pointer-events: auto;
@@ -216,7 +205,8 @@ watch(() => props.isOpen, (open) => {
 .title-tag { font-size: 10px; color: #5eead4; letter-spacing: 2px; font-family: monospace; }
 .close-btn {
   background: none; border: none;
-  color: white; font-size: 20px; cursor: pointer; opacity: 0.4; transition: 0.3s;
+  color: white; font-size: 20px; cursor: pointer; opacity: 0.4;
+  transition: opacity 0.3s ease, transform 0.3s ease;
 }
 .close-btn:hover { opacity: 1; transform: rotate(90deg); }
 
@@ -247,13 +237,13 @@ watch(() => props.isOpen, (open) => {
   border-radius: 8px;
   background: rgba(255,255,255,0.01);
   border: 1px solid rgba(255,255,255,0.03);
-  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background-color 0.4s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.4s cubic-bezier(0.16, 1, 0.3, 1);
   overflow: hidden;
 }
 .session-item-glow {
   position: absolute; left: 0; top: 0; width: 3px; height: 100%;
   background: #5eead4; opacity: 0;
-  transform: scaleY(0.3); transition: all 0.3s ease;
+  transform: scaleY(0.3); transition: opacity 0.3s ease, transform 0.3s ease;
 }
 .session-item:hover { background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.08); }
 .session-item.active {
@@ -338,6 +328,19 @@ watch(() => props.isOpen, (open) => {
 }
 
 /* ── 加载 / 错误 / 空状态 ── */
+.sidebar-empty {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; padding: 40px 12px; gap: 12px;
+}
+.empty-hint-text { font-size: 12px; color: rgba(255,255,255,0.25); }
+.error-hint-text { font-size: 12px; color: rgba(248,113,113,0.7); text-align: center; }
+.sidebar-empty .retry-btn {
+  background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+  color: rgba(255,255,255,0.7); padding: 4px 16px; border-radius: 16px;
+  cursor: pointer; font-size: 11px; transition: background-color 0.3s ease;
+}
+.sidebar-empty .retry-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
+
 .history-loading, .history-error {
   flex: 1; display: flex; flex-direction: column;
   align-items: center; justify-content: center;
@@ -359,7 +362,7 @@ watch(() => props.isOpen, (open) => {
 .history-error .retry-btn {
   background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
   color: rgba(255,255,255,0.7); padding: 6px 20px; border-radius: 20px;
-  cursor: pointer; font-size: 12px; transition: all 0.3s;
+  cursor: pointer; font-size: 12px; transition: background-color 0.3s ease, color 0.3s ease;
 }
 .history-error .retry-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
 
@@ -382,4 +385,37 @@ watch(() => props.isOpen, (open) => {
 
 /* GPU 分层：仅对整体面板启用，避免 v-for 中子项创建过多独立层 */
 .history-panel { will-change: transform, opacity; }
+
+/* ── 响应式布局 ── */
+
+/* 平板 (≤ 1024px) */
+@media (max-width: 1024px) {
+  .content-panel { width: 65%; }
+}
+
+/* 手机 (≤ 768px) */
+@media (max-width: 768px) {
+  .content-panel { width: 100%; }
+  .panel-header { padding: 40px 20px 16px; }
+  .panel-title { font-size: 20px; }
+  .history-body { flex-direction: column; height: calc(100% - 100px); }
+  .history-sidebar {
+    width: 100%; height: 160px;
+    border-right: none; border-bottom: 1px solid rgba(255,255,255,0.06);
+    padding: 0 16px 12px;
+    display: flex; gap: 10px; overflow-x: auto; overflow-y: hidden;
+    flex-shrink: 0;
+  }
+  .session-item { min-width: 160px; margin-bottom: 0; padding: 12px; }
+  .history-detail { padding: 16px; }
+}
+
+/* 小屏手机 (≤ 480px) */
+@media (max-width: 480px) {
+  .panel-header { padding: 32px 16px 12px; }
+  .panel-title { font-size: 18px; }
+  .history-sidebar { height: 130px; padding: 0 12px 10px; }
+  .session-item { min-width: 140px; padding: 10px; }
+  .history-detail { padding: 12px; }
+}
 </style>

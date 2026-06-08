@@ -61,7 +61,7 @@ public class PeekCallbackService {
      * @param imageUrl 截图的 OSS URL
      * @param peekId   peek 任务 ID（用于日志追踪）
      */
-    @Async
+    @Async("ttsTaskExecutor")
     public void handlePeekCallback(String userId, String imageUrl, String peekId) {
         log.info("开始处理 peek 回调：userId={}, peekId={}", userId, peekId);
 

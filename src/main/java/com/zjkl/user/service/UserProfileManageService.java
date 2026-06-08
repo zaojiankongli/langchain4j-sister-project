@@ -127,6 +127,7 @@ public class UserProfileManageService {
         info.put("email", user.getEmail());
         info.put("username", user.getUsername());
         info.put("avatarUrl", user.getAvatarUrl());
+        info.put("backgroundUrl", user.getBackgroundUrl());
         info.put("gender", user.getGender());
         info.put("hobbies", user.getHobbies());
         info.put("aiType", user.getAiType());

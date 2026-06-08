@@ -48,4 +48,9 @@ public interface UserProfileService {
      * 上传头像
      */
     String uploadAvatar(String userId, MultipartFile file);
+
+    /**
+     * 上传背景图
+     */
+    String uploadBackground(String userId, MultipartFile file);
 }

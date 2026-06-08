@@ -1,8 +1,9 @@
 <script setup>
 import { ref, watch, nextTick, onMounted, onBeforeUnmount, inject } from 'vue'
 import {
+  acquireConnection,
   connect,
-  disconnect,
+  releaseConnection,
   sendChat,
   setCallbacks,
   reconnectAttempts,
@@ -46,6 +47,19 @@ let streamSaveTimer = null // 流式内容节流持久化
 let fileReplyTimer = null // 图片上传自动回复
 let scrollThrottled = false // 滚动加载节流
 
+function resetSendTimeout() {
+  if (sendTimeout) clearTimeout(sendTimeout)
+  sendTimeout = setTimeout(() => {
+    if (isSending.value) {
+      isSending.value = false
+      interactionState.value = 'idle'
+      currentMessage.value = null
+      addErrorBubble('回复超时，请重试')
+      scrollToBottom()
+    }
+  }, 30000)
+}
+
 // WebSocket 连接状态
 const connectionStatus = ref('disconnected')
 const connectionText = ref('')
@@ -60,7 +74,7 @@ const {
   isSending, interactionState, currentMessage, messageListRef,
   loadFromStorage, saveToStorage, fetchTodayMessages, loadEarlierMessages,
   scrollToBottom, addImageMessage, addAiMessage, addErrorBubble,
-  completeCurrentMessage, setCurrentMessage,
+  completeCurrentMessage, setCurrentMessage, nextMsgId,
 } = useChatMessages(() => _isAlive)
 
 // ── GSAP composable ──
@@ -112,6 +126,7 @@ function handleTextMessage(message) {
 
   if (currentMessage.value && !isComplete) {
     // === 场景 1：流式追加（已有 currentMessage，未结束） ===
+    resetSendTimeout()
     currentMessage.value.content += content
     pendingLive2dText += content
     // 节流失效化：每 2s 落盘一次，防止刷新丢太多
@@ -130,7 +145,7 @@ function handleTextMessage(message) {
     } else {
       // 单条完整消息（非流式，如 WakeUp 主动推送）
       const msg = {
-        id: message.messageId || Date.now(),
+        id: message.messageId || nextMsgId(),
         role: 'ai', type: 'text',
         content, isTemp: false, isComplete: true,
         timestamp: new Date().toISOString()
@@ -152,8 +167,9 @@ function handleTextMessage(message) {
     }
   } else {
     // === 场景 3：首条流式片段（无 currentMessage，未结束） ===
+    resetSendTimeout()
     const newMessage = {
-      id: message.messageId || Date.now(),
+      id: message.messageId || nextMsgId(),
       role: 'ai', type: 'text',
       content, isTemp: true, isComplete: false,
       timestamp: new Date().toISOString()
@@ -243,11 +259,11 @@ function handleEmotionUpdate(emotion) {
 // --- 交互逻辑 ---
 const handleFocus = () => {
   chatState.value = 'expanded'
-  // 确保输入框可用（防止 isSending 卡死后用户无法重新聚焦）
-  if (isSending.value) {
+  // 仅在无活跃流式响应时重置 isSending（防止卡死场景）
+  // currentMessage 存在说明 AI 正在流式回复，不应打断
+  if (isSending.value && !currentMessage.value) {
     isSending.value = false
     interactionState.value = 'idle'
-    // 不移除 currentMessage，避免后续 WS 分块进入 Scenario 3 产生幽灵消息
     if (sendTimeout) clearTimeout(sendTimeout)
   }
 }
@@ -261,10 +277,9 @@ const handleInput = () => {
   }, 150)
 }
 
-let userMessageIdCounter = 0
 
 const handleSend = () => {
-  if (!_isAlive || isSending.value) return  // 防止重复发送
+  if (!_isAlive || isSending.value || currentMessage.value) return  // 防止重复发送 & 流式响应进行中
   const text = inputText.value.trim()
   if (!text) return
 
@@ -275,7 +290,7 @@ const handleSend = () => {
   if (fileReplyTimer) { clearTimeout(fileReplyTimer); fileReplyTimer = null }
 
   // 追踪这条用户消息，避免 WS 消息插入后用 pop() 误删
-  const sentMsgId = `user-${Date.now()}-${++userMessageIdCounter}`
+  const sentMsgId = `user-${nextMsgId()}`
   const sentMsg = {
     id: sentMsgId,
     role: 'user', type: 'text',
@@ -290,17 +305,8 @@ const handleSend = () => {
   isSending.value = true
   scrollToBottom()
 
-  // 30 秒超时保护：防止 AI 不回复导致 isSending 卡死
-  if (sendTimeout) clearTimeout(sendTimeout)
-  sendTimeout = setTimeout(() => {
-    if (isSending.value) {
-      isSending.value = false
-      interactionState.value = 'idle'
-      currentMessage.value = null
-      addErrorBubble('回复超时，请重试')
-      scrollToBottom()
-    }
-  }, 30000)
+  // 30 秒超时保护：防止 AI 不回复导致 isSending 卡死；流式分块到达时会重置
+  resetSendTimeout()
 
   const success = connectionStatus.value === 'connected' ? sendChat(text, true) : false
 
@@ -341,6 +347,9 @@ const handleFileChange = async (e) => {
   isSending.value = true
   scrollToBottom()
 
+  // 标记：仅在上传/发送失败时重置 isSending，成功 sendChat 后保持 true 等待流式响应
+  let shouldResetSending = true
+
   try {
     // 上传图片到 OSS
     const formData = new FormData()
@@ -354,7 +363,12 @@ const handleFileChange = async (e) => {
       const imageUrl = res.data.url
       // 替换本地 blob URL 为真实 URL
       const imgMsg = messages.value.find(m => m.type === 'image' && m.content === fileUrl)
-      if (imgMsg) imgMsg.content = imageUrl
+      if (imgMsg) {
+        imgMsg.content = imageUrl
+        saveToStorage()
+      }
+      URL.revokeObjectURL(fileUrl)
+      if (fileUrlRef.value === fileUrl) fileUrlRef.value = ''
       // 通过 WebSocket 发送（可能带用户已输入的文本）
       const text = inputText.value.trim()
       inputText.value = ''
@@ -365,6 +379,8 @@ const handleFileChange = async (e) => {
         fallbackImageReply()
         return
       }
+      // sendChat 成功，保持 isSending = true 等待 AI 流式响应
+      shouldResetSending = false
     } else {
       fallbackImageReply()
     }
@@ -372,8 +388,10 @@ const handleFileChange = async (e) => {
     console.error('图片上传失败:', e)
     fallbackImageReply()
   } finally {
-    isSending.value = false
-    if (interactionState.value !== 'typing') interactionState.value = 'idle'
+    if (shouldResetSending) {
+      isSending.value = false
+      if (interactionState.value !== 'typing') interactionState.value = 'idle'
+    }
     e.target.value = ''
   }
 }
@@ -430,8 +448,8 @@ onBeforeUnmount(() => { _isAlive = false })
 
 // --- 生命周期 ---
 onMounted(async () => {
-  await fetchTodayMessages()
-  // 如果组件在 fetchTodayMessages 期间被卸载，放弃后续操作
+  const fetchTodayMessagesPromise = fetchTodayMessages()
+  // 如果组件在 fetchTodayMessages 启动后被卸载，放弃后续操作
   if (!_isAlive) return
 
   const userId = getUserId() || 'unknown'
@@ -453,7 +471,12 @@ onMounted(async () => {
     onStatusChange: handleStatusChange,
   })
 
+  acquireConnection()
   connect(userId)
+
+  await fetchTodayMessagesPromise.catch((e) => {
+    console.warn('ChatWindow fetchTodayMessages:', e)
+  })
 
   // Scroll to bottom after messages are loaded and WS is connected
   await nextTick(() => {
@@ -481,7 +504,7 @@ onBeforeUnmount(() => {
   if (_uiPersistTimer) { clearTimeout(_uiPersistTimer); _uiPersistTimer = null }
   if (disposeCallbacks) disposeCallbacks()
   if (fileUrlRef.value) { URL.revokeObjectURL(fileUrlRef.value); fileUrlRef.value = '' }
-  disconnect()
+  releaseConnection()
   stopAudio()
   disposeLive2dChat()
 })
@@ -554,7 +577,7 @@ onBeforeUnmount(() => {
             @focus="handleFocus"
             @keyup.enter="handleSend"
             @input="handleInput"
-            :disabled="isSending"
+            :disabled="isSending || !!currentMessage"
         />
         <div class="input-focus-line"></div>
       </div>
@@ -584,7 +607,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   justify-content: flex-end;
   pointer-events: none;
-  transition: all 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1), transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .chat-window-container.is-hidden { opacity: 0; transform: translate(-50%, 40px); pointer-events: none; }
@@ -595,14 +618,14 @@ onBeforeUnmount(() => {
 .glass-morph-bg {
   position: absolute; inset: 0;
   background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(20px) saturate(120%);
+  backdrop-filter: blur(12px) saturate(120%);
   border: 1px solid rgba(255, 255, 255, 0.8);
   border-radius: 16px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
   pointer-events: auto;
   z-index: -1;
   opacity: 1;
-  transition: all 0.4s ease;
+  transition: background-color 0.4s ease, box-shadow 0.4s ease;
 }
 
 .chat-window-container.is-expanded .glass-morph-bg {
@@ -635,7 +658,7 @@ onBeforeUnmount(() => {
 .decor-btn {
   background: none; border: none; padding: 0;
   font-size: 11px; color: #888; cursor: pointer;
-  letter-spacing: 1px; transition: all 0.3s ease;
+  letter-spacing: 1px; transition: color 0.3s ease, text-shadow 0.3s ease;
 }
 .decor-btn:hover { color: #333; text-shadow: 0 0 5px rgba(0,0,0,0.1); }
 .decor-btn.highlight { color: #5ea4ea; }
@@ -673,7 +696,7 @@ onBeforeUnmount(() => {
 .action-btn {
   width: 40px; height: 40px; border-radius: 50%;
   display: flex; justify-content: center; align-items: center;
-  color: #666; cursor: pointer; transition: 0.3s;
+  color: #666; cursor: pointer; transition: background-color 0.3s ease, color 0.3s ease, opacity 0.3s ease, transform 0.3s ease;
 }
 .action-btn:hover { background: rgba(0,0,0,0.05); color: #000; }
 
@@ -687,6 +710,40 @@ onBeforeUnmount(() => {
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-.content-fade-enter-active, .content-fade-leave-active { transition: all 0.3s ease; }
+.content-fade-enter-active, .content-fade-leave-active { transition: opacity 0.3s ease, transform 0.3s ease; }
 .content-fade-enter-from, .content-fade-leave-to { opacity: 0; transform: translateY(5px); }
+
+/* ── 响应式布局 ── */
+
+/* 平板 (≤ 1024px) */
+@media (max-width: 1024px) {
+  .chat-window-container { width: min(600px, calc(100vw - 48px)); }
+}
+
+/* 手机 (≤ 768px) */
+@media (max-width: 768px) {
+  .chat-window-container {
+    width: calc(100vw - 24px);
+    bottom: 16px;
+  }
+  .input-bar { height: 56px; padding: 0 14px; }
+  .input-field input { font-size: 14px; }
+  .terminal-decor { padding: 12px 16px 0; }
+  .message-list { padding: 14px 16px; gap: 14px; }
+  .is-boosted .chat-panel { height: 280px; }
+  .decor-text { display: none; }
+}
+
+/* 小屏手机 (≤ 480px) */
+@media (max-width: 480px) {
+  .chat-window-container {
+    width: calc(100vw - 16px);
+    bottom: 8px;
+  }
+  .input-bar { height: 50px; padding: 0 10px; }
+  .action-btn { width: 36px; height: 36px; }
+  .is-boosted .chat-panel { height: 240px; }
+  .decor-actions { gap: 8px; }
+  .decor-btn { font-size: 10px; }
+}
 </style>

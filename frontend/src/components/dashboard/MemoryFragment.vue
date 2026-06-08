@@ -64,12 +64,13 @@
 
               <div v-if="currentTab === 'journal'" class="memory-content-mini journal-style">
                 <div class="mini-cover-wrapper">
-                  <template v-if="item.imageUrl">
-                    <img :src="item.imageUrl"
+                  <template v-if="item.imageUrl && !failedImages.has(item.id)">
+                    <img :src="getOptimizedImageUrl(item.imageUrl, { width: 720 })"
                          class="mini-cover"
                          alt=""
                          loading="lazy"
-                         @error="onImageError($event, item)"
+                         decoding="async"
+                         @error="onImageError(item)"
                     >
                   </template>
                   <div v-else class="mini-cover-placeholder">
@@ -192,9 +193,11 @@
 </template>
 
 <script setup>
+defineOptions({ name: 'MemoryFragment' })
 import { ref, computed, onMounted, onUnmounted, onBeforeUnmount, watch } from 'vue';
 import { API } from '@/config/api';
 import request from '@/utils/request';
+import { getOptimizedImageUrl } from '@/utils/image';
 
 /* ---------------- 基础状态 ---------------- */
 const currentTab = ref('journal');
@@ -209,6 +212,7 @@ const closeMemory = () => { currentMemory.value = null; };
 const journalList = ref([]);
 const anchorList = ref([]);
 const loading = ref(false);
+const failedImages = ref(new Set());
 
 /* ---------------- 交互 ---------------- */
 const selectFilter = (option) => {
@@ -233,47 +237,65 @@ onUnmounted(() => {
 
 /* 切换 tab 自动请求（组件活跃时才执行） */
 let _isFetchingData = false
+let _fetchGen = 0
+let _pendingRefetch = false
+
 watch(currentTab, () => {
-  if (_isFetchingData) return
+  if (_isFetchingData) {
+    _pendingRefetch = true
+    return
+  }
   fetchData();
 });
 
 /* ---------------- 数据请求 ---------------- */
 const fetchData = async () => {
-  if (_isFetchingData) return // 防并发
+  if (_isFetchingData) {
+    _pendingRefetch = true
+    return
+  }
   _isFetchingData = true
+  _pendingRefetch = false
+  const gen = ++_fetchGen
+  const currentFilter = filterText.value
   loading.value = true;
 
   try {
     const params = {
       page: 1,
       size: 50,
-      filter: filterText.value
+      filter: currentFilter
     };
 
     let res;
 
     if (currentTab.value === 'anchor') {
       res = await request.get(API.ANCHOR_LIST, { params });
-      if (!_isMounted) return
+      if (!_isMounted || gen !== _fetchGen) return
 
       anchorList.value = res?.data?.data ?? res?.data ?? [];
 
     } else {
       res = await request.get(API.MEMORY_LIST, { params });
-      if (!_isMounted) return
+      if (!_isMounted || gen !== _fetchGen) return
 
       journalList.value = res?.data?.data ?? res?.data ?? [];
     }
 
   } catch (e) {
-    if (!_isMounted) return
+    if (!_isMounted || gen !== _fetchGen) return
     console.error('Failed to fetch memory data:', e);
   } finally {
-    if (_isMounted) {
+    // Always release the lock so pending calls can proceed
+    _isFetchingData = false
+
+    if (_pendingRefetch && _isMounted) {
+      _pendingRefetch = false
+      fetchData()
+      // 不在此处重置 loading —— 由新 fetch 接管
+    } else if (_isMounted) {
       loading.value = false;
     }
-    _isFetchingData = false
   }
 };
 
@@ -285,17 +307,8 @@ const displayList = computed(() =>
 );
 
 /* ---------------- 图片加载失败兜底 ---------------- */
-function onImageError(event, item) {
-  const img = event.target
-  img.style.display = 'none'
-  // 在 img 后面插入占位元素
-  const wrapper = img.closest('.mini-cover-wrapper')
-  if (wrapper && !wrapper.querySelector('.mini-cover-fallback')) {
-    const fallback = document.createElement('div')
-    fallback.className = 'mini-cover-fallback'
-    fallback.innerHTML = '<span class="placeholder-icon">✧</span>'
-    wrapper.appendChild(fallback)
-  }
+function onImageError(item) {
+  failedImages.value = new Set([...failedImages.value, item.id])
 }
 
 /* ---------------- 工具函数 ---------------- */
@@ -342,17 +355,17 @@ const getDeltaColor = (val) => {
   flex-shrink: 0; position: relative; z-index: 100;
 }
 .filter-tabs { display: flex; gap: 24px; }
-.filter-tabs span { font-size: 14px; color: rgba(255, 255, 255, 0.4); cursor: pointer; padding: 8px 0; position: relative; transition: 0.3s; }
+.filter-tabs span { font-size: 14px; color: rgba(255, 255, 255, 0.4); cursor: pointer; padding: 8px 0; position: relative; transition: color 0.3s ease; }
 .filter-tabs span.active { color: #fff; }
-.filter-tabs span::after { content: ''; position: absolute; bottom: -1px; left: 0; width: 100%; height: 2px; background: #fff; transform: scaleX(0); transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+.filter-tabs span::after { content: ''; position: absolute; bottom: -1px; left: 0; width: 100%; height: 2px; background: #fff; transform: scaleX(0); transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
 .filter-tabs span.active::after { transform: scaleX(1); }
 
 .right-controls { display: flex; align-items: center; gap: 16px; }
 .filter-wrapper { position: relative; }
-.filter-btn { font-size: 12px; color: #7c9cff; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: 0.3s; }
+.filter-btn { font-size: 12px; color: #7c9cff; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: text-shadow 0.3s ease; }
 .filter-btn:hover { text-shadow: 0 0 10px rgba(124, 156, 255, 0.6); }
 
-.filter-dropdown { position: absolute; top: calc(100% + 10px); right: 0; background: rgba(30, 32, 45, 0.9); backdrop-filter: blur(15px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 6px; min-width: 110px; z-index: 1000; }
+.filter-dropdown { position: absolute; top: calc(100% + 10px); right: 0; background: rgba(30, 32, 45, 0.9); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 6px; min-width: 110px; z-index: 1000; }
 .filter-item { padding: 10px 14px; font-size: 12px; color: rgba(255, 255, 255, 0.5); cursor: pointer; text-align: right; border-radius: 4px; }
 .filter-item:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
 .filter-item.active { color: #7c9cff; background: rgba(124, 156, 255, 0.1); }
@@ -371,7 +384,7 @@ const getDeltaColor = (val) => {
 .memory-card { position: relative; margin-bottom: 28px; cursor: pointer; }
 .memory-card::before { content: ''; position: absolute; left: -34px; top: 8px; width: 8px; height: 8px; border-radius: 50%; background: #fff; box-shadow: 0 0 8px rgba(255, 255, 255, 0.5); z-index: 1; }
 .memory-date { font-size: 12px; opacity: 0.7; margin-bottom: 10px; font-family: monospace; }
-.memory-content-mini { background: rgba(255, 255, 255, 0.02); border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.05); transition: all 0.3s ease; overflow: hidden; }
+.memory-content-mini { background: rgba(255, 255, 255, 0.02); border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.05); transition: background-color 0.3s ease, border-color 0.3s ease, transform 0.3s ease; overflow: hidden; }
 .memory-card:hover .memory-content-mini { background: rgba(255, 255, 255, 0.05); transform: translateX(5px); }
 
 /* --- 日记卡片图片容器 --- */
@@ -426,7 +439,7 @@ const getDeltaColor = (val) => {
 .memory-modal-overlay {
   position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
   background: rgba(10, 10, 12, 0.5); /* 整体背景稍微压暗 */
-  backdrop-filter: blur(15px);
+  backdrop-filter: blur(8px);
   display: flex; align-items: center; justify-content: center; z-index: 9999;
 }
 
@@ -439,7 +452,7 @@ const getDeltaColor = (val) => {
   box-shadow: 0 40px 100px rgba(0, 0, 0, 0.5); overflow: hidden;
 }
 
-.modal-close-btn { position: absolute; top: 20px; right: 25px; color: rgba(255, 255, 255, 0.4); cursor: pointer; font-size: 18px; z-index: 10; transition: 0.3s; }
+.modal-close-btn { position: absolute; top: 20px; right: 25px; color: rgba(255, 255, 255, 0.4); cursor: pointer; font-size: 18px; z-index: 10; transition: color 0.3s ease, transform 0.3s ease; }
 .modal-close-btn:hover { color: #fff; transform: rotate(90deg); }
 .modal-date { color: #9ab4ff; font-family: monospace; font-size: 14px; margin-bottom: 10px; display: block; }
 .modal-tag { display: inline-block; font-size: 10px; padding: 2px 8px; background: rgba(124, 156, 255, 0.15); color: #7c9cff; border-radius: 4px; margin-bottom: 20px; font-family: monospace; }
@@ -475,18 +488,18 @@ const getDeltaColor = (val) => {
 .scrollable::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 10px; }
 
 /* 动画库 */
-.fade-slide-enter-active, .fade-slide-leave-active { transition: all 0.3s; }
+.fade-slide-enter-active, .fade-slide-leave-active { transition: opacity 0.3s, transform 0.3s; }
 .fade-slide-enter-from, .fade-slide-leave-to { opacity: 0; transform: translateY(-10px); }
-.memory-list-enter-active { transition: all 0.6s ease; transition-delay: var(--delay); }
-.memory-list-leave-active { transition: all 0.3s ease; }
-.memory-list-move { transition: all 0.4s ease; }
+.memory-list-enter-active { transition: opacity 0.6s ease, transform 0.6s ease; transition-delay: var(--delay); }
+.memory-list-leave-active { transition: opacity 0.3s ease, transform 0.3s ease; }
+.memory-list-move { transition: transform 0.4s ease; }
 .memory-list-enter-from { opacity: 0; transform: translateX(-15px); }
 .memory-list-leave-to { opacity: 0; transform: translateX(15px); }
-.page-switch-enter-active, .page-switch-leave-active { transition: all 0.4s ease; }
+.page-switch-enter-active, .page-switch-leave-active { transition: opacity 0.4s ease, transform 0.4s ease; }
 .page-switch-enter-from { opacity: 0; transform: translateY(5px); }
 .page-switch-leave-to { opacity: 0; transform: translateY(-5px); }
-.modal-fade-enter-active { transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
-.modal-fade-leave-active { transition: all 0.3s cubic-bezier(0.6, 0, 0.4, 1); }
+.modal-fade-enter-active { transition: opacity 0.4s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+.modal-fade-leave-active { transition: opacity 0.3s cubic-bezier(0.6, 0, 0.4, 1), transform 0.3s cubic-bezier(0.6, 0, 0.4, 1); }
 .modal-fade-enter-from, .modal-fade-leave-to { opacity: 0; }
 .modal-fade-enter-from .memory-modal-window { transform: scale(0.96) translateY(20px); }
 .animate-sitewide-enter { animation: fadeInDown 0.8s ease forwards; }

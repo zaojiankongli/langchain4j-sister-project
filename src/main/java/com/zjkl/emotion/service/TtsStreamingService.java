@@ -21,6 +21,8 @@ import java.nio.ByteBuffer;
 @RequiredArgsConstructor
 public class TtsStreamingService {
 
+    private static final int MAX_TTS_INSTRUCTION_CHARS = 120;
+
     private final AiProperties aiProperties;
     private final TtsProperties ttsProperties;
     private final ChatPushService chatPushService;
@@ -98,6 +100,7 @@ public class TtsStreamingService {
      * 构建 DashScope 参数
      */
     private SpeechSynthesisParam buildDashScopeParam(VoiceParams params) {
+        String instruction = sanitizeInstruction(params.getInstruction());
 
         return SpeechSynthesisParam.builder()
             .apiKey(aiProperties.getChatApiKey())
@@ -107,7 +110,18 @@ public class TtsStreamingService {
             .volume(params.getVolume())
             .speechRate(params.getSpeechRate())
             .pitchRate(params.getPitchRate())
-            .instruction(params.getInstruction())
+            .instruction(instruction)
             .build();
+    }
+
+    private String sanitizeInstruction(String instruction) {
+        if (instruction == null || instruction.isBlank()) {
+            return null;
+        }
+        String trimmed = instruction.replaceAll("\\s+", " ").trim();
+        if (trimmed.length() <= MAX_TTS_INSTRUCTION_CHARS) {
+            return trimmed;
+        }
+        return trimmed.substring(0, MAX_TTS_INSTRUCTION_CHARS);
     }
 }

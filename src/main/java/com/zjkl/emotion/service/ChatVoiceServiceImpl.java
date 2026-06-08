@@ -1,32 +1,22 @@
 package com.zjkl.emotion.service;
 
 import com.alibaba.dashscope.audio.ttsv2.SpeechSynthesizer;
-import com.zjkl.ai.chat.entity.MessageContent;
-import com.zjkl.ai.chat.service.ConverMessageService;
 import com.zjkl.ai.chat.service.SisterChatService;
+import com.zjkl.anchor.service.AnchorEventService;
 import com.zjkl.emotion.model.EmotionalState;
 
-import com.zjkl.emotion.model.VoiceParams;
 import com.zjkl.emotion.util.AudioBuffer;
-import com.zjkl.settings.service.SettingsService;
 import com.zjkl.emotion.util.LlmResponseStreamParser;
 import com.zjkl.ai.chat.stomp.ChatPushService;
 import com.zjkl.ai.chat.stomp.SemanticPetEventAdapter;
-import dev.langchain4j.memory.chat.ChatMemoryProvider;
-import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.data.message.UserMessage;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
-import reactor.core.publisher.Mono;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -34,21 +24,31 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ChatVoiceServiceImpl implements ChatVoiceService {
 
     private final TtsStreamingService ttsStreamingService;
-    private final SettingsService settingsService;
-
     private final EmotionService emotionService;
-    private final EmotionAnchorService anchorService;
+    private final AnchorEventService anchorService;
     private final SisterChatService sisterChatService;
     private final ChatPushService chatPushService;
     private final SemanticPetEventAdapter semanticPetEventAdapter;
-    private final ChatMemoryProvider redisChatMemoryProvider;
-    private final ConverMessageService converMessageService;
+    private final ChatReplyPersistenceService chatReplyPersistenceService;
+    private final ChatAudioPlaybackService chatAudioPlaybackService;
     private final LlmResponseStreamParser parser;
     private final Executor asyncExecutor;
+
+    public ChatVoiceServiceImpl(TtsStreamingService ttsStreamingService, EmotionService emotionService, AnchorEventService anchorService, SisterChatService sisterChatService, ChatPushService chatPushService, SemanticPetEventAdapter semanticPetEventAdapter, ChatReplyPersistenceService chatReplyPersistenceService, ChatAudioPlaybackService chatAudioPlaybackService, LlmResponseStreamParser parser,@Qualifier("asyncTaskExecutor")  Executor asyncExecutor) {
+        this.ttsStreamingService = ttsStreamingService;
+        this.emotionService = emotionService;
+        this.anchorService = anchorService;
+        this.sisterChatService = sisterChatService;
+        this.chatPushService = chatPushService;
+        this.semanticPetEventAdapter = semanticPetEventAdapter;
+        this.chatReplyPersistenceService = chatReplyPersistenceService;
+        this.chatAudioPlaybackService = chatAudioPlaybackService;
+        this.parser = parser;
+        this.asyncExecutor = asyncExecutor;
+    }
 
     /**
      * 语音聊天
@@ -62,196 +62,19 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
         try {
             semanticPetEventAdapter.pushChatPhase(userId, SemanticPetEventAdapter.ChatPhase.THINKING);
 
-            // 并行处理图片
             SisterChatService.ChatResult chatResult = sisterChatService.chatWithVoice(userInput, userId, imageUrl);
-            Flux<String> llmStream = chatResult.stream();
-            CompletableFuture<String> imageDescFuture = chatResult.imageDescFuture();
-
-            // 解析响应
-            LlmResponseStreamParser.ParsedResult result = parser.parse(llmStream);
+            LlmResponseStreamParser.ParsedResult result = parser.parse(chatResult.stream());
 
             AtomicReference<SpeechSynthesizer> synthesizerRef = new AtomicReference<>();
-
-            // 200ms 缓冲
             AudioBuffer audioBuffer = new AudioBuffer(200);
-
-            // 使用线程安全的收集器替代 StringBuilder
             List<String> replyChunks = java.util.Collections.synchronizedList(new java.util.ArrayList<>());
-
-            // 构建 replyStream 处理链（延迟订阅，确保 voiceParams 先完成 TTS 初始化）
             AtomicReference<Boolean> firstChunkSent = new AtomicReference<>(false);
-            var replyChain = result.getReplyStream()
-                .concatMap(chunk -> {
-                    if (!firstChunkSent.get()) {
-                        firstChunkSent.set(true);
-                        semanticPetEventAdapter.pushChatPhase(userId, SemanticPetEventAdapter.ChatPhase.SPEAKING);
-                    }
-                    chatPushService.pushText(userId, chunk, false);
-                    replyChunks.add(chunk);
-                    return Mono.empty();
-                }, 1)
-                .doOnComplete(() -> {
-                    log.info("LLM 回复完成：userId={}", userId);
-                    String fullReply = String.join("", replyChunks);
-                    log.info("完整 reply: userId={}, length={}", userId, fullReply.length());
 
-                    // 过滤括号内容
-                    String ttsText = fullReply.replaceAll("[（(\\[【][^）)\\]】]*[）)\\]】]", "").trim();
-                    if (log.isDebugEnabled()) {
-                        log.debug("TTS 文本(已过滤括号内容): userId={}, originalLen={}, filteredLen={}",
-                                userId, fullReply.length(), ttsText.length());
-                    }
+            var replyChain = buildReplyChain(userId, userInput, imageUrl, enableAudio, chatResult.imageDescFuture(),
+                    result, future, synthesizerRef, audioBuffer, replyChunks, firstChunkSent);
 
-                    // 发送完成信号给前端
-                    chatPushService.pushText(userId, "", true);
-
-                    CompletableFuture.runAsync(() -> saveMemory(userId, userInput, imageUrl, imageDescFuture, fullReply), asyncExecutor);
-
-                    SpeechSynthesizer synthesizer = synthesizerRef.get();
-                    log.info("=== TTS 调试 === userId={}, enableAudio={}, synthesizer={}", userId, enableAudio, synthesizer);
-                    if (synthesizer != null && Boolean.TRUE.equals(enableAudio)) {
-                        log.info("开始 TTS 流式合成：userId={}, textLength={}", userId, fullReply.length());
-
-                        AtomicReference<Throwable> ttsError = new AtomicReference<>();
-
-                        CompletableFuture.runAsync(() -> {
-                            try {
-                                synthesizer.streamingCall(ttsText);
-                                log.info("TTS 文本发送完成：userId={}", userId);
-                                synthesizer.streamingComplete();
-                                log.info("TTS streamingComplete 调用完成：userId={}", userId);
-                            } catch (Exception e) {
-                                log.error("TTS 合成失败：userId={}", userId, e);
-                                ttsError.set(e);
-                                chatPushService.pushError(userId, "语音合成失败，已跳过音频");
-                                audioBuffer.markSynthesisCompleted();
-                            } finally {
-                                ttsStreamingService.closeSynthesizer(synthesizer);
-                            }
-                        }, asyncExecutor).orTimeout(30, TimeUnit.SECONDS).exceptionally(ex -> {
-                            log.error("TTS 合成超时或失败：userId={}", userId, ex);
-                            ttsError.set(ex instanceof TimeoutException
-                                    ? new TimeoutException("语音合成超时（30s）") : ex);
-                            audioBuffer.markSynthesisCompleted();
-                            chatPushService.pushError(userId, "语音合成超时，已跳过音频");
-                            ttsStreamingService.closeSynthesizer(synthesizer);
-                            return null;
-                        });
-
-                        CompletableFuture.runAsync(() -> {
-                            try {
-                                audioBuffer.awaitPlaybackReady();
-
-                                while (audioBuffer.hasMoreAudio()) {
-                                    byte[] audioData = audioBuffer.getNextAudio(100);
-                                    if (audioData != null) {
-                                        chatPushService.pushAudio(userId, audioData);
-                                        log.debug("已发送音频分片：userId={}, size={}", userId, audioData.length);
-                                    }
-                                }
-
-                                log.info("音频播放完成：userId={}", userId);
-                                Throwable ttsErr = ttsError.get();
-                                if (ttsErr != null) {
-                                    future.completeExceptionally(ttsErr);
-                                } else {
-                                    future.complete(null);
-                                }
-
-                            } catch (Exception e) {
-                                log.error("音频播放失败：userId={}", userId, e);
-                                future.completeExceptionally(e);
-                            }
-                        }, asyncExecutor).orTimeout(60, TimeUnit.SECONDS).exceptionally(ex -> {
-                            log.error("音频播放超时或失败：userId={}", userId, ex);
-                            future.completeExceptionally(ex instanceof TimeoutException
-                                    ? new TimeoutException("音频播放超时（60s）") : ex);
-                            return null;
-                        });
-
-                    } else {
-                        future.complete(null);
-                    }
-                })
-                .doOnError(error -> {
-                    log.error("LLM 回复流错误：userId={}", userId, error);
-                    chatPushService.pushError(userId, "回复生成失败，请稍后重试");
-                    future.completeExceptionally(error);
-                });
-            // replyChain 已构建但尚未订阅，等待 voiceParams 完成后再订阅
-
-            // 订阅顺序保证：voiceParams Mono 在 doFinally 中触发 replyChain 订阅，
-            // 确保 TTS synthesizer 在 replyStream 处理前已就绪（synthesizerRef 已赋值）。
-            // delta_emotion 独立订阅，不依赖 voiceParams/replyChain 的完成顺序。
-            // 超时保护：TTS 30s + 音频播放 60s，两者独立超时互不影响。
-            result.getVoiceParams()
-                .doOnSuccess(params -> {
-                    log.info("voice_params 已解析：userId={}, volume={}", userId, params.getVolume());
-
-                    if (Boolean.TRUE.equals(enableAudio)) {
-                        // === 读取用户 TTS 设置 ===
-                        var settings = settingsService.getSettings(userId);
-                        if (!settings.isTtsEnabled()) {
-                            log.info("用户已关闭 TTS，跳过语音合成：userId={}", userId);
-                        } else {
-                            // 应用用户音量/语速设置
-                            int adjustedVolume = (int) Math.round(params.getVolume() * settings.getTtsVolume());
-                            adjustedVolume = Math.max(0, Math.min(100, adjustedVolume));
-                            VoiceParams adjustedParams = new VoiceParams(
-                                adjustedVolume,
-                                (float) settings.getTtsSpeed(),
-                                params.getPitchRate(),
-                                params.getInstruction()
-                            );
-                            SpeechSynthesizer synthesizer = ttsStreamingService.initTtsSynthesizer(userId, adjustedParams, audioBuffer);
-                            if (synthesizer != null) {
-                                synthesizerRef.set(synthesizer);
-                                log.info("TTS 已就绪（应用用户设置）：userId={}, adjustedVolume={}, adjustedSpeed={}",
-                                    userId, adjustedVolume, settings.getTtsSpeed());
-                            } else {
-                                log.warn("TTS 初始化返回 null，语音合成将跳过：userId={}", userId);
-                                chatPushService.pushError(userId, "语音服务初始化失败，已跳过音频");
-                            }
-                        }
-                    }
-                })
-                .doOnError(error -> {
-                    log.error("voice_params 解析失败：userId={}", userId, error);
-                    chatPushService.pushError(userId, "响应解析失败");
-                })
-                .doFinally(signal -> {
-                    // voiceParams 处理完毕（成功/失败/取消），现在订阅 replyStream
-                    log.info("voiceParams 已完成({})，开始订阅 replyStream: userId={}", signal, userId);
-                    replyChain.subscribe();
-                })
-                .subscribe();
-
-            // 6. 订阅 delta_emotion（后台更新用户情绪 + 触发锚点监测 + 推送情绪到前端）
-            result.getDeltaEmotion()
-                .doOnSuccess(delta -> {
-                    // 获取更新前的情绪状态
-                    EmotionalState oldEmotion = emotionService.getUserEmotion(userId);
-                    // 更新情绪
-                    EmotionalState newEmotion = emotionService.updateUserEmotion(userId, delta);
-                    log.debug("用户情绪已更新：userId={}, P={}, A={}, D={}",
-                        userId, newEmotion.getPleasure(), newEmotion.getArousal(), newEmotion.getDominance());
-                    // 触发锚点监测（同时更新最后消息时间）
-                    anchorService.onEmotionChange(userId, oldEmotion, newEmotion);
-
-                    // 推送情绪状态到前端（实时 mood 指示器）
-                    String moodLabel = MoodDescriptionGenerator.generateMoodLabel(newEmotion);
-                    String moodDesc = MoodDescriptionGenerator.generateMoodDescription(newEmotion);
-                    chatPushService.pushEmotionUpdate(userId,
-                        newEmotion.getFormattedPleasure(),
-                        newEmotion.getFormattedArousal(),
-                        newEmotion.getFormattedDominance(),
-                        moodLabel, moodDesc);
-                    semanticPetEventAdapter.pushMoodExpression(userId, moodLabel);
-                })
-                .doOnError(error -> {
-                    log.warn("情绪更新失败：userId={}", userId, error);
-                })
-                .subscribe();
+            subscribeVoiceParams(userId, enableAudio, result, synthesizerRef, audioBuffer, replyChain);
+            subscribeDeltaEmotion(userId, result);
 
         } catch (Exception e) {
             log.error("语音聊天失败：userId={}", userId, e);
@@ -262,58 +85,120 @@ public class ChatVoiceServiceImpl implements ChatVoiceService {
         return future;
     }
 
-    /**
-     * 保存聊天记录
-     */
-    private void saveMemory(String userId, String userInput, String imageUrl,
-                           CompletableFuture<String> imageDescFuture, String fullReply) {
-        try {
-            // Redis
-            
-            // 拼接描述
-            String redisUserText = userInput;
-            if (imageUrl != null && !imageUrl.isBlank() && imageDescFuture != null) {
-                try {
-                    String imageDesc = imageDescFuture.get(3, TimeUnit.SECONDS);
-                    redisUserText += " [图片:" + imageDesc + "|" + imageUrl + "]";
-                    log.debug("VLM 描述获取成功: {}", imageDesc);
-                } catch (Exception e) {
-                    log.warn("VLM 描述获取超时或失败，使用原始文本: {}", e.getMessage());
-                }
-            }
+    private Flux<String> buildReplyChain(String userId,
+                                         String userInput,
+                                         String imageUrl,
+                                         Boolean enableAudio,
+                                         CompletableFuture<String> imageDescFuture,
+                                         LlmResponseStreamParser.ParsedResult result,
+                                         CompletableFuture<Void> future,
+                                         AtomicReference<SpeechSynthesizer> synthesizerRef,
+                                         AudioBuffer audioBuffer,
+                                         List<String> replyChunks,
+                                         AtomicReference<Boolean> firstChunkSent) {
+        return result.getReplyStream()
+                .doOnNext(chunk -> {
+                    if (!firstChunkSent.get()) {
+                        firstChunkSent.set(true);
+                        semanticPetEventAdapter.pushChatPhase(userId, SemanticPetEventAdapter.ChatPhase.SPEAKING);
+                    }
+                    chatPushService.pushText(userId, chunk, false);
+                    replyChunks.add(chunk);
+                })
+                .doOnComplete(() -> handleReplyComplete(
+                        userId, userInput, imageUrl, enableAudio, imageDescFuture, replyChunks,
+                        synthesizerRef, audioBuffer, future))
+                .doOnError(error -> handleReplyError(userId, error, future));
+    }
 
-            // 保存到 Redis（user → assistant 顺序保证）
-            try {
-                var chatMemory = redisChatMemoryProvider.get(userId);
-                chatMemory.add(UserMessage.from(redisUserText));
-                chatMemory.add(AiMessage.from(fullReply));
-                log.debug("Redis 记忆已保存: userId={}", userId);
-            } catch (Exception e) {
-                log.error("Redis 记忆保存失败: userId={}", userId, e);
-            }
+    private void handleReplyError(String userId, Throwable error, CompletableFuture<Void> future) {
+        log.error("LLM 回复流错误：userId={}", userId, error);
+        chatPushService.pushError(userId, "回复生成失败，请稍后重试");
+        future.completeExceptionally(error);
+    }
 
-            // MySQL
+    private void handleReplyComplete(String userId,
+                                     String userInput,
+                                     String imageUrl,
+                                     Boolean enableAudio,
+                                     CompletableFuture<String> imageDescFuture,
+                                     List<String> replyChunks,
+                                     AtomicReference<SpeechSynthesizer> synthesizerRef,
+                                     AudioBuffer audioBuffer,
+                                     CompletableFuture<Void> future) {
+        log.info("LLM 回复完成：userId={}", userId);
+        String fullReply = String.join("", replyChunks);
+        log.info("完整 reply: userId={}, length={}", userId, fullReply.length());
 
-            // 构建用户消息内容
-            List<MessageContent> userContents = new ArrayList<>();
-            userContents.add(MessageContent.text(userInput));
-            if (imageUrl != null && !imageUrl.isBlank()) {
-                userContents.add(MessageContent.image(imageUrl));
-            }
-
-            // 保存用户消息
-            converMessageService.saveMessage(userId, "user", userContents);
-
-            // 保存回复
-            List<MessageContent> aiContents = List.of(MessageContent.text(fullReply));
-            converMessageService.saveMessage(userId, "assistant", aiContents);
-
-            log.debug("MySQL 消息已保存: userId={}, userContents={}, aiContents={}",
-                userId, userContents.size(), aiContents.size());
-
-        } catch (Exception e) {
-            log.error("保存记忆失败: userId={}", userId, e);
+        String ttsText = fullReply.replaceAll("[（(\\[【][^）)\\]】]*[）)\\]】]", "").trim();
+        if (log.isDebugEnabled()) {
+            log.debug("TTS 文本(已过滤括号内容): userId={}, originalLen={}, filteredLen={}",
+                    userId, fullReply.length(), ttsText.length());
         }
+
+        chatPushService.pushText(userId, "", true);
+        CompletableFuture.runAsync(() -> chatReplyPersistenceService.saveChatMemory(userId, userInput, imageUrl, imageDescFuture, fullReply), asyncExecutor);
+
+        SpeechSynthesizer synthesizer = synthesizerRef.get();
+        log.info("=== TTS 调试 === userId={}, enableAudio={}, synthesizer={}", userId, enableAudio, synthesizer);
+        if (synthesizer != null && Boolean.TRUE.equals(enableAudio)) {
+            chatAudioPlaybackService.startTtsPlayback(userId, fullReply, ttsText, synthesizer, audioBuffer, future);
+        } else {
+            future.complete(null);
+        }
+    }
+
+    private void subscribeVoiceParams(String userId,
+                                      Boolean enableAudio,
+                                      LlmResponseStreamParser.ParsedResult result,
+                                      AtomicReference<SpeechSynthesizer> synthesizerRef,
+                                      AudioBuffer audioBuffer,
+                                      Flux<String> replyChain) {
+        result.getVoiceParams()
+                .doOnSuccess(params -> {
+                    log.info("voice_params 已解析：userId={}, volume={}", userId, params.getVolume());
+
+                    SpeechSynthesizer synthesizer = chatAudioPlaybackService.initializeSynthesizer(
+                            userId,
+                            enableAudio,
+                            params,
+                            audioBuffer
+                    );
+                    if (synthesizer != null) {
+                        synthesizerRef.set(synthesizer);
+                    }
+                })
+                .doOnError(error -> {
+                    log.error("voice_params 解析失败：userId={}", userId, error);
+                    chatPushService.pushError(userId, "响应解析失败");
+                })
+                .doFinally(signal -> {
+                    log.info("voiceParams 已完成({})，开始订阅 replyStream: userId={}", signal, userId);
+                    replyChain.subscribe();
+                })
+                .subscribe();
+    }
+
+    private void subscribeDeltaEmotion(String userId, LlmResponseStreamParser.ParsedResult result) {
+        result.getDeltaEmotion()
+                .doOnSuccess(delta -> {
+                    EmotionalState oldEmotion = emotionService.getUserEmotion(userId);
+                    EmotionalState newEmotion = emotionService.updateUserEmotion(userId, delta);
+                    log.debug("用户情绪已更新：userId={}, P={}, A={}, D={}",
+                            userId, newEmotion.getPleasure(), newEmotion.getArousal(), newEmotion.getDominance());
+                    anchorService.onEmotionChange(userId, oldEmotion, newEmotion);
+
+                    String moodLabel = MoodDescriptionGenerator.generateMoodLabel(newEmotion);
+                    String moodDesc = MoodDescriptionGenerator.generateMoodDescription(newEmotion);
+                    chatPushService.pushEmotionUpdate(userId,
+                            newEmotion.getFormattedPleasure(),
+                            newEmotion.getFormattedArousal(),
+                            newEmotion.getFormattedDominance(),
+                            moodLabel, moodDesc);
+                    semanticPetEventAdapter.pushMoodExpression(userId, moodLabel);
+                })
+                .doOnError(error -> log.warn("情绪更新失败：userId={}", userId, error))
+                .subscribe();
     }
 
 }

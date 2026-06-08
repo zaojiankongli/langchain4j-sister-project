@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zjkl.user.mapper.UserWechatBindingMapper">
+
+    <resultMap id="bindingMap" type="com.zjkl.user.domain.UserWechatBinding">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="wechat_appid" property="wechatAppid"/>
+        <result column="openid" property="openid"/>
+        <result column="unionid" property="unionid"/>
+        <result column="nickname" property="nickname"/>
+        <result column="avatar_url" property="avatarUrl"/>
+        <result column="bind_status" property="bindStatus"/>
+        <result column="bound_at" property="boundAt"/>
+        <result column="last_login_at" property="lastLoginAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <select id="findBoundByAppidAndOpenid" resultMap="bindingMap">
+        SELECT *
+        FROM user_wechat_bindings
+        WHERE wechat_appid = #{wechatAppid}
+          AND openid = #{openid}
+          AND bind_status = 'bound'
+        LIMIT 1
+    </select>
+
+    <select id="findBoundByUserIdAndAppid" resultMap="bindingMap">
+        SELECT *
+        FROM user_wechat_bindings
+        WHERE user_id = #{userId}
+          AND wechat_appid = #{wechatAppid}
+          AND bind_status = 'bound'
+        LIMIT 1
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO user_wechat_bindings (
+            user_id,
+            wechat_appid,
+            openid,
+            unionid,
+            nickname,
+            avatar_url,
+            bind_status,
+            bound_at,
+            last_login_at
+        ) VALUES (
+            #{userId},
+            #{wechatAppid},
+            #{openid},
+            #{unionid},
+            #{nickname},
+            #{avatarUrl},
+            #{bindStatus},
+            #{boundAt},
+            #{lastLoginAt}
+        )
+    </insert>
+
+    <update id="updateLastLoginAt">
+        UPDATE user_wechat_bindings
+        SET last_login_at = NOW()
+        WHERE id = #{id}
+    </update>
+</mapper>

@@ -187,8 +187,8 @@ body {
   line-height: 1.7 !important;
   font-family: "PingFang SC", "Microsoft YaHei", "Hiragino Sans", sans-serif !important;
   min-height: 36px !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
+  backdrop-filter: blur(6px) !important;
+  -webkit-backdrop-filter: blur(6px) !important;
 
   /* 底部粉色小尾巴 ↓ 指向人物 */
   &::after {
@@ -226,6 +226,17 @@ body {
 @keyframes tip-heart {
   0%, 100% { opacity: 0.3; transform: scale(1); }
   50% { opacity: 0.8; transform: scale(1.2); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* ── Live2D 舞台 ── */

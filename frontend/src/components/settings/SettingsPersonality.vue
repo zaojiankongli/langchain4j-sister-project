@@ -51,6 +51,7 @@
         <div class="ocean-sliders">
           <div v-for="trait in oceanKeys" :key="trait.key" class="ocean-slider-row">
             <span class="ocean-label">{{ trait.label }}</span>
+            <!-- eslint-disable-next-line vue/no-mutating-props -- form 是父组件响应式 ref 的解包对象，v-model 写入会正确触发响应式更新 -->
             <input v-model.number="form[trait.key]" type="range" min="-1" max="1" step="0.05" class="cyber-slider ocean-slider" />
             <span class="ocean-value">{{ form[trait.key].toFixed(2) }}</span>
           </div>
@@ -67,6 +68,8 @@ const props = defineProps({
   form: { type: Object, required: true },
   presets: { type: Array, default: () => [] },
 })
+
+const emit = defineEmits(['select-preset'])
 
 const OCEAN_COLORS = {
   openness: '#5eead4',
@@ -118,11 +121,15 @@ const oceanTraitsComputed = computed(() => {
 })
 
 function selectPreset(preset) {
-  props.form.personalityPreset = preset.id
-  if (preset.id !== 'custom') {
+  // 通过 emit 通知父组件更新 form，避免直接修改 props
+  if (preset.id === 'custom') {
+    emit('select-preset', { personalityPreset: 'custom' })
+  } else {
+    const update = { personalityPreset: preset.id }
     for (const t of oceanKeys) {
-      props.form[t.key] = preset[t.key]
+      update[t.key] = preset[t.key]
     }
+    emit('select-preset', update)
   }
 }
 
@@ -140,7 +147,7 @@ function calcPct(value) {
 .preset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 12px; }
 .preset-card {
   background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 10px; padding: 14px 12px; cursor: pointer; transition: all 0.3s ease; text-align: center;
+  border-radius: 10px; padding: 14px 12px; cursor: pointer; transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease; text-align: center;
 }
 .preset-card:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.15); }
 .preset-card.active { border-color: #5eead4; background: rgba(94, 234, 212, 0.1); box-shadow: 0 0 12px rgba(94, 234, 212, 0.12); }
@@ -150,7 +157,7 @@ function calcPct(value) {
 .preset-bar { height: 3px; border-radius: 2px; opacity: 0.5; transition: opacity 0.3s; }
 .preset-card.active .preset-bar { opacity: 0.85; }
 .preset-tag { font-size: 12px; padding: 3px 12px; border-radius: 20px; background: rgba(94, 234, 212, 0.15); border: 1px solid rgba(94, 234, 212, 0.3); color: #5eead4; letter-spacing: 1px; }
-.param-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 20px; transition: all 0.3s ease; }
+.param-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); border-radius: 10px; padding: 20px; transition: background-color 0.3s ease; }
 .param-card:hover { background: rgba(255,255,255,0.06); }
 .param-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .param-label { font-size: 15px; font-weight: 400; }

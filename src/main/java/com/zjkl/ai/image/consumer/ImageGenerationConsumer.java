@@ -2,6 +2,7 @@ package com.zjkl.ai.image.consumer;
 
 import com.zjkl.ai.image.service.MemoryImageGenerator;
 import com.zjkl.common.stream.AbstractStreamConsumer;
+import com.zjkl.memory.gallery.service.ConversationMemoryGalleryService;
 import com.zjkl.memory.mapper.ConversationMemoryMapper;
 import com.zjkl.user.domain.ConversationMemory;
 import lombok.extern.slf4j.Slf4j;
@@ -34,14 +35,17 @@ public class ImageGenerationConsumer extends AbstractStreamConsumer {
 
     private final MemoryImageGenerator memoryImageGenerator;
     private final ConversationMemoryMapper conversationMemoryMapper;
+    private final ConversationMemoryGalleryService conversationMemoryGalleryService;
     private final Semaphore inFlightImageTasks = new Semaphore(MAX_IN_FLIGHT_IMAGE_TASKS);
 
     public ImageGenerationConsumer(StringRedisTemplate redisTemplate,
                                    MemoryImageGenerator memoryImageGenerator,
-                                   ConversationMemoryMapper conversationMemoryMapper) {
+                                   ConversationMemoryMapper conversationMemoryMapper,
+                                   ConversationMemoryGalleryService conversationMemoryGalleryService) {
         super(redisTemplate);
         this.memoryImageGenerator = memoryImageGenerator;
         this.conversationMemoryMapper = conversationMemoryMapper;
+        this.conversationMemoryGalleryService = conversationMemoryGalleryService;
     }
 
     @Override
@@ -65,6 +69,7 @@ public class ImageGenerationConsumer extends AbstractStreamConsumer {
         String title = valToString(value.get("title"));
         String summary = valToString(value.get("summary"));
         String memoryDateStr = valToString(value.get("memoryDate"));
+        String mood = valToString(value.get("mood"));
         String createdAtStr = valToString(value.get("createdAt"));
 
         log.info("开始处理图片任务：taskId={}, userId={}", taskId, userId);
@@ -105,17 +110,23 @@ public class ImageGenerationConsumer extends AbstractStreamConsumer {
                         .userId(userId)
                         .title(title)
                         .content(summary)
+                        .mood(mood)
                         .imageUrl(imageUrl)
                         .memoryDate(memoryDate)
                         .createdAt(createdAt)
                         .build();
 
                     conversationMemoryMapper.insert(memory);
+                    conversationMemoryGalleryService.classifyAndPersistAsync(memory);
                     log.info("图片任务完成入库：taskId={}, userId={}, imageUrl={}",
                         taskId, userId, imageUrl);
 
                 } catch (DuplicateKeyException e) {
                     log.info("图片已入库（唯一索引），跳过：taskId={}", taskId);
+                    ConversationMemory existing = conversationMemoryMapper.selectByUserIdAndDate(userId, memoryDate);
+                    if (existing != null) {
+                        conversationMemoryGalleryService.classifyAndPersistAsync(existing);
+                    }
                 } catch (Exception e) {
                     log.error("图片任务入库失败：taskId={}, userId={}", taskId, userId, e);
                     return;

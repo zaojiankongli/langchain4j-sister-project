@@ -260,12 +260,60 @@ public class UserProfileServiceImpl implements UserProfileService {
         }
     }
 
+    @Override
+    public String uploadBackground(String userId, MultipartFile file) {
+        if (userId == null || userId.isBlank()) {
+            throw new IllegalArgumentException("用户 ID 不能为空，请先登录");
+        }
+
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("请选择要上传的文件");
+        }
+
+        String contentType = file.getContentType();
+        if (contentType == null || !ALLOWED_CONTENT_TYPES.contains(contentType)) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST, "不支持的文件类型，仅支持 JPEG、PNG、WebP、GIF");
+        }
+
+        log.info("用户上传背景图 - userId: {}, 文件名：{}, 大小：{} bytes",
+            userId, file.getOriginalFilename(), file.getSize());
+
+        try {
+            String ossUrl = ossService.uploadFile("backgrounds", file);
+            updateBackgroundInDb(userId, ossUrl);
+
+            log.info("用户 {} 背景图上传成功：{}", userId, ossUrl);
+            return ossUrl;
+
+        } catch (IllegalArgumentException e) {
+            log.warn("参数校验失败：{}", e.getMessage());
+            throw e;
+        } catch (IOException e) {
+            log.error("上传背景图失败 - userId: {}, filename: {}", userId, file.getOriginalFilename(), e);
+            throw new BusinessException(ErrorCode.OSS_UPLOAD_FAILED.getCode(), "上传背景图失败，请稍后重试");
+        } catch (Exception e) {
+            log.error("上传背景图异常 - userId: {}", userId, e);
+            throw new BusinessException(ErrorCode.OSS_UPLOAD_FAILED.getCode(), "上传背景图失败");
+        }
+    }
+
     /**
      * 单独的方法：仅更新数据库中的头像 URL，避免在 OSS 上传期间持有 DB 连接。
      * 单条 UPDATE 在 DB 层面是原子的，无需显式事务。
      */
     private void updateAvatarInDb(String userId, String ossUrl) {
         int rows = userProfileMapper.updateUserAvatar(userId, ossUrl);
+        if (rows == 0) {
+            throw new BusinessException(ErrorCode.USER_NOT_FOUND);
+        }
+    }
+
+    /**
+     * 单独的方法：仅更新数据库中的背景图 URL，避免在 OSS 上传期间持有 DB 连接。
+     * 单条 UPDATE 在 DB 层面是原子的，无需显式事务。
+     */
+    private void updateBackgroundInDb(String userId, String ossUrl) {
+        int rows = userProfileMapper.updateUserBackground(userId, ossUrl);
         if (rows == 0) {
             throw new BusinessException(ErrorCode.USER_NOT_FOUND);
         }

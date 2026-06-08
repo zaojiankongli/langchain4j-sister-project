@@ -25,12 +25,16 @@ export function useImageGeneration(aliveCheck) {
    * @param {string} options.content - 用于提取元素的文本（记忆内容、日记等）
    * @returns {Promise<string|null>} 生成的图片 URL，失败返回 null
    */
+  // ── 代际计数器：防止并发调用导致状态错乱 ──
+  let _gen = 0
+
   async function generateFromContent({ content }) {
     if (!content || !content.trim()) {
       error.value = '内容不能为空'
       return null
     }
 
+    const gen = ++_gen
     loading.value = true
     error.value = ''
 
@@ -40,6 +44,7 @@ export function useImageGeneration(aliveCheck) {
         memoryContent: content
       })
       if (aliveCheck && !aliveCheck()) return null
+      if (gen !== _gen) return null  // 被新调用取代，丢弃
       if (elemRes.code !== 200) {
         throw new Error(elemRes.message || '元素提取失败')
       }
@@ -51,6 +56,7 @@ export function useImageGeneration(aliveCheck) {
       // Step 2: 使用元素生成图片
       const genRes = await request.post(API.IMAGE_GENERATE, elements)
       if (aliveCheck && !aliveCheck()) return null
+      if (gen !== _gen) return null
       if (genRes.code !== 200) {
         throw new Error(genRes.message || '图片生成失败')
       }
@@ -62,11 +68,13 @@ export function useImageGeneration(aliveCheck) {
       imageUrl.value = url
       return url
     } catch (e) {
-      error.value = e.message || '图片生成失败'
+      if (gen === _gen) {
+        error.value = e.message || '图片生成失败'
+      }
       console.error('AI 图片生成失败:', e)
       return null
     } finally {
-      loading.value = false
+      if (gen === _gen) loading.value = false
     }
   }
 

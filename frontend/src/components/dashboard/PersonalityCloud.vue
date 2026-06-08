@@ -120,6 +120,11 @@ onBeforeUnmount(() => { _isMounted = false })
 
 // Combined watch for settings, loading, and errors
 watch([() => settingsStore.settings, () => settingsStore.loading, () => settingsStore.error], ([settings, loadingVal, errorVal]) => {
+  if (errorVal) {
+    loadError.value = errorVal
+    loading.value = false
+    return
+  }
   if (settings) {
     // 增量更新：不替换整个 displaySettings 对象，只更新具体字段
     // 避免触发 slider-track-glow 等依赖 .value 引用变化的 :style 重渲染
@@ -127,13 +132,9 @@ watch([() => settingsStore.settings, () => settingsStore.loading, () => settings
     displaySettings.value.decayRate = settings.decayRate ?? 0.1
     displaySettings.value.regressionRate = settings.regressionRate ?? 0.05
     loadError.value = ''
-    loading.value = false
   }
+  // Only reflect the store's loading state directly — no premature false assignment
   loading.value = loadingVal
-  if (errorVal) {
-    loadError.value = errorVal
-    loading.value = false
-  }
 }, { immediate: true })
 
 const handleSave = async () => {
@@ -181,7 +182,7 @@ onMounted(() => {
   background: rgba(255, 255, 255, 0.05);
   border-radius: 12px;
   padding: 25px;
-  transition: all 0.4s ease;
+  transition: background-color 0.4s ease, transform 0.4s ease;
   overflow: hidden;
 
   /* 初始状态：透明且向下偏移 */
@@ -212,7 +213,7 @@ onMounted(() => {
 /* 4. 保持你原有的交互样式不变 */
 .parameter-card:hover {
   background: rgba(255, 255, 255, 0.08);
-  transform: translateX(5px);
+  transform: translateY(0) translateX(5px);
 }
 
 .card-glow {
@@ -267,7 +268,7 @@ onMounted(() => {
 .toggle-item {
   padding: 6px 15px; border-radius: 4px;
   background: rgba(255,255,255,0.05); font-size: 13px;
-  cursor: pointer; transition: all 0.3s;
+  cursor: pointer; transition: background-color 0.3s ease, border-color 0.3s ease;
   border: 1px solid rgba(255,255,255,0.1);
 }
 .toggle-item.active {
@@ -281,7 +282,7 @@ onMounted(() => {
 .switch-handle {
   position: absolute; top: 2px; left: 2px;
   width: 16px; height: 16px; background: white;
-  border-radius: 50%; transition: 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+  border-radius: 50%; transition: left 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28), background-color 0.3s cubic-bezier(0.18, 0.89, 0.32, 1.28);
 }
 .cyber-switch.on { background: rgba(94, 234, 212, 0.4); }
 .cyber-switch.on .switch-handle { left: 22px; background: #5eead4; }
@@ -289,7 +290,7 @@ onMounted(() => {
 .save-btn {
   background: transparent; border: 1px solid rgba(255,255,255,0.3);
   color: white; padding: 12px 30px; border-radius: 4px;
-  letter-spacing: 2px; cursor: pointer; transition: 0.3s;
+  letter-spacing: 2px; cursor: pointer; transition: background-color 0.3s ease, color 0.3s ease, opacity 0.3s ease;
 }
 .save-btn:hover { background: white; color: black; }
 .save-btn:disabled { opacity: 0.4; cursor: not-allowed; }
@@ -333,7 +334,7 @@ onMounted(() => {
   border-radius: 4px;
   font-size: 12px;
   cursor: pointer;
-  transition: 0.3s;
+  transition: background-color 0.3s ease, border-color 0.3s ease;
 }
 .retry-btn:hover {
   background: rgba(255,255,255,0.1);

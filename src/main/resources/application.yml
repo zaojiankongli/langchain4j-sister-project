@@ -7,7 +7,7 @@ spring:
   datasource:
     password: ${MYSQL_PASSWORD}
     username: ${MYSQL_USERNAME}
-    url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/zjkl_sister?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=UTC&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/zjkl_sister?useUnicode=true&characterEncoding=utf-8&serverTimezone=UTC${MYSQL_JDBC_OPTIONS:}
     driverClassName: com.mysql.cj.jdbc.Driver
     hikari:
       pool-name: MyHikariPool
@@ -17,9 +17,6 @@ spring:
       idle-timeout: 600000
       max-lifetime: 1800000
       connection-test-query: SELECT 1
-  profiles:
-    # 不设置默认 profile，通过环境变量 SPRING_PROFILES_ACTIVE 指定
-    active: ""
   data:
     redis:
       host: ${REDIS_HOST}
@@ -153,6 +150,12 @@ app:
       - /api/auth/send-code
       - /api/auth/login
       - /api/auth/refresh
+      - /api/auth/wx-login
+      - /api/auth/bind-email
+  wechat:
+    appid: ${WECHAT_APPID}
+    secret: ${WECHAT_SECRET}
+    code-to-session-url: https://api.weixin.qq.com/sns/jscode2session
   milvus:
     host: ${MILVUS_HOST}
     port: ${MILVUS_PORT}
@@ -182,3 +185,18 @@ app:
     anchor-max-duration-minutes: 60
   recommendation-demo-user: demo_user
   prompt-cache-ttl: 300
+  thread-pool:
+    websocket-sender-core-size: 2
+    websocket-sender-max-size: 4
+    websocket-sender-queue-capacity: 100
+    llm-core-size: 2
+    llm-max-size: 4
+    llm-queue-capacity: 32
+    tts-core-size: 1
+    tts-max-size: 2
+    tts-queue-capacity: 16
+    milvus-core-size: 1
+    milvus-max-size: 2
+    milvus-queue-capacity: 16
+    redisson-min-idle: 2
+    redisson-pool-size: 8

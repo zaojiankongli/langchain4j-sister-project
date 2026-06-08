@@ -47,6 +47,11 @@ public class OssService {
     private static final List<String> ALLOWED_IMAGE_EXTENSIONS = Arrays.asList(
             "jpg", "jpeg", "png", "gif", "webp"
     );
+
+    // 允许的音频文件扩展名
+    private static final List<String> ALLOWED_AUDIO_EXTENSIONS = Arrays.asList(
+            "mp3", "wav", "m4a", "aac", "amr", "ogg", "webm"
+    );
     
     // 最大文件大小 5MB（简单上传限制）
     private static final long MAX_FILE_SIZE = 5 * 1024 * 1024;
@@ -94,6 +99,18 @@ public class OssService {
     }
 
     /**
+     * 上传语音文件到 OSS
+     */
+    public String uploadVoice(String userId, MultipartFile file) throws IOException {
+        if (userId == null || userId.isBlank()) {
+            throw new IllegalArgumentException("用户 ID 不能为空");
+        }
+        validateAudioFile(file, "语音");
+        String objectKey = objectKeyGenerator.generateVoiceObjectKey(userId, file.getOriginalFilename());
+        return uploadToOSS(file, objectKey, "语音");
+    }
+
+    /**
      * 从 URL 下载文件并上传到 OSS
      *
      * @param fileUrl 文件的 URL 地址
@@ -106,9 +123,9 @@ public class OssService {
             throw new IllegalArgumentException("文件 URL 不能为空");
         }
 
-        validateRemoteFileUrl(fileUrl);
+        URI fileUri = validateRemoteFileUrl(fileUrl);
         
-        log.info("开始从 URL 下载并上传 - fileUrl: {}", fileUrl);
+        log.info("开始从远程 URL 下载并上传 - source: {}", safeUrlForLog(fileUri));
         
         HttpURLConnection connection = null;
         try {
@@ -119,8 +136,10 @@ public class OssService {
             connection.setRequestMethod("GET");
             connection.setConnectTimeout(10000);
             connection.setReadTimeout(30000);
+            validateResolvedHost(fileUri.getHost());
             
             int responseCode = connection.getResponseCode();
+            validateResolvedHost(fileUri.getHost());
             // 拒绝重定向响应，避免 SSRF
             if (responseCode >= 300 && responseCode < 400) {
                 throw new IllegalArgumentException("不允许重定向的文件 URL");
@@ -366,7 +385,28 @@ public class OssService {
         }
     }
 
-    private void validateRemoteFileUrl(String fileUrl) {
+    private void validateAudioFile(MultipartFile file, String fileType) {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException(fileType + "不能为空");
+        }
+        if (file.getSize() > MAX_FILE_SIZE) {
+            throw new IllegalArgumentException(fileType + "大小不能超过 5MB");
+        }
+        String contentType = file.getContentType();
+        if (contentType != null && !contentType.startsWith("audio/") && !"application/octet-stream".equalsIgnoreCase(contentType)) {
+            throw new IllegalArgumentException(fileType + "只支持音频文件（MP3/WAV/M4A/AAC/AMR/OGG/WEBM）");
+        }
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename == null) {
+            throw new IllegalArgumentException(fileType + "文件名不能为空");
+        }
+        String extension = objectKeyGenerator.getFileExtension(originalFilename);
+        if (!ALLOWED_AUDIO_EXTENSIONS.contains(extension.toLowerCase())) {
+            throw new IllegalArgumentException(fileType + "只支持 MP3/WAV/M4A/AAC/AMR/OGG/WEBM 格式");
+        }
+    }
+
+    private URI validateRemoteFileUrl(String fileUrl) {
         try {
             URI uri = URI.create(fileUrl);
             String scheme = uri.getScheme();
@@ -379,17 +419,30 @@ public class OssService {
                 throw new IllegalArgumentException("文件 URL 缺少合法主机名");
             }
 
-            InetAddress[] addresses = InetAddress.getAllByName(host);
-            for (InetAddress address : addresses) {
-                if (isLocalOrPrivateAddress(address)) {
-                    throw new IllegalArgumentException("不允许上传来自本地或内网地址的文件");
-                }
-            }
+            validateResolvedHost(host);
+            return uri;
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (Exception e) {
             throw new IllegalArgumentException("文件 URL 非法", e);
         }
+    }
+
+    private void validateResolvedHost(String host) throws java.net.UnknownHostException {
+        InetAddress[] addresses = InetAddress.getAllByName(host);
+        for (InetAddress address : addresses) {
+            if (isLocalOrPrivateAddress(address)) {
+                throw new IllegalArgumentException("不允许上传来自本地或内网地址的文件");
+            }
+        }
+    }
+
+    private String safeUrlForLog(URI uri) {
+        String path = uri.getPath();
+        if (path == null || path.isBlank()) {
+            path = "/";
+        }
+        return uri.getScheme() + "://" + uri.getHost() + path;
     }
 
     private boolean isLocalOrPrivateAddress(InetAddress address) {

@@ -18,9 +18,11 @@ app.config.errorHandler = (err, instance, info) => {
 // 全局未捕获 Promise 拒绝：避免静默失败
 window.addEventListener('unhandledrejection', (event) => {
   const message = event.reason?.message || event.reason || '未知错误'
-  console.warn('[Unhandled Rejection]', message)
-  // 取消默认处理（浏览器控制台仍会打印，但不触发 onerror）
-  event.preventDefault()
+  console.error('[Unhandled Rejection]', message)
+  // 生产环境阻止默认行为（避免用户看到浏览器原始弹窗），开发环境保留浏览器红色告警
+  if (!import.meta.env.DEV) {
+    event.preventDefault()
+  }
 })
 
 app.mount('#app')

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, watch, onBeforeUnmount } from 'vue';
+import { ref, reactive, watch, onBeforeUnmount, computed } from 'vue';
 import request from '@/utils/request';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
@@ -59,6 +59,8 @@ const aiMessages = [
 // 监听场景开启
 watch(() => props.modelValue, (newVal) => {
   if (newVal) {
+    // 清除旧定时器，防止快速重开导致 step 被旧定时器提前跳转
+    if (dialogTimeout) { clearTimeout(dialogTimeout); dialogTimeout = null; }
     step.value = 0;
     dialogTimeout = setTimeout(() => { step.value = 1; }, 2200);
   }
@@ -148,7 +150,7 @@ const handleAvatarUpload = async (e) => {
 
 const selectMale = () => { profile.gender = 1; nextStep() }
 const selectFemale = () => { profile.gender = 2; nextStep() }
-const retrySubmit = () => { step.value = 6; saveError.value = '' }
+const retrySubmit = () => { saveError.value = ''; submitData() }
 
 const nextStep = () => {
   step.value++;
@@ -347,7 +349,7 @@ onBeforeUnmount(() => {
 .background-overlay {
   position: absolute; inset: 0;
   background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(25px) brightness(0.9);
+  backdrop-filter: blur(12px) brightness(0.9);
   z-index: -1;
 }
 
@@ -359,12 +361,12 @@ onBeforeUnmount(() => {
 .glow-sphere {
   width: 100%; height: 100%; border-radius: 50%;
   background: radial-gradient(circle, #fff 0%, transparent 70%);
-  filter: blur(20px); animation: breathe 3s infinite ease-in-out;
+  filter: blur(10px); animation: breathe 3s infinite ease-in-out;
 }
 @keyframes breathe { 0%, 100% { opacity: 0.3; transform: scale(1); } 50% { opacity: 0.6; transform: scale(1.2); } }
 
 .ai-bubble {
-  background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(6px);
   padding: 25px 45px; border-radius: 4px; margin-bottom: 40px;
   border: 1px solid rgba(255, 255, 255, 0.5);
   box-shadow: 0 10px 40px rgba(0,0,0,0.03);
@@ -376,7 +378,7 @@ onBeforeUnmount(() => {
 .id-card {
   flex: 1; max-width: 180px; padding: 25px 15px;
   background: rgba(255,255,255,0.4); border: 1px solid rgba(255,255,255,0.8);
-  border-radius: 12px; cursor: pointer; transition: 0.3s;
+  border-radius: 12px; cursor: pointer; transition: background-color 0.3s ease, opacity 0.3s ease, filter 0.3s ease, transform 0.3s ease;
   display: flex; flex-direction: column; align-items: center; position: relative;
 }
 .id-card.active:hover { background: #fff; transform: translateY(-5px); }
@@ -393,21 +395,21 @@ onBeforeUnmount(() => {
 .glass-input {
   background: rgba(255,255,255,0.4); border: 1px solid rgba(255,255,255,0.6);
   padding: 14px 25px; border-radius: 8px; width: 320px;
-  font-size: 16px; outline: none; transition: 0.3s; text-align: center;
+  font-size: 16px; outline: none; transition: background-color 0.3s ease, border-color 0.3s ease; text-align: center;
 }
 .glass-input:focus { background: #fff; border-color: #fff; }
 
 .glass-btn {
   background: #333; color: #fff; border: none; padding: 12px 40px;
   border-radius: 50px; font-size: 13px; letter-spacing: 2px;
-  cursor: pointer; transition: 0.3s;
+  cursor: pointer; transition: background-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
 }
 .glass-btn:hover { background: #000; transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
 
 /* 选项卡片 (用户身份) */
 .option-card {
   background: rgba(255,255,255,0.5); border: 1px solid rgba(255,255,255,0.8);
-  padding: 20px 45px; border-radius: 12px; cursor: pointer; transition: 0.3s;
+  padding: 20px 45px; border-radius: 12px; cursor: pointer; transition: background-color 0.3s ease, transform 0.3s ease;
   display: flex; flex-direction: column; align-items: center;
 }
 .option-card:hover { background: #fff; transform: translateY(-5px); }
@@ -417,10 +419,10 @@ onBeforeUnmount(() => {
 /* ── 自定义日期选择器 (3-select glassmorphism) ── */
 .date-picker-group {
   display: flex; align-items: center; gap: 6px;
-  background: rgba(255,255,255,0.4); backdrop-filter: blur(10px);
+  background: rgba(255,255,255,0.4); backdrop-filter: blur(6px);
   border: 1px solid rgba(255,255,255,0.6);
   border-radius: 12px; padding: 8px 16px;
-  transition: all 0.3s ease;
+  transition: background-color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
 }
 .date-picker-group:focus-within {
   background: #fff; border-color: #fff;
@@ -461,7 +463,7 @@ onBeforeUnmount(() => {
 .tag-item {
   padding: 8px 18px; border-radius: 20px; font-size: 13px;
   background: rgba(255,255,255,0.4); border: 1px solid rgba(255,255,255,0.6);
-  color: #666; cursor: pointer; transition: 0.3s;
+  color: #666; cursor: pointer; transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
 }
 .tag-item.active { background: #333; color: #fff; border-color: #333; }
 .inline-tag-input {
@@ -473,7 +475,7 @@ onBeforeUnmount(() => {
 .upload-box {
   width: 160px; height: 100px; border: 1px dashed #ccc;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
-  border-radius: 12px; cursor: pointer; transition: 0.3s; position: relative;
+  border-radius: 12px; cursor: pointer; transition: background-color 0.3s ease, border-color 0.3s ease; position: relative;
 }
 .upload-box:hover { background: rgba(255,255,255,0.5); border-color: #888; }
 .upload-box .icon { font-size: 24px; color: #888; margin-bottom: 8px; }
@@ -492,7 +494,7 @@ onBeforeUnmount(() => {
 /* 底部状态 — 多阶段同步 */
 .sync-status { display: flex; flex-direction: column; align-items: flex-start; gap: 0; width: 280px; }
 .sync-stages { display: flex; flex-direction: column; gap: 14px; width: 100%; padding: 8px 0; }
-.sync-stage-row { display: flex; align-items: center; gap: 12px; transition: all 0.4s ease; }
+.sync-stage-row { display: flex; align-items: center; gap: 12px; transition: opacity 0.4s ease; }
 .sync-stage-row.future { opacity: 0.3; }
 .sync-stage-row.current { opacity: 1; }
 .sync-stage-row.past { opacity: 0.65; }
@@ -510,10 +512,10 @@ onBeforeUnmount(() => {
 .fade-leave-active { transition: opacity 0.4s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
-.slide-fade-enter-active { transition: all 0.5s ease-out; }
+.slide-fade-enter-active { transition: opacity 0.5s ease-out, transform 0.5s ease-out; }
 .slide-fade-enter-from { opacity: 0; transform: translateY(10px); }
 
-.action-pop-enter-active { transition: all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+.action-pop-enter-active { transition: opacity 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275), transform 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
 .action-pop-enter-from { opacity: 0; transform: scale(0.9) translateY(20px); }
 
 .text-btn { background: transparent; border: none; color: #999; font-size: 12px; cursor: pointer; text-decoration: underline; }

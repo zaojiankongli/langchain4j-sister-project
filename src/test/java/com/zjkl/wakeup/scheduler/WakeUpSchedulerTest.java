@@ -1,14 +1,14 @@
 package com.zjkl.wakeup.scheduler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.zjkl.ai.chat.service.ConverMessageService;
 import com.zjkl.ai.chat.stomp.ChatPushService;
 import com.zjkl.ai.component.UserActivityTracker;
 import com.zjkl.ai.prompt.service.PromptTemplateService;
+import com.zjkl.anchor.service.AnchorEventService;
 import com.zjkl.common.config.properties.WakeUpProperties;
+import com.zjkl.common.event.WakeUpSentEvent;
 import com.zjkl.emotion.model.EmotionalState;
 import com.zjkl.emotion.model.VoiceSynthesisParam;
-import com.zjkl.emotion.service.EmotionAnchorService;
 import com.zjkl.emotion.service.EmotionService;
 import com.zjkl.emotion.service.VoiceSynthesisService;
 import com.zjkl.settings.model.UserSettings;
@@ -28,11 +28,13 @@ import com.zjkl.wakeup.template.WakeUpPromptBuilder;
 import com.zjkl.wakeup.tool.TimeContextTool;
 import com.zjkl.wakeup.tool.UserStateTool;
 import com.zjkl.wakeup.tracker.WakeUpTracker;
+import com.zjkl.wakeup.workflow.WakeUpWorkflow;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -62,7 +64,7 @@ class WakeUpSchedulerTest {
     @Mock private EmotionService emotionService;
     @Mock private VoiceSynthesisService voiceSynthesisService;
     @Mock private ChatPushService chatPushService;
-    @Mock private ConverMessageService converMessageService;
+    @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private StringRedisTemplate redisTemplate;
     @Mock private ValueOperations<String, String> valueOperations;
     @Mock private WakeUpGenerator1Agent generator1Agent;
@@ -77,6 +79,8 @@ class WakeUpSchedulerTest {
     @Mock private PromptTemplateService promptTemplateService;
     @Mock private SettingsService settingsService;
 
+    private WakeUpWorkflow wakeUpWorkflow;
+
     private WakeUpScheduler scheduler;
 
     @BeforeEach
@@ -88,30 +92,34 @@ class WakeUpSchedulerTest {
         WakeUpArbiter arbiter = new WakeUpArbiter(objectMapper);
         WakeUpProperties wakeUpProperties = new WakeUpProperties();
 
-        scheduler = new WakeUpScheduler(
-                userActivityTracker,
-                userStateTool,
-                timeContextTool,
-                emotionService,
+        wakeUpWorkflow = new WakeUpWorkflow(
                 voiceSynthesisService,
                 chatPushService,
-                converMessageService,
-                redisTemplate,
-                generator1Agent,
-                generator2Agent,
-                generator3Agent,
-                scorer1Agent,
-                scorer2Agent,
-                scorer3Agent,
-                arbiterAgent,
-                wakeUpTracker,
+                eventPublisher,
+                emotionService,
+                settingsService,
+                userStateTool,
                 userProfileService,
                 promptTemplateService,
                 promptBuilder,
                 contentGenerator,
                 scorer,
                 arbiter,
-                settingsService,
+                wakeUpTracker,
+                generator1Agent,
+                generator2Agent,
+                generator3Agent,
+                scorer1Agent,
+                scorer2Agent,
+                scorer3Agent,
+                arbiterAgent
+        );
+
+        scheduler = new WakeUpScheduler(
+                userActivityTracker,
+                timeContextTool,
+                redisTemplate,
+                wakeUpWorkflow,
                 wakeUpProperties
         );
 
@@ -175,6 +183,7 @@ class WakeUpSchedulerTest {
         assertEquals(3, result);
         verify(chatPushService).pushText(eq("u1"), anyString(), eq(true));
         verify(userStateTool).recordWakeUp("u1");
+        verify(eventPublisher).publishEvent(any(WakeUpSentEvent.class));
     }
 
     @Test

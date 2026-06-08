@@ -4,6 +4,8 @@ import { STORAGE_KEYS } from '@/config/storage'
 import { API } from '@/config/api'
 import request from '@/utils/request'
 import { safeGet, safeSet, safeRemove, safeGetJSON, safeSetJSON } from '@/utils/storage'
+import { getUserIdFromToken } from '@/utils/jwt'
+import { setAccessTokenCache } from '@/utils/tokenCache'
 
 /**
  * 认证状态管理 Store
@@ -21,24 +23,13 @@ export const useAuthStore = defineStore('auth', () => {
 
   // ── 计算属性 ──
   const isAuthenticated = computed(() => !!accessToken.value)
-  const userId = computed(() => user.value?.id || parseUserIdFromToken(accessToken.value))
+  const userId = computed(() => user.value?.id || getUserIdFromToken(accessToken.value))
   const username = computed(() => user.value?.username || '')
 
   // ── 内部工具 ──
     function parseUser() {
       return safeGetJSON(STORAGE_KEYS.USER)
     }
-
-   function parseUserIdFromToken(token) {
-     if (!token) return null
-     try {
-       const payload = JSON.parse(atob(token.split('.')[1]))
-       return payload.sub || payload.userId || payload.id
-     } catch (error) {
-       console.warn('解析token payload失败:', error, token)
-       return null
-     }
-   }
 
   function syncLocalStorage() {
     if (accessToken.value) {
@@ -64,6 +55,7 @@ export const useAuthStore = defineStore('auth', () => {
     refreshToken.value = refresh
     if (userData) user.value = userData
     error.value = ''
+    setAccessTokenCache(token)
     syncLocalStorage()
   }
 
@@ -72,6 +64,7 @@ export const useAuthStore = defineStore('auth', () => {
     refreshToken.value = ''
     user.value = null
     error.value = ''
+    setAccessTokenCache('')
     syncLocalStorage()
   }
 

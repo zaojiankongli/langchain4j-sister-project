@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zjkl.memory.gallery.mapper.ConversationMemoryGalleryLinkMapper">
+
+    <resultMap id="BaseResultMap" type="com.zjkl.memory.gallery.entity.ConversationMemoryGalleryLink">
+        <id column="id" property="id"/>
+        <result column="memory_id" property="memoryId"/>
+        <result column="gallery_key" property="galleryKey"/>
+        <result column="confidence" property="confidence"/>
+        <result column="is_primary" property="primaryLink"/>
+        <result column="matched_keywords" property="matchedKeywords"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.zjkl.memory.gallery.entity.ConversationMemoryGalleryLink" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO conversation_memory_gallery_links (memory_id, gallery_key, confidence, is_primary, matched_keywords)
+        VALUES (#{memoryId}, #{galleryKey}, #{confidence}, #{primaryLink}, #{matchedKeywords})
+    </insert>
+
+    <delete id="deleteByMemoryId">
+        DELETE FROM conversation_memory_gallery_links WHERE memory_id = #{memoryId}
+    </delete>
+
+    <select id="selectByMemoryId" resultMap="BaseResultMap">
+        SELECT * FROM conversation_memory_gallery_links WHERE memory_id = #{memoryId} ORDER BY confidence DESC, id ASC
+    </select>
+
+    <select id="selectPrimaryByMemoryIdAndGalleryKey" resultMap="BaseResultMap">
+        SELECT *
+        FROM conversation_memory_gallery_links
+        WHERE memory_id = #{memoryId}
+          AND gallery_key = #{galleryKey}
+          AND is_primary = 1
+        ORDER BY id ASC
+        LIMIT 1
+    </select>
+
+</mapper>

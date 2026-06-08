@@ -23,6 +23,13 @@
             updated_at = NOW() 
         WHERE id = #{userId}
     </update>
+
+    <update id="updateUserBackground">
+        UPDATE users
+        SET background_url = #{backgroundUrl},
+            updated_at = NOW()
+        WHERE id = #{userId}
+    </update>
     
     <update id="updateUserBasic">
         UPDATE users 

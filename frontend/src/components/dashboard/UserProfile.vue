@@ -1,11 +1,13 @@
 <script setup>
+defineOptions({ name: 'UserProfile' })
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
-import request from '@/utils/request'
 import { getUserId } from '@/utils/auth'
-import { API } from '@/config/api'
 import { useAsyncData } from '@/composables/useAsyncData'
 import { useUiStore } from '@/stores/ui'
 import { useUserStore } from '@/stores/user'
+import request from '@/utils/request'
+import { getOptimizedImageUrl } from '@/utils/image'
+import { API } from '@/config/api'
 
 let _isMounted = true
 onBeforeUnmount(() => { _isMounted = false })
@@ -19,7 +21,7 @@ const userStore = useUserStore()
 const { data: user, loading, error, execute: fetchUserData } = useAsyncData(async () => {
   const userId = getUserId()
   if (!userId) return
-  const res = await request.get(API.MY_PROFILE)
+  const res = await request.get(API.USER_PROFILE)
   if (res.code === 200 && res.data) return res.data
   throw new Error(res.message || '获取用户数据失败')
 })
@@ -100,19 +102,31 @@ const isActivityCollapsed = ref(true)
 // ==========================================
 // 七、交互行为
 // ==========================================
+const MAX_AVATAR_SIZE = 5 * 1024 * 1024 // 5MB
+const ALLOWED_AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+
 const triggerAvatarUpload = () => avatarInput.value.click()
 const handleAvatarChange = async (event) => {
   const file = event.target.files[0]
   if (!file) return
+
+  if (!ALLOWED_AVATAR_TYPES.includes(file.type)) {
+    uiStore.error('仅支持 JPG、PNG、WebP、GIF 格式的图片')
+    event.target.value = ''
+    return
+  }
+  if (file.size > MAX_AVATAR_SIZE) {
+    uiStore.error('图片大小不能超过 5MB')
+    event.target.value = ''
+    return
+  }
+
   try {
-    const formData = new FormData()
-    formData.append('file', file)
-    const res = await request.post(API.USER_AVATAR, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' }
-    })
+    const res = await userStore.updateAvatar(file)
     if (!_isMounted) return
     if (res.code === 200 && res.data) {
       mergedUser.value.avatar_url = res.data
+      mergedUser.value.avatarUrl = res.data
     }
   } catch (err) {
     if (!_isMounted) return
@@ -176,12 +190,14 @@ const addHobby = async () => {
 const changeAIType = async (type) => {
   const prevType = mergedUser.value.ai_type // 保存旧值用于回滚
   mergedUser.value.ai_type = type
+   mergedUser.value.aiType = type
   showAITypeSelector.value = false
   try {
-    await request.post(API.USER_UPDATE_AI_TYPE, { ai_type: type })
+    await userStore.updateAIType(type)
     if (!_isMounted) { mergedUser.value.ai_type = prevType; return }
   } catch (err) {
     mergedUser.value.ai_type = prevType // 回滚
+    mergedUser.value.aiType = prevType
     console.error('Failed to change AI type', err)
     uiStore.error('变更AI类型失败，请重试')
   }
@@ -232,7 +248,7 @@ async function handleRedraw() {
       <div class="section-tag">IDENTITY_CARD //</div>
       <div class="profile-main">
         <div class="avatar-area" @click="triggerAvatarUpload">
-          <img v-if="mergedUser.avatar_url" :src="mergedUser.avatar_url" class="avatar-circle avatar-img" alt="avatar" />
+          <img v-if="mergedUser.avatar_url" :src="getOptimizedImageUrl(mergedUser.avatar_url, { width: 128 })" class="avatar-circle avatar-img" alt="avatar" decoding="async" />
           <div v-else class="avatar-circle avatar-placeholder"><span class="upload-icon">+</span></div>
           <input type="file" ref="avatarInput" accept="image/*" class="hidden-file-input" @change="handleAvatarChange" />
         </div>
@@ -302,7 +318,7 @@ async function handleRedraw() {
           </div>
         </div>
         <div class="perception-poster">
-          <img v-if="mergedUser.ai_image_url" :src="mergedUser.ai_image_url" alt="AI Perception" />
+          <img v-if="mergedUser.ai_image_url" :src="getOptimizedImageUrl(mergedUser.ai_image_url, { width: 320 })" alt="AI Perception" loading="lazy" decoding="async" />
           <div v-else class="perception-placeholder">
             <span class="placeholder-hint">{{ isRedrawing ? '✦' : '✧' }}</span>
           </div>
@@ -346,9 +362,9 @@ async function handleRedraw() {
   padding: 24px;
   margin-bottom: 24px;
   border-radius: 4px;
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(6px);
   position: relative;
-  transition: all 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: background-color 0.3s cubic-bezier(0.22, 1, 0.36, 1), border-color 0.3s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.3s cubic-bezier(0.22, 1, 0.36, 1), transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .section-tag { font-size: 10px; color: rgba(255, 255, 255, 0.5); letter-spacing: 2px; margin-bottom: 20px; font-family: monospace; }
@@ -417,7 +433,7 @@ async function handleRedraw() {
 }
 
 /* 其他辅助 */
-.action-btn { color: #7c9cff; font-size: 11px; cursor: pointer; opacity: 0.7; transition: 0.3s; }
+.action-btn { color: #7c9cff; font-size: 11px; cursor: pointer; opacity: 0.7; transition: opacity 0.3s ease, text-shadow 0.3s ease; }
 .action-btn:hover { opacity: 1; text-shadow: 0 0 10px rgba(124,156,255,0.6); }
 .bottom-right-action { position: absolute; bottom: 24px; right: 24px; }
 .tag-cloud { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -444,8 +460,8 @@ async function handleRedraw() {
 
 /* 动画 */
 @keyframes space-dissolve {
-  0% { opacity: 0; transform: translateY(15px); filter: blur(10px); }
-  100% { opacity: 1; transform: translateY(0); filter: blur(0); }
+  0% { opacity: 0; transform: translateY(15px); }
+  100% { opacity: 1; transform: translateY(0); }
 }
 .stagger-1 { animation-delay: 0.1s; }
 .stagger-2 { animation-delay: 0.2s; }

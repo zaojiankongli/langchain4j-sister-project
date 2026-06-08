@@ -65,7 +65,7 @@ public class RedisStreamConfig {
             redisTemplate.opsForStream().createGroup(streamKey, groupName);
             log.info("消费者组创建成功：{} for {}", groupName, streamKey);
         } catch (Exception e) {
-            if (e.getMessage() != null && e.getMessage().contains("BUSYGROUP")) {
+            if (hasCauseMessage(e, "BUSYGROUP")) {
                 // 组已存在，忽略
                 log.debug("消费者组已存在：{} for {}", groupName, streamKey);
             } else {
@@ -73,6 +73,18 @@ public class RedisStreamConfig {
                 throw e;
             }
         }
+    }
+
+    private boolean hasCauseMessage(Throwable throwable, String text) {
+        Throwable current = throwable;
+        while (current != null) {
+            String message = current.getMessage();
+            if (message != null && message.contains(text)) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
     
 }

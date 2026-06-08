@@ -8,7 +8,7 @@
       </div>
     </div>
 
-    <div class="minimal-divider"></div>
+    <div class="minimal-divider" />
 
     <div class="weather-section">
       <div class="weather-row">
@@ -27,6 +27,7 @@
 <script setup>
 import { ref, onMounted, onUnmounted, onBeforeUnmount, reactive } from 'vue'
 import request from '@/utils/request'
+import { getUserId } from '@/utils/auth'
 import { useUiStore } from '@/stores/ui'
 
 const timeStr = ref('')
@@ -95,7 +96,13 @@ const updateTime = () => {
   weekStr.value = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][now.getDay()]
 }
 
+const getMsUntilNextMinute = () => {
+  const now = new Date()
+  return (60 - now.getSeconds()) * 1000 - now.getMilliseconds()
+}
+
 let timeTimer = null
+let timeTimeout = null
 let _isMounted = true
 
 onBeforeUnmount(() => { _isMounted = false })
@@ -126,16 +133,22 @@ const applyOpenMeteoWeather = (data, cityName) => {
   return false
 }
 
-const CACHE_KEY = 'zeeva-weather-cache'
+const CACHE_KEY_BASE = 'zeeva-weather-cache'
 const CACHE_TTL = 1000 * 60 * 30 // 30 分钟
+
+function getCacheKey() {
+  const uid = getUserId()
+  return uid ? `${CACHE_KEY_BASE}-${uid}` : CACHE_KEY_BASE
+}
 
 function loadCache() {
   try {
-    const raw = localStorage.getItem(CACHE_KEY)
+    const key = getCacheKey()
+    const raw = localStorage.getItem(key)
     if (!raw) return false
     const cache = JSON.parse(raw)
     if (Date.now() - cache.timestamp > CACHE_TTL) {
-      localStorage.removeItem(CACHE_KEY)
+      localStorage.removeItem(key)
       return false
     }
     Object.assign(weatherInfo, cache.data)
@@ -147,7 +160,7 @@ function loadCache() {
 
 function saveCache() {
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({
+    localStorage.setItem(getCacheKey(), JSON.stringify({
       timestamp: Date.now(),
       data: { ...weatherInfo }
     }))
@@ -158,45 +171,77 @@ const fetchWeather = async () => {
   // 缓存命中直接返回
   if (loadCache()) return
 
-   // 策略 1：浏览器定位 → Open-Meteo（无需 API key）
-   if (navigator.geolocation) {
-     try {
-       const pos = await new Promise((resolve, reject) => {
-         navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 })
-       })
-       if (!_isMounted) return
-       const meteoData = await fetchOpenMeteo(pos.coords.latitude, pos.coords.longitude)
-       if (!_isMounted) return
-       if (applyOpenMeteoWeather(meteoData, '')) { saveCache(); return }
-     } catch {
-       if (!_isMounted) return
-       uiStore.error('获取地理位置失败，将尝试其他方式获取天气')
-     }
-   }
+  let settled = false
+  let completed = 0
 
-   // 策略 2：ip-api.com → Open-Meteo
-   try {
-     const res = await request.get('https://ip-api.com/json/', {
-       params: { fields: 'status,city,lat,lon' },
-       timeout: 5000
-     })
-     if (!_isMounted) return
-     if (res && res.status === 'success' && res.lat && res.lon) {
-       const meteoData = await fetchOpenMeteo(res.lat, res.lon)
-       if (!_isMounted) return
-       if (applyOpenMeteoWeather(meteoData, res.city)) { saveCache(); return }
-     }
-   } catch {
-     if (!_isMounted) return
-     uiStore.error('获取网络位置失败，将使用默认天气信息')
-   }
+  // Atomically claim "first winner" — single-threaded JS guarantees this is safe
+  const trySettle = () => {
+    if (settled || !_isMounted) return false
+    settled = true
+    return true
+  }
+
+  const finalizeIfNeeded = () => {
+    completed += 1
+    if (completed < 2 || settled || !_isMounted) return
+
+    weatherInfo.temp = '--'
+    weatherInfo.desc = ''
+    weatherInfo.city = ''
+    weatherInfo.moodText = '断开了和外界的联系呢...'
+    uiStore.error('获取天气失败，将使用默认天气信息')
+  }
+
+  // 策略 1：浏览器定位 → Open-Meteo（无需 API key）
+  const geoTask = (async () => {
+    if (!navigator.geolocation) {
+      finalizeIfNeeded()
+      return
+    }
+
+    try {
+      const pos = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 })
+      })
+      if (settled || !_isMounted) return
+      const meteoData = await fetchOpenMeteo(pos.coords.latitude, pos.coords.longitude)
+      if (settled || !_isMounted) return
+      if (applyOpenMeteoWeather(meteoData, '') && trySettle()) {
+        saveCache()
+      }
+    } catch (e) {
+      console.warn('StatusPanel geolocation weather failed:', e)
+    } finally {
+      finalizeIfNeeded()
+    }
+  })()
+
+  // 策略 2：ip-api.com → Open-Meteo
+  const ipTask = (async () => {
+    try {
+      const res = await request.get('https://ip-api.com/json/', {
+        params: { fields: 'status,city,lat,lon' },
+        timeout: 5000
+      })
+      if (settled || !_isMounted) return
+      if (res && res.status === 'success' && res.lat && res.lon) {
+        const meteoData = await fetchOpenMeteo(res.lat, res.lon)
+        if (settled || !_isMounted) return
+        if (applyOpenMeteoWeather(meteoData, res.city) && trySettle()) {
+          saveCache()
+        }
+      }
+    } catch (e) {
+      console.warn('StatusPanel ip weather failed:', e)
+    } finally {
+      finalizeIfNeeded()
+    }
+  })()
+
+  await Promise.all([geoTask, ipTask])
 
   // 全部失败
-  if (!_isMounted) return
-  weatherInfo.temp = '--'
-  weatherInfo.desc = ''
-  weatherInfo.city = ''
-  weatherInfo.moodText = '断开了和外界的联系呢...'
+  if (!_isMounted || settled) return
 }
 
 /**
@@ -204,11 +249,17 @@ const fetchWeather = async () => {
  */
 const handleVisibilityChange = () => {
   if (document.hidden) {
+    clearTimeout(timeTimeout)
     clearInterval(timeTimer)
+    timeTimeout = null
     timeTimer = null
-  } else if (!timeTimer) {
+  } else if (!timeTimeout && !timeTimer) {
     updateTime()
-    timeTimer = setInterval(updateTime, 1000)
+    timeTimeout = setTimeout(() => {
+      updateTime()
+      timeTimer = setInterval(updateTime, 60 * 1000)
+      timeTimeout = null
+    }, getMsUntilNextMinute())
   }
 }
 
@@ -216,11 +267,16 @@ onMounted(() => {
   updateTime()
   fetchWeather()
 
-  timeTimer = setInterval(updateTime, 1000)
+  timeTimeout = setTimeout(() => {
+    updateTime()
+    timeTimer = setInterval(updateTime, 60 * 1000)
+    timeTimeout = null
+  }, getMsUntilNextMinute())
   document.addEventListener('visibilitychange', handleVisibilityChange)
 })
 
 onUnmounted(() => {
+  clearTimeout(timeTimeout)
   clearInterval(timeTimer)
   document.removeEventListener('visibilitychange', handleVisibilityChange)
 })

@@ -25,6 +25,9 @@ public class UserProfileVO {
     
     @JsonProperty("avatar_url")
     private String avatarUrl;
+
+    @JsonProperty("background_url")
+    private String backgroundUrl;
     
     @JsonProperty("gender")
     private Integer gender;

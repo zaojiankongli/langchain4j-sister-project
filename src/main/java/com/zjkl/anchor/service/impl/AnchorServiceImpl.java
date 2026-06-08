@@ -1,8 +1,8 @@
 package com.zjkl.anchor.service.impl;
 
 import com.zjkl.anchor.service.AnchorService;
-import com.zjkl.emotion.model.EmotionAnchorEvent;
-import com.zjkl.emotion.service.EmotionAnchorService;
+import com.zjkl.anchor.service.AnchorEventService;
+import com.zjkl.anchor.model.AnchorEvent;
 import com.zjkl.memory.domain.vo.MemoryVO;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -14,17 +14,17 @@ import java.util.List;
 @RequiredArgsConstructor
 public class AnchorServiceImpl implements AnchorService {
 
-    private final EmotionAnchorService emotionAnchorService;
+    private final AnchorEventService anchorEventService;
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy.MM.dd");
     private static final DateTimeFormatter DATETIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     @Override
     public List<MemoryVO> getMilestones(String userId, int offset, int limit, String beginDate, String endDate) {
-        List<EmotionAnchorEvent> events = emotionAnchorService.getEventsPaged(userId, offset, limit, beginDate, endDate);
+        List<AnchorEvent> events = anchorEventService.getEventsPaged(userId, offset, limit, beginDate, endDate);
         return events.stream().map(this::toMemoryVO).toList();
     }
 
-    private MemoryVO toMemoryVO(EmotionAnchorEvent event) {
+    private MemoryVO toMemoryVO(AnchorEvent event) {
         MemoryVO vo = new MemoryVO();
         vo.setId(event.getId());
         vo.setType("milestone");
@@ -43,7 +43,7 @@ public class AnchorServiceImpl implements AnchorService {
         vo.setDesc(desc.toString());
         // endType 映射为 mood
         if (event.getEndType() != null) {
-            vo.setMood(event.getEndType() == EmotionAnchorEvent.EndType.POSITIVE ? "正向" : "负向");
+            vo.setMood(event.getEndType() == AnchorEvent.EndType.POSITIVE ? "正向" : "负向");
         }
         if (event.getStartTime() != null) {
             vo.setDate(event.getStartTime().format(DATE_FORMATTER));

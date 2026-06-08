@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { getAccessToken } from '@/utils/auth'
+import { isTokenUsable } from '@/utils/jwt'
 
 const routes = [
   {
@@ -24,13 +25,23 @@ const router = createRouter({
   routes
 })
 
-// 路由守卫
-router.beforeEach((to, from) => {
-  const token = getAccessToken()
+async function clearStaleAuth() {
+  const { useAuthStore } = await import('@/stores/auth')
+  useAuthStore().clearAuth()
+}
 
-  if (to.meta.requiresAuth && !token) {
+// 路由守卫
+router.beforeEach(async (to, _from) => {
+  const token = getAccessToken()
+  const hasUsableToken = isTokenUsable(token)
+
+  if (token && !hasUsableToken) {
+    await clearStaleAuth()
+  }
+
+  if (to.meta.requiresAuth && !hasUsableToken) {
     return { name: 'Login', query: { redirect: to.fullPath } }
-  } else if (to.name === 'Login' && token) {
+  } else if (to.name === 'Login' && hasUsableToken) {
     return { name: 'Dashboard' }
   }
 })

@@ -1,9 +1,11 @@
 package com.zjkl.auth.controller;
 
 import com.zjkl.auth.dto.CompleteProfileRequest;
+import com.zjkl.auth.dto.BindEmailRequest;
 import com.zjkl.auth.dto.LoginRequest;
 import com.zjkl.auth.dto.RefreshTokenRequest;
 import com.zjkl.auth.dto.SendCodeRequest;
+import com.zjkl.auth.dto.WxLoginRequest;
 import com.zjkl.auth.service.AuthService;
 import com.zjkl.common.context.UserContext;
 import com.zjkl.common.util.HashUtil;
@@ -33,6 +35,12 @@ public class AuthController {
 
     private static final long COMPLETE_PROFILE_WINDOW_MS = 60_000;
     private static final int COMPLETE_PROFILE_MAX = 5;
+
+    private static final long WX_LOGIN_WINDOW_MS = 60_000;
+    private static final int WX_LOGIN_MAX = 5;
+
+    private static final long BIND_EMAIL_WINDOW_MS = 60_000;
+    private static final int BIND_EMAIL_MAX = 5;
 
     private final AuthService authService;
     private final UserContext userContext;
@@ -67,6 +75,36 @@ public class AuthController {
             return Result.rateLimited("登录尝试过于频繁，请 1 分钟后再试");
         }
         Map<String, Object> result = authService.login(request);
+        return Result.success(result);
+    }
+
+    @PostMapping("/wx-login")
+    public Result<Map<String, Object>> wxLogin(@RequestBody @Valid WxLoginRequest request) {
+        String rateKey = "rate:wx-login:" + hashToken(request.code());
+        if (!rateLimiter.tryAcquire(rateKey, WX_LOGIN_MAX, WX_LOGIN_WINDOW_MS)) {
+            return Result.rateLimited("微信登录过于频繁，请稍后再试");
+        }
+        Map<String, Object> result = authService.wxLogin(request.code());
+        return Result.success(result);
+    }
+
+    @PostMapping("/bind-email")
+    public Result<Map<String, Object>> bindEmail(@RequestBody @Valid BindEmailRequest request) {
+        String rateKey = "rate:bind-email:" + hashToken(request.bindToken());
+        if (!rateLimiter.tryAcquire(rateKey, BIND_EMAIL_MAX, BIND_EMAIL_WINDOW_MS)) {
+            return Result.rateLimited("绑定过于频繁，请稍后再试");
+        }
+        Map<String, Object> result = authService.bindEmail(request);
+        return Result.success(result);
+    }
+
+    @PostMapping("/sync-email-account")
+    public Result<Map<String, Object>> syncEmailAccount() {
+        String userId = userContext.getUserId();
+        if (userId == null) {
+            return Result.unauthorized("请先登录");
+        }
+        Map<String, Object> result = authService.syncEmailAccount(userId);
         return Result.success(result);
     }
 

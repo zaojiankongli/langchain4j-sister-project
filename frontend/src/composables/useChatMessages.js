@@ -73,10 +73,16 @@ export function useChatMessages(aliveCheck) {
   function saveToStorage() {
     if (_storageScheduled) return // 同一 tick 内多次调用合并为一次写入
     _storageScheduled = true
-    Promise.resolve().then(() => {
+    const flush = () => {
       _storageScheduled = false
       commitToStorage()
-    })
+    }
+
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      window.requestIdleCallback(flush, { timeout: 1000 })
+    } else {
+      window.setTimeout(flush, 250)
+    }
   }
 
   // 从专属键还原当前会话消息（去重：剔除 historyMessages 已有的）
@@ -118,6 +124,7 @@ export function useChatMessages(aliveCheck) {
     _fetchingToday = true
     const userId = getUserId()
     if (!userId) { _fetchingToday = false; return }
+    let loadedFromServer = false
     try {
       const today = new Date()
       const dateStr =
@@ -128,6 +135,7 @@ export function useChatMessages(aliveCheck) {
       if (aliveCheck && !aliveCheck()) return
       if (res.code === 200 && Array.isArray(res.data)) {
         historyMessages.value = res.data
+        loadedFromServer = true
       }
       // 还原当前会话（从专属键），再补旧兜底
       restoreSessionMessages()
@@ -138,7 +146,9 @@ export function useChatMessages(aliveCheck) {
       restoreSessionMessages()
       loadFromStorage()
     } finally {
-      historyLoaded.value = true
+      if (loadedFromServer) {
+        historyLoaded.value = true
+      }
       _fetchingToday = false
     }
   }
@@ -179,21 +189,35 @@ export function useChatMessages(aliveCheck) {
   }
 
   // ── 滚动（Promise coalescing，同一 tick 内多次调用只滚一次） ──
-  let scrollCoalesce = null
+  let scrollCoalesce = false
   async function scrollToBottom() {
     if (scrollCoalesce) return // 同一 tick 已排队，跳过
     scrollCoalesce = true
     await nextTick()
-    if (messageListRef.value) {
-      messageListRef.value.scrollTop = messageListRef.value.scrollHeight
+    const flushScroll = () => {
+      if (messageListRef.value) {
+        messageListRef.value.scrollTop = messageListRef.value.scrollHeight
+      }
+      scrollCoalesce = false
     }
-    scrollCoalesce = null
+
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(flushScroll)
+    } else {
+      flushScroll()
+    }
+  }
+
+  // ── 消息 ID 生成（Date.now() + 单调计数器，消除同毫秒碰撞） ──
+  let _msgIdCounter = 0
+  function nextMsgId() {
+    return `${Date.now()}-${++_msgIdCounter}`
   }
 
   // ── 消息工厂 ──
   function addUserMessage(text) {
     messages.value.push({
-      id: Date.now(), role: 'user', type: 'text',
+      id: nextMsgId(), role: 'user', type: 'text',
       content: text, timestamp: new Date().toISOString()
     })
     saveToStorage()
@@ -201,7 +225,7 @@ export function useChatMessages(aliveCheck) {
 
   function addImageMessage(fileUrl) {
     messages.value.push({
-      id: Date.now(), role: 'user', type: 'image',
+      id: nextMsgId(), role: 'user', type: 'image',
       content: fileUrl, timestamp: new Date().toISOString()
     })
     saveToStorage()
@@ -209,7 +233,7 @@ export function useChatMessages(aliveCheck) {
 
   function addAiMessage(content, isComplete) {
     const msg = {
-      id: Date.now(), role: 'ai', type: 'text',
+      id: nextMsgId(), role: 'ai', type: 'text',
       content, isTemp: !isComplete, isComplete,
       timestamp: new Date().toISOString()
     }
@@ -220,7 +244,7 @@ export function useChatMessages(aliveCheck) {
 
   function addErrorBubble(text) {
     messages.value.push({
-      id: Date.now(), role: 'ai', type: 'text',
+      id: nextMsgId(), role: 'ai', type: 'text',
       content: text, isComplete: true, isError: true,
       timestamp: new Date().toISOString()
     })
@@ -273,7 +297,7 @@ export function useChatMessages(aliveCheck) {
     currentMessage, interactionState, isSending, messageListRef,
     loadFromStorage, saveToStorage, restoreSessionMessages, fetchTodayMessages, loadEarlierMessages,
     scrollToBottom, addUserMessage, addImageMessage, addAiMessage, addErrorBubble,
-    completeCurrentMessage, setCurrentMessage,
+    completeCurrentMessage, setCurrentMessage, nextMsgId,
     formatTime, formatDateLabel, isNewDateGroup,
   }
 }

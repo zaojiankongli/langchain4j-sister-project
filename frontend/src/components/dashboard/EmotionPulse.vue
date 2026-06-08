@@ -92,7 +92,8 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+defineOptions({ name: 'EmotionPulse' })
+import { ref, onMounted, onBeforeUnmount, onActivated } from 'vue'
 import request from '@/utils/request'
 import { getUserId } from '@/utils/auth'
 import { API } from '@/config/api'
@@ -149,6 +150,11 @@ const formatTime = (timeStr) => {
 
 onMounted(() => {
   fetchHistory()
+})
+
+// keep-alive 重新激活时刷新数据（避免用户切回 tab 后看到过时记录）
+onActivated(() => {
+  if (_isMounted) fetchHistory()
 })
 </script>
 
@@ -274,7 +280,7 @@ onMounted(() => {
 .stat-fill {
   position: absolute;
   height: 100%;
-  transition: all 1.5s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: width 1.5s cubic-bezier(0.22, 1, 0.36, 1), left 1.5s cubic-bezier(0.22, 1, 0.36, 1), right 1.5s cubic-bezier(0.22, 1, 0.36, 1), background-color 1.5s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 1.5s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 /* 双向进度条填充方向 */
@@ -336,7 +342,7 @@ onMounted(() => {
 .retry-btn {
   background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
   color: rgba(255,255,255,0.7); padding: 6px 20px; border-radius: 20px;
-  cursor: pointer; font-size: 12px; transition: all 0.3s;
+  cursor: pointer; font-size: 12px; transition: background-color 0.3s ease, color 0.3s ease;
 }
 .retry-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
 .empty-icon { font-size: 32px; margin-bottom: 12px; opacity: 0.4; }
@@ -349,8 +355,8 @@ onMounted(() => {
 
 /* 动画部分 */
 @keyframes grow-in {
-  0% { opacity: 0; filter: blur(10px); transform: translateY(20px) scale(0.95); }
-  100% { opacity: 1; filter: blur(0); transform: translateY(0) scale(1); }
+  0% { opacity: 0; transform: translateY(20px) scale(0.95); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 @keyframes line-extend {

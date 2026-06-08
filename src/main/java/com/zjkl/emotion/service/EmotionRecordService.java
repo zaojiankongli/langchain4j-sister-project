@@ -42,7 +42,7 @@ public class EmotionRecordService {
      * 3. 异步调用 LLM 生成原因
      * 4. 写入 user_emotions 表
      */
-    @Async
+    @Async("llmTaskExecutor")
     public void recordEmotionAsync(String userId) {
         log.debug("开始异步记录用户情绪: userId={}", userId);
 

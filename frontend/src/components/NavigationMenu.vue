@@ -76,7 +76,7 @@ const bubbleStyles = navItems.map((_, index) => {
   align-items: center;
   justify-content: center;
   color: var(--text-inverse);
-  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background-color 0.4s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.4s cubic-bezier(0.16, 1, 0.3, 1), transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .active-bubble .bubble-inner,
@@ -94,11 +94,11 @@ const bubbleStyles = navItems.map((_, index) => {
 
 /* Animations */
 .menu-pop-enter-active {
-  transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  transition: opacity 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275), transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
 .menu-pop-leave-active {
-  transition: all 0.3s cubic-bezier(0.6, 0, 0.4, 1);
+  transition: opacity 0.3s cubic-bezier(0.6, 0, 0.4, 1), transform 0.3s cubic-bezier(0.6, 0, 0.4, 1);
 }
 
 .menu-pop-enter-from {

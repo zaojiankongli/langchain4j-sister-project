@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zjkl.memory.gallery.mapper.UserMemoryGalleryUnlockMapper">
+
+    <resultMap id="BaseResultMap" type="com.zjkl.memory.gallery.entity.UserMemoryGalleryUnlock">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="gallery_key" property="galleryKey"/>
+        <result column="source_memory_id" property="sourceMemoryId"/>
+        <result column="related_mood" property="relatedMood"/>
+        <result column="related_excerpt" property="relatedExcerpt"/>
+        <result column="unlocked_at" property="unlockedAt"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="com.zjkl.memory.gallery.entity.UserMemoryGalleryUnlock" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO user_memory_gallery_unlocks (user_id, gallery_key, source_memory_id, related_mood, related_excerpt, unlocked_at)
+        VALUES (#{userId}, #{galleryKey}, #{sourceMemoryId}, #{relatedMood}, #{relatedExcerpt}, #{unlockedAt})
+    </insert>
+
+    <select id="selectByUserIdAndGalleryKey" resultMap="BaseResultMap">
+        SELECT * FROM user_memory_gallery_unlocks WHERE user_id = #{userId} AND gallery_key = #{galleryKey}
+    </select>
+
+    <select id="selectUnlockViewsByUserId" resultType="com.zjkl.memory.gallery.domain.vo.GalleryUnlockVO">
+        SELECT u.gallery_key AS galleryKey,
+               u.unlocked_at AS unlockedAt,
+               u.related_mood AS relatedMood,
+               u.related_excerpt AS relatedExcerpt,
+               m.id AS sourceMemoryId,
+               m.title AS sourceMemoryTitle,
+               DATE_FORMAT(m.memory_date, '%Y.%m.%d') AS sourceMemoryDate,
+               m.image_url AS sourceImageUrl
+        FROM user_memory_gallery_unlocks u
+        LEFT JOIN conversation_memories m ON m.id = u.source_memory_id
+        WHERE u.user_id = #{userId}
+        ORDER BY u.unlocked_at DESC, u.id DESC
+    </select>
+
+    <select id="selectUnlockViewByUserIdAndGalleryKey" resultType="com.zjkl.memory.gallery.domain.vo.GalleryUnlockVO">
+        SELECT u.gallery_key AS galleryKey,
+               u.unlocked_at AS unlockedAt,
+               u.related_mood AS relatedMood,
+               u.related_excerpt AS relatedExcerpt,
+               m.id AS sourceMemoryId,
+               m.title AS sourceMemoryTitle,
+               DATE_FORMAT(m.memory_date, '%Y.%m.%d') AS sourceMemoryDate,
+               m.image_url AS sourceImageUrl
+        FROM user_memory_gallery_unlocks u
+        LEFT JOIN conversation_memories m ON m.id = u.source_memory_id
+        WHERE u.user_id = #{userId} AND u.gallery_key = #{galleryKey}
+        LIMIT 1
+    </select>
+
+</mapper>

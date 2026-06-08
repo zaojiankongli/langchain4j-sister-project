@@ -107,8 +107,9 @@ export function useLive2dChat(oml2dRef) {
     }, QUEUE_INTERVAL)
   }
 
-  /** 清空队列 + 立即隐藏当前气泡（不 bump _gen，避免误杀正在执行的回调） */
+  /** 清空队列 + 立即隐藏当前气泡；bump _gen 使已调度的 setTimeout 回调失效 */
   function clearQueue() {
+    _gen++ // 使所有待定 setTimeout 回调失效（不影响 processQueue 同步执行段）
     messageQueue = []
     if (queueTimer) { clearTimeout(queueTimer); queueTimer = null }
     if (oml2dRef.value) oml2dRef.value.clearTips()

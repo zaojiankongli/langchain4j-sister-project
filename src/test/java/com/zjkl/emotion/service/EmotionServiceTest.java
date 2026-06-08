@@ -2,7 +2,8 @@ package com.zjkl.emotion.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zjkl.emotion.config.EmotionEngineConfig;
-import com.zjkl.emotion.mapper.EmotionAnchorMapper;
+import com.zjkl.common.event.EmotionChangedEvent;
+import com.zjkl.anchor.mapper.AnchorMapper;
 import com.zjkl.emotion.mapper.UserEmotionMapper;
 import com.zjkl.emotion.model.DeltaEmotion;
 import com.zjkl.emotion.model.EmotionalState;
@@ -15,6 +16,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.StringRedisTemplate;
 
 import java.time.Duration;
@@ -36,11 +38,13 @@ class EmotionServiceTest {
     @Mock
     private RedissonClient redissonClient;
     @Mock
+    private ApplicationEventPublisher eventPublisher;
+    @Mock
     private RLock lock;
     @Mock
     private UserSettingsMapper userSettingsMapper;
     @Mock
-    private EmotionAnchorMapper emotionAnchorMapper;
+    private AnchorMapper anchorMapper;
     @Mock
     private UserEmotionMapper userEmotionMapper;
     @Mock
@@ -71,7 +75,7 @@ class EmotionServiceTest {
         lenient().when(redisTemplate.opsForHash()).thenReturn(hashOps);
         lenient().when(redisTemplate.opsForValue()).thenReturn(valueOps);
 
-        emotionService = new EmotionService(config, redisTemplate, redissonClient, objectMapper, userSettingsMapper, emotionAnchorMapper, userEmotionMapper);
+        emotionService = new EmotionService(config, redisTemplate, redissonClient, eventPublisher, objectMapper, userSettingsMapper, anchorMapper, userEmotionMapper);
     }
 
     @Test
@@ -115,6 +119,8 @@ class EmotionServiceTest {
         assertTrue(updated.getPleasure() >= -1.0 && updated.getPleasure() <= 1.0);
         assertTrue(updated.getArousal() >= -1.0 && updated.getArousal() <= 1.0);
         assertTrue(updated.getDominance() >= -1.0 && updated.getDominance() <= 1.0);
+
+        verify(eventPublisher).publishEvent(any(EmotionChangedEvent.class));
     }
 
     @Test
@@ -201,6 +207,8 @@ class EmotionServiceTest {
         assertEquals(base.getPleasure(), afterReset.getPleasure());
         assertEquals(base.getArousal(), afterReset.getArousal());
         assertEquals(base.getDominance(), afterReset.getDominance());
+
+        verify(eventPublisher, atLeastOnce()).publishEvent(any(EmotionChangedEvent.class));
     }
 
     @Test

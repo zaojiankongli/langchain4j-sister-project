@@ -48,7 +48,6 @@ export const API = {
   MAIL_LIST: '/mails',                    // 后端从 UserContext 获取 userId
   MAIL_READ: (mailId) => `/mails/${mailId}/read`,
   MAIL_READ_ALL: '/mails/read-all',
-  MY_PROFILE: '/user/profile',
 
   // ── 设置 ──
   SETTINGS_GET: (userId) => `/settings/${userId}`,

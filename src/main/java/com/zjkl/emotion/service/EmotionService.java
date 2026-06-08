@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.zjkl.emotion.config.EmotionEngineConfig;
-import com.zjkl.emotion.mapper.EmotionAnchorMapper;
+import com.zjkl.anchor.mapper.AnchorMapper;
 import com.zjkl.emotion.mapper.UserEmotionMapper;
 import com.zjkl.emotion.model.DeltaEmotion;
 import com.zjkl.emotion.model.EmotionalState;
@@ -12,11 +12,13 @@ import com.zjkl.emotion.model.Personality;
 import com.zjkl.emotion.model.UserEmotionRecord;
 import com.zjkl.emotion.model.vo.EmotionHistoryVO;
 import com.zjkl.emotion.model.vo.EvolutionEventVO;
+import com.zjkl.common.event.EmotionChangedEvent;
 import com.zjkl.settings.mapper.UserSettingsMapper;
 import com.zjkl.settings.model.UserSettings;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.redis.core.RedisOperations;
 import org.springframework.data.redis.core.SessionCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -54,9 +56,10 @@ public class EmotionService {
     private final EmotionEngineConfig config;
     private final StringRedisTemplate redisTemplate;
     private final org.redisson.api.RedissonClient redissonClient;
+    private final ApplicationEventPublisher eventPublisher;
     private final ObjectMapper objectMapper;
     private final UserSettingsMapper userSettingsMapper;
-    private final EmotionAnchorMapper emotionAnchorMapper;
+    private final AnchorMapper anchorMapper;
     private final UserEmotionMapper userEmotionMapper;
 
     private final Cache<String, EmotionalState> localCache = Caffeine.newBuilder()
@@ -70,16 +73,17 @@ public class EmotionService {
             .build();
 
     public EmotionService(EmotionEngineConfig config, StringRedisTemplate redisTemplate,
-                          org.redisson.api.RedissonClient redissonClient, ObjectMapper objectMapper,
+                          org.redisson.api.RedissonClient redissonClient, ApplicationEventPublisher eventPublisher, ObjectMapper objectMapper,
                           UserSettingsMapper userSettingsMapper,
-                          EmotionAnchorMapper emotionAnchorMapper,
+                           AnchorMapper anchorMapper,
                           UserEmotionMapper userEmotionMapper) {
         this.config = config;
         this.redisTemplate = redisTemplate;
         this.redissonClient = redissonClient;
+        this.eventPublisher = eventPublisher;
         this.objectMapper = objectMapper;
         this.userSettingsMapper = userSettingsMapper;
-        this.emotionAnchorMapper = emotionAnchorMapper;
+        this.anchorMapper = anchorMapper;
         this.userEmotionMapper = userEmotionMapper;
     }
 
@@ -243,6 +247,7 @@ public class EmotionService {
             }
 
             EmotionalState current = getUserEmotion(userId);
+            EmotionalState oldState = current.copy();
 
             // 施加刺激（基于当前情绪的增量变化）
             double s = getUserSensitivity(userId);
@@ -254,6 +259,7 @@ public class EmotionService {
             // 衰减只由 EmotionDecayScheduler 定时执行，此处不再调用 applyDecayAndRegression
 
             saveUserEmotion(userId, current);
+            publishEmotionChangedEvent(userId, oldState, current);
 
             log.debug("用户情绪更新完成 - userId={}, P: {}, A: {}, D: {}",
                     userId, current.getPleasure(), current.getArousal(), current.getDominance());
@@ -286,9 +292,11 @@ public class EmotionService {
             }
 
             EmotionalState current = getUserEmotion(userId);
+            EmotionalState oldState = current.copy();
             current = applyDecayAndRegression(current, userId);
 
             saveUserEmotion(userId, current);
+            publishEmotionChangedEvent(userId, oldState, current);
 
             return current.copy();
         } catch (InterruptedException e) {
@@ -359,7 +367,10 @@ public class EmotionService {
 
     public void resetUserEmotion(String userId) {
         log.info("重置到基准：userId={}", userId);
-        saveUserEmotion(userId, computeBaseEmotion(userId).copy());
+        EmotionalState oldState = getUserEmotion(userId);
+        EmotionalState baseEmotion = computeBaseEmotion(userId).copy();
+        saveUserEmotion(userId, baseEmotion);
+        publishEmotionChangedEvent(userId, oldState, baseEmotion);
     }
 
     /**
@@ -531,7 +542,7 @@ public class EmotionService {
      */
     @Transactional(readOnly = true)
     public List<EvolutionEventVO> getEvolutionEvents(String userId, int limit) {
-        List<Map<String, Object>> events = emotionAnchorMapper.selectEvolutionByUserId(userId, limit);
+        List<Map<String, Object>> events = anchorMapper.selectEvolutionByUserId(userId, limit);
         return events.stream().map(row -> {
             EvolutionEventVO vo = new EvolutionEventVO();
             vo.setTrigger((String) row.get("trigger_reason"));
@@ -589,5 +600,12 @@ public class EmotionService {
         long days = duration.toDays();
         if (days < 30) return days + "天前";
         return dateTime.toLocalDate().toString().replace("-", ".");
+    }
+
+    private void publishEmotionChangedEvent(String userId, EmotionalState oldState, EmotionalState newState) {
+        if (eventPublisher == null) {
+            return;
+        }
+        eventPublisher.publishEvent(new EmotionChangedEvent(userId, oldState, newState, LocalDateTime.now()));
     }
 }

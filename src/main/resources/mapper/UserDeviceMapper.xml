@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zjkl.miniprogram.mapper.UserDeviceMapper">
+    <resultMap id="deviceMap" type="com.zjkl.miniprogram.domain.UserDevice">
+        <id column="id" property="id"/>
+        <result column="user_id" property="userId"/>
+        <result column="device_code" property="deviceCode"/>
+        <result column="nickname" property="nickname"/>
+        <result column="status" property="status"/>
+        <result column="bound_at" property="boundAt"/>
+        <result column="last_seen_at" property="lastSeenAt"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <select id="findByUserId" resultMap="deviceMap">
+        SELECT * FROM user_devices WHERE user_id = #{userId} LIMIT 1
+    </select>
+
+    <select id="findByDeviceCode" resultMap="deviceMap">
+        SELECT * FROM user_devices WHERE device_code = #{deviceCode} LIMIT 1
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO user_devices (user_id, device_code, nickname, status, bound_at, last_seen_at)
+        VALUES (#{userId}, #{deviceCode}, #{nickname}, #{status}, #{boundAt}, #{lastSeenAt})
+    </insert>
+
+    <update id="updateForUser">
+        UPDATE user_devices
+        SET device_code = #{deviceCode},
+            nickname = #{nickname},
+            status = #{status},
+            bound_at = #{boundAt},
+            updated_at = NOW()
+        WHERE user_id = #{userId}
+    </update>
+</mapper>

@@ -54,6 +54,13 @@
         LIMIT #{offset}, #{limit}
     </select>
 
+    <select id="selectAllByUserId" resultType="com.zjkl.user.domain.ConversationMemory">
+        SELECT id, user_id, title, content, mood, memory_date, image_url, created_at
+        FROM conversation_memories
+        WHERE user_id = #{userId}
+        ORDER BY memory_date ASC, id ASC
+    </select>
+
     <!-- 更新图片 URL -->
     <update id="updateImageUrl">
         UPDATE conversation_memories 

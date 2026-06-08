@@ -24,6 +24,8 @@ public interface UserProfileMapper {
                           @Param("hobbies") String hobbies);
     
     int updateUserAvatar(@Param("userId") String userId, @Param("avatarUrl") String avatarUrl);
+
+    int updateUserBackground(@Param("userId") String userId, @Param("backgroundUrl") String backgroundUrl);
     
     int updateUserBasic(@Param("userId") String userId,
                         @Param("username") String username,

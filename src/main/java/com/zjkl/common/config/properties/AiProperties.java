@@ -33,4 +33,16 @@ public class AiProperties {
     /** 通义万相参考图片 URL */
     private String wanxReferenceImageUrl;
 
+    /** Qwen-Omni-Realtime 模型名称（桌宠实时语音专用） */
+    @NotBlank
+    private String realtimeModelName = "qwen3.5-omni-plus-realtime";
+
+    /** Qwen-Omni-Realtime WebSocket 地址（不含 model 查询参数） */
+    @NotBlank
+    private String realtimeUrl = "wss://dashscope.aliyuncs.com/api-ws/v1/realtime";
+
+    /** Qwen-Omni-Realtime 默认音色 */
+    @NotBlank
+    private String realtimeVoice = "Ethan";
+
 }

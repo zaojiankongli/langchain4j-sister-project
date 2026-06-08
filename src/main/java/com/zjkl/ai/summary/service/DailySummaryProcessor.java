@@ -80,6 +80,7 @@ public class DailySummaryProcessor {
                 .title(result.title())
                 .summary(result.summary())
                 .memoryDate(LocalDate.now().minusDays(1))
+                .mood(result.emotionLabel())
                 .createdAt(taskCreatedAt)
                 .build();
 
@@ -100,6 +101,7 @@ public class DailySummaryProcessor {
         messageBody.put("title", task.getTitle());
         messageBody.put("summary", task.getSummary());
         messageBody.put("memoryDate", task.getMemoryDate().toString());
+        messageBody.put("mood", task.getMood());
         messageBody.put("createdAt", task.getCreatedAt().toString());
 
         redisTemplate.opsForStream().add(IMAGE_STREAM, messageBody);

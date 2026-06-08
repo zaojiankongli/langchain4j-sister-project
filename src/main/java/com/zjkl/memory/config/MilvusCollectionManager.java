@@ -45,15 +45,9 @@ public class MilvusCollectionManager {
     @PostConstruct
     public void init() {
         try {
-            HasCollectionReq hasReq = HasCollectionReq.builder()
-                    .collectionName(collectionName)
-                    .build();
-
-            if (Boolean.TRUE.equals(client.hasCollection(hasReq))) {
+            if (hasCollection()) {
                 log.info("记忆集合 {} 已存在，加载到内存", collectionName);
-                client.loadCollection(LoadCollectionReq.builder()
-                        .collectionName(collectionName)
-                        .build());
+                loadCollection();
                 collectionReady = true;
                 return;
             }
@@ -70,6 +64,18 @@ public class MilvusCollectionManager {
     /** 检查集合是否已就绪 */
     public boolean isCollectionReady() {
         return collectionReady;
+    }
+
+    private boolean hasCollection() {
+        return Boolean.TRUE.equals(client.hasCollection(HasCollectionReq.builder()
+                .collectionName(collectionName)
+                .build()));
+    }
+
+    private void loadCollection() {
+        client.loadCollection(LoadCollectionReq.builder()
+                .collectionName(collectionName)
+                .build());
     }
 
     private void createCollection() {
@@ -95,6 +101,29 @@ public class MilvusCollectionManager {
                 .fieldName("title")
                 .dataType(DataType.VarChar)
                 .maxLength(512)
+                .build());
+
+        schema.addField(AddFieldReq.builder()
+                .fieldName("user_id")
+                .dataType(DataType.VarChar)
+                .maxLength(128)
+                .build());
+
+        schema.addField(AddFieldReq.builder()
+                .fieldName("create_time")
+                .dataType(DataType.VarChar)
+                .maxLength(32)
+                .build());
+
+        schema.addField(AddFieldReq.builder()
+                .fieldName("emotion_label")
+                .dataType(DataType.VarChar)
+                .maxLength(64)
+                .build());
+
+        schema.addField(AddFieldReq.builder()
+                .fieldName("sentiment_score")
+                .dataType(DataType.Float)
                 .build());
 
         schema.addField(AddFieldReq.builder()
@@ -144,8 +173,6 @@ public class MilvusCollectionManager {
         client.createCollection(createReq);
 
         // 5. 加载
-        client.loadCollection(LoadCollectionReq.builder()
-                .collectionName(collectionName)
-                .build());
+        loadCollection();
     }
 }

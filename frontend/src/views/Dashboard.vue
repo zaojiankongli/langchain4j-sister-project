@@ -73,13 +73,14 @@
 import { useGsapAnimation } from '@/composables/useGsapAnimation'
 import { useMouseParallax } from '@/composables/useMouseParallax'
 import { useRouter } from 'vue-router'
-import { disconnect } from '@/utils/chatWebSocket'
+import { disconnect, disposeAppLevel } from '@/utils/chatWebSocket'
 import live2dModels from '@/config/live2d-models.json'
 import request from '@/utils/request'
 import { API } from '@/config/api'
 import { useSettingsStore } from '@/stores/settings'
 import { useUiStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
+import { useUserStore } from '@/stores/user'
 import { OML2D_KEY } from '@/symbols'
 // ── ChatWindow 同步导入（输入框必须在首屏就绪） ──
 import ChatWindow from "@/components/chat/ChatWindow.vue"
@@ -93,6 +94,14 @@ const ActionCenter = defineAsyncComponent(() => import('@/components/dashboard/A
 const SettingsPanel = defineAsyncComponent(() => import('@/components/settings/SettingsPanel.vue'))
 const MailBox = defineAsyncComponent(() => import("@/components/Panel/MailBox.vue"))
 const StatusPanel = defineAsyncComponent(() => import("@/components/Panel/StatusPanel.vue"))
+
+const backgroundMap = {
+  default: new URL('../assets/bk1.webp', import.meta.url).href,
+  bk2: new URL('../assets/bk2.webp', import.meta.url).href,
+  bk3: new URL('../assets/bk3.webp', import.meta.url).href,
+  bk4: new URL('../assets/bk4.webp', import.meta.url).href,
+  bk5: new URL('../assets/bk5.webp', import.meta.url).href,
+}
 
 // 模块级常量：避免 computed 每次求值都创建新对象
 const viewMap = { 'user': UserProfile, 'memory': MemoryFragment, 'emotion': EmotionPulse, 'relation': EmotionPulse, 'action': ActionCenter, 'settings': SettingsPanel }
@@ -110,6 +119,7 @@ const { mouseX, mouseY } = useMouseParallax()
 
 const router = useRouter()
 let live2dInitTimer = null
+let live2dIdleCbId = null
 let gsapEnterTimer = null
 let _isAlive = true              // 组件存活标记，阻止卸载后的异步回调
 let _live2dGen = 0               // 生成计数器，每次 destroy 自增，使旧 onLoad 回调失效
@@ -124,14 +134,7 @@ const settingsStore = useSettingsStore()
 const uiStore = useUiStore()
 const themeBgSrc = computed(() => {
   const themeId = settingsStore.settings?.themeId || 'default'
-  const bgMap = {
-    default: new URL('../assets/bk1.webp', import.meta.url).href,
-    bk2: new URL('../assets/bk2.webp', import.meta.url).href,
-    bk3: new URL('../assets/bk3.webp', import.meta.url).href,
-    bk4: new URL('../assets/bk4.webp', import.meta.url).href,
-    bk5: new URL('../assets/bk5.webp', import.meta.url).href,
-  }
-  return bgMap[themeId] || bgMap.default
+  return backgroundMap[themeId] || backgroundMap.default
 })
 
 // ── 事件穿透防护 ──
@@ -145,9 +148,10 @@ let _initLive2Ding = false // 防并发
 
 provide(OML2D_KEY, oml2dInstance)
 
+let _savedOnCopy = undefined  // 保存 oml2d 初始化前的 document.oncopy
+
 /** 销毁 oml2d 实例，清理所有资源 */
 const destroyOml2d = () => {
-  _isAlive = false // 与 _live2dGen++ 同步写入，消除任何竞态窗口；即使从 onUnmounted 外部调用也保证安全
   _live2dGen++ // 自增使所有待定 onLoad/loadTimer 回调失效
   const inst = oml2dInstance.value
   if (!inst) return
@@ -158,8 +162,11 @@ const destroyOml2d = () => {
   } catch (e) {
     console.warn('Dashboard destroyOml2d:', e)
   }
-  // 恢复 document.oncopy（oml2d 内部注册，防止全局泄漏）
-  window.document.oncopy = null
+  // 恢复 document.oncopy 为 oml2d 初始化前的值（而非强制置 null）
+  if (_savedOnCopy !== undefined) {
+    window.document.oncopy = _savedOnCopy
+    _savedOnCopy = undefined
+  }
   if (live2dInnerRef.value) live2dInnerRef.value.innerHTML = ''
   oml2dInstance.value = null
   live2dLoadStatus.value = 'idle'
@@ -215,6 +222,9 @@ const initLive2D = async () => {
     }))
     return modelsCache
   })()
+
+  // 保存 oml2d 初始化前的 oncopy，销毁时恢复
+  _savedOnCopy = window.document.oncopy
 
   const inst = loadOml2d({
     parentElement: live2dInnerRef.value,
@@ -362,7 +372,7 @@ const initLive2D = async () => {
         loadTimer = setTimeout(() => {
           if (currentGen !== _live2dGen || !_isAlive) return
           console.warn('Dashboard Live2D 模型加载超时，触发重试')
-          destroyOml2d()
+          try { destroyOml2d() } catch (e) { console.warn('destroyOml2d during timeout:', e) }
           _initLive2Ding = false
           retryLive2D()
         }, LIVE2D_LOAD_TIMEOUT)
@@ -391,6 +401,7 @@ const initLive2D = async () => {
 // 退出登录
 const handleLogout = async () => {
   const authStore = useAuthStore()
+  const userStore = useUserStore()
   try {
     // 用 authStore.refreshToken 而非直接读 localStorage，保持状态一致
     await request.post(API.AUTH_LOGOUT, { refreshToken: authStore.refreshToken })
@@ -398,8 +409,12 @@ const handleLogout = async () => {
     // 即使后端 logout 失败，前端仍需清理本地状态（通知用户已退出，但未通知服务端）
     uiStore.error('已退出登录（服务端通知失败）')
   }
-  disconnect()
+  try { disconnect() } catch (e) { console.warn('WebSocket disconnect:', e) }
   destroyOml2d()
+  userStore.clearProfile()
+  settingsStore.resetSettings()
+  uiStore.clearAllToasts()
+  uiStore.closeAllPanels()
   // 清理 Pinia authStore（自动同步 localStorage），防止同一会话重新登录后 token 引用过期
   authStore.clearAuth()
   router.push({ name: 'Login' }).catch(() => {})
@@ -448,7 +463,7 @@ const mailBoxStyle = computed(() => {
 // 交互逻辑
 const openNav = (e) => {
   lastPanelActionTime.value = Date.now()
-  if(activeLayer.value == 'nav'){
+  if(activeLayer.value === 'nav'){
     activeLayer.value = 'idle'
   }else {
     activeLayer.value = 'nav'
@@ -539,7 +554,7 @@ onMounted(() => {
   // Live2D 延后到空闲时初始化，避免阻塞首屏渲染
   // 低带宽场景：requestIdleCallback timeout 兜底 + import() 内部超时由 LIVE2D_LOAD_TIMEOUT 控制
   if ('requestIdleCallback' in window) {
-    requestIdleCallback(() => initLive2D(), { timeout: LIVE2D_IDLE_TIMEOUT })
+    live2dIdleCbId = requestIdleCallback(() => { live2dIdleCbId = null; initLive2D() }, { timeout: LIVE2D_IDLE_TIMEOUT })
   } else {
     live2dInitTimer = setTimeout(initLive2D, 500)
   }
@@ -562,9 +577,10 @@ onMounted(() => {
   }, 100)
 })
 onBeforeUnmount(() => {
-  // 同步写入存活标志 + 生成计数器，确保所有待定/排队回调立即失效
-  // destroyOml2d 内部也会设置 _isAlive = false + live2dGen++ 作为 belt-and-suspenders
+  _isAlive = false  // 组件卸载标记，必须在 destroyOml2d 之前设置
   destroyOml2d()
+  disposeAppLevel()  // 清除 WebSocket 残留定时器，阻止后续重连
+  if (live2dIdleCbId !== null && 'cancelIdleCallback' in window) { cancelIdleCallback(live2dIdleCbId); live2dIdleCbId = null }
   if (live2dInitTimer) { clearTimeout(live2dInitTimer); live2dInitTimer = null }
   if (gsapEnterTimer) { clearTimeout(gsapEnterTimer); gsapEnterTimer = null }
   if (ambientTimer) { clearInterval(ambientTimer); ambientTimer = null }
@@ -642,7 +658,7 @@ onBeforeUnmount(() => {
 /* --- 面板通用样式 --- */
 .content-panel {
   background: rgba(0,0,0,0.3); /* 调暗背景更沉浸 */
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(6px);
   position: fixed; top: 0; width: 50%; height: 100%;
   z-index: 100; transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1);
   pointer-events: auto;
@@ -667,13 +683,13 @@ onBeforeUnmount(() => {
   border: 1px solid rgba(255, 255, 255, 0.15);
   color: rgba(255, 255, 255, 0.6);
   font-size: 12px; padding: 6px 16px; border-radius: 6px;
-  cursor: pointer; transition: all 0.3s;
+  cursor: pointer; transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease;
 }
 .logout-btn:hover {
   background: rgba(216, 74, 98, 0.2);
   border-color: rgba(216, 74, 98, 0.5); color: #d84a62;
 }
-.close-btn { background: none; border: none; color: white; font-size: 20px; cursor: pointer; opacity: 0.5; transition: 0.3s; }
+.close-btn { background: none; border: none; color: white; font-size: 20px; cursor: pointer; opacity: 0.5; transition: opacity 0.3s ease, transform 0.3s ease; }
 .close-btn:hover { opacity: 1; transform: rotate(90deg); }
 
 .panel-body {
@@ -682,7 +698,7 @@ onBeforeUnmount(() => {
 }
 
 /* 动画 */
-.bubble-fade-enter-active, .bubble-fade-leave-active { transition: all 0.5s ease; }
+.bubble-fade-enter-active, .bubble-fade-leave-active { transition: opacity 0.5s ease, transform 0.5s ease; }
 .bubble-fade-enter-from, .bubble-fade-leave-to { opacity: 0; transform: translateY(10px); }
 
 /* view-dissolve transition for panel content switching */
@@ -693,5 +709,36 @@ onBeforeUnmount(() => {
 .view-dissolve-enter-from,
 .view-dissolve-leave-to {
   opacity: 0;
+}
+
+/* ── 响应式布局 ── */
+
+/* 平板 (≤ 1024px)：内容面板占 65%，Live2D 缩小 */
+@media (max-width: 1024px) {
+  .content-panel { width: 65%; }
+  .live2d-box { width: 450px; }
+  .live2d-container { width: 500px; height: 500px; }
+}
+
+/* 手机 (≤ 768px)：内容面板全屏，Live2D 进一步缩小 */
+@media (max-width: 768px) {
+  .content-panel {
+    width: 100%; height: 100%;
+    border-radius: 0;
+  }
+  .panel-header { padding: 40px 20px 16px; }
+  .panel-title { font-size: 20px; }
+  .live2d-box { width: 320px; }
+  .live2d-container { width: 380px; height: 380px; }
+  .panel-body { height: calc(100% - 90px); }
+}
+
+/* 小屏手机 (≤ 480px) */
+@media (max-width: 480px) {
+  .panel-header { padding: 32px 16px 12px; }
+  .panel-title { font-size: 18px; }
+  .logout-btn { font-size: 11px; padding: 5px 12px; }
+  .live2d-box { width: 260px; }
+  .live2d-container { width: 300px; height: 300px; }
 }
 </style>

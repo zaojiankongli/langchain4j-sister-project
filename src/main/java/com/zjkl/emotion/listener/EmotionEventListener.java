@@ -3,7 +3,7 @@ package com.zjkl.emotion.listener;
 import com.zjkl.common.event.AnchorEndedEvent;
 import com.zjkl.common.event.AnchorTriggeredEvent;
 import com.zjkl.common.event.EmotionChangedEvent;
-import com.zjkl.emotion.model.EmotionAnchorEvent;
+import com.zjkl.anchor.model.AnchorEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
@@ -52,11 +52,11 @@ public class EmotionEventListener {
     /**
      * 将锚点摘要注入 Redis 聊天历史，使大模型在后续对话中感知情绪锚点
      */
-    private void injectAnchorToChatHistory(String userId, EmotionAnchorEvent event) {
+    private void injectAnchorToChatHistory(String userId, AnchorEvent event) {
         String historyKey = "chat:history:" + userId;
         String anchorEntry = "system: 【情绪锚点】" + event.getEventTitle()
                 + "。" + event.getSummary()
-                + (event.getEndType() == EmotionAnchorEvent.EndType.NEGATIVE ? "（情绪偏低，需要关注）" : "");
+                + (event.getEndType() == AnchorEvent.EndType.NEGATIVE ? "（情绪偏低，需要关注）" : "");
         try {
             stringRedisTemplate.opsForList().rightPush(historyKey, anchorEntry);
             stringRedisTemplate.opsForList().trim(historyKey, -200, -1);

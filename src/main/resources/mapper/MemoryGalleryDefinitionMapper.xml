@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.zjkl.memory.gallery.mapper.MemoryGalleryDefinitionMapper">
+
+    <resultMap id="BaseResultMap" type="com.zjkl.memory.gallery.entity.MemoryGalleryDefinition">
+        <id column="id" property="id"/>
+        <result column="gallery_key" property="galleryKey"/>
+        <result column="title" property="title"/>
+        <result column="category" property="category"/>
+        <result column="rarity" property="rarity"/>
+        <result column="hint" property="hint"/>
+        <result column="description" property="description"/>
+        <result column="cover_theme" property="coverTheme"/>
+        <result column="match_keywords" property="matchKeywords"/>
+        <result column="sort_order" property="sortOrder"/>
+        <result column="is_enabled" property="enabled"/>
+        <result column="created_at" property="createdAt"/>
+        <result column="updated_at" property="updatedAt"/>
+    </resultMap>
+
+    <select id="selectEnabledDefinitions" resultMap="BaseResultMap">
+        SELECT * FROM memory_gallery_definitions
+        WHERE is_enabled = 1
+        ORDER BY sort_order ASC, id ASC
+    </select>
+
+    <select id="selectByGalleryKey" resultMap="BaseResultMap">
+        SELECT * FROM memory_gallery_definitions WHERE gallery_key = #{galleryKey}
+    </select>
+
+</mapper>

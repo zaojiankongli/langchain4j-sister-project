@@ -1,10 +1,10 @@
 package com.zjkl.wakeup.tool;
 
 import com.zjkl.ai.component.UserActivityTracker;
+import com.zjkl.anchor.monitor.AnchorMonitor;
+import com.zjkl.anchor.service.AnchorEventService;
 import com.zjkl.common.config.properties.WakeUpProperties;
 import com.zjkl.emotion.model.EmotionalState;
-import com.zjkl.emotion.monitor.EmotionAnchorMonitor;
-import com.zjkl.emotion.service.EmotionAnchorService;
 import com.zjkl.emotion.service.EmotionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,8 +24,8 @@ import java.time.format.DateTimeFormatter;
 public class UserStateTool {
 
     private final EmotionService emotionService;
-    private final EmotionAnchorMonitor anchorMonitor;
-    private final EmotionAnchorService anchorService;
+    private final AnchorMonitor anchorMonitor;
+    private final AnchorEventService anchorService;
     private final UserActivityTracker userActivityTracker;
     private final StringRedisTemplate redisTemplate;
     private final WakeUpProperties wakeUpProperties;

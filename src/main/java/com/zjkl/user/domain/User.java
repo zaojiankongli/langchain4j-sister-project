@@ -19,8 +19,14 @@ public class User {
 
     private String id;
     private String email;
+    private String wxOpenid;
+    private String wxUnionid;
+    private String wxNickname;
+    private String wxAvatarUrl;
+    private LocalDateTime wxBoundAt;
     private String username;
     private String avatarUrl;
+    private String backgroundUrl;
     private Integer gender;
     private String hobbies;
     private String userProfile;

@@ -12,6 +12,7 @@ import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import io.milvus.v2.client.MilvusClientV2;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.data.redis.core.RedisCallback;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -35,20 +36,20 @@ public class GraphSnapshotService {
     private final MilvusProperties milvusProperties;
     private final PromptTemplateService promptTemplateService;
     private final QwenChatModel qwenChatModel;
-    private final Executor asyncExecutor;
+    private final Executor milvusTaskExecutor;
 
     public GraphSnapshotService(StringRedisTemplate stringRedisTemplate,
                                 MilvusClientV2 milvusClientV2,
                                 MilvusProperties milvusProperties,
                                 PromptTemplateService promptTemplateService,
                                 QwenChatModel qwenChatModel,
-                                Executor asyncExecutor) {
+                                @Qualifier("milvusTaskExecutor") Executor milvusTaskExecutor) {
         this.stringRedisTemplate = stringRedisTemplate;
         this.milvusClientV2 = milvusClientV2;
         this.milvusProperties = milvusProperties;
         this.promptTemplateService = promptTemplateService;
         this.qwenChatModel = qwenChatModel;
-        this.asyncExecutor = asyncExecutor;
+        this.milvusTaskExecutor = milvusTaskExecutor;
     }
 
     public String getSnapshot(String userId) {
@@ -104,7 +105,7 @@ public class GraphSnapshotService {
                     stringRedisTemplate.delete(lockKey);
                 }
             }
-        }, asyncExecutor)
+        }, milvusTaskExecutor)
                 .exceptionally(e -> {
                     log.warn("图 snapshot 异步重建调度失败 userId={}", userId, e);
                     String current = stringRedisTemplate.opsForValue().get(lockKey);

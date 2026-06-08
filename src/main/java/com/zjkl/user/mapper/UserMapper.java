@@ -9,7 +9,11 @@ import org.apache.ibatis.annotations.Param;
 public interface UserMapper {
     
     User findByEmail(@Param("email") String email);
-    
+
+    User findByWxOpenid(@Param("wxOpenid") String wxOpenid);
+
+    User findByWxUnionid(@Param("wxUnionid") String wxUnionid);
+
     User findById(@Param("id") String id);
     
     int insert(User user);

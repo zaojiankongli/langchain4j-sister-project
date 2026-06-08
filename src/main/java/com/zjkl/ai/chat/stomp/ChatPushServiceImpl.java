@@ -1,8 +1,14 @@
 package com.zjkl.ai.chat.stomp;
 
+import com.zjkl.ai.chat.stomp.dto.MessageType;
+import com.zjkl.ai.chat.stomp.dto.WebSocketMessage;
+import com.zjkl.miniprogram.realtime.MiniprogramRealtimeSocketRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+
+import java.util.Base64;
+import java.util.Map;
 
 /**
  * STOMP 消息推送实现类
@@ -18,6 +24,7 @@ public class ChatPushServiceImpl implements ChatPushService {
 
     private final ConnectionStateManager connectionStateManager;
     private final HeartbeatChecker heartbeatChecker;
+    private final MiniprogramRealtimeSocketRegistry miniprogramSocketRegistry;
 
     // ==================== ChatPushService 接口实现 ====================
 
@@ -34,31 +41,43 @@ public class ChatPushServiceImpl implements ChatPushService {
     @Override
     public void pushText(String userId, String content, boolean isComplete) {
         connectionStateManager.pushText(userId, content, isComplete);
+        pushToMiniprogram(userId, WebSocketMessage.text(content, isComplete));
     }
 
     @Override
     public void pushPetExpression(String userId, String expression, double intensity, long durationMs) {
         connectionStateManager.pushPetExpression(userId, expression, intensity, durationMs);
+        pushToMiniprogram(userId, WebSocketMessage.petExpression(expression, intensity, durationMs));
     }
 
     @Override
     public void pushPetMotion(String userId, String motion, String priority) {
         connectionStateManager.pushPetMotion(userId, motion, priority);
+        pushToMiniprogram(userId, WebSocketMessage.petMotion(motion, priority));
     }
 
     @Override
     public void pushEmotionUpdate(String userId, double pleasure, double arousal, double dominance, String moodLabel, String moodDescription) {
         connectionStateManager.pushEmotionUpdate(userId, pleasure, arousal, dominance, moodLabel, moodDescription);
+        pushToMiniprogram(userId, WebSocketMessage.emotionUpdate(Map.of(
+                "pleasure", pleasure,
+                "arousal", arousal,
+                "dominance", dominance,
+                "moodLabel", moodLabel,
+                "moodDescription", moodDescription
+        )));
     }
 
     @Override
     public void pushSystem(String userId, String content) {
         connectionStateManager.pushSystem(userId, content);
+        pushToMiniprogram(userId, WebSocketMessage.system(content));
     }
 
     @Override
     public void pushError(String userId, String errMsg) {
         connectionStateManager.pushError(userId, errMsg);
+        pushToMiniprogram(userId, WebSocketMessage.error(errMsg));
     }
 
     @Override
@@ -69,11 +88,18 @@ public class ChatPushServiceImpl implements ChatPushService {
     @Override
     public void pushAudio(String userId, byte[] audioData) {
         connectionStateManager.pushAudio(userId, audioData);
+        pushToMiniprogram(userId, new WebSocketMessage(MessageType.AUDIO, Map.of(
+                "audioData", Base64.getEncoder().encodeToString(audioData)
+        )));
     }
 
     @Override
     public void pushPong(String userId) {
         connectionStateManager.pushPong(userId);
+    }
+
+    private void pushToMiniprogram(String userId, WebSocketMessage message) {
+        miniprogramSocketRegistry.push(userId, message);
     }
 
     @Override

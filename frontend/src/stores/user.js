@@ -11,6 +11,7 @@ import { useAuthStore } from './auth'
  * 避免 UserProfile.vue 中 10+ 个分散的 ref 和重复的 try/catch。
  */
 export const useUserStore = defineStore('user', () => {
+  const authStore = useAuthStore()
   // ── 状态 ──
   const profile = ref(null)
   const hobbies = ref([])
@@ -21,7 +22,7 @@ export const useUserStore = defineStore('user', () => {
   const error = ref('')
 
   // ── 计算 ──
-  const userId = computed(() => useAuthStore().userId)
+  const userId = computed(() => authStore.userId)
 
   // ── 代际计数器：检测过时响应 ──
   let _generation = 0
@@ -75,7 +76,10 @@ export const useUserStore = defineStore('user', () => {
       if (res.code !== 200) {
         throw new Error(res.message || '头像上传失败')
       }
-      if (gen === _generation && profile.value)         profile.value.avatarUrl = res.data
+      if (gen === _generation && profile.value) {
+        profile.value.avatar_url = res.data
+        profile.value.avatarUrl = res.data
+      }
       return res
     })
   }
@@ -109,7 +113,10 @@ export const useUserStore = defineStore('user', () => {
       if (res.code !== 200) {
         throw new Error(res.message || '更新 AI 类型失败')
       }
-      if (gen === _generation && profile.value) profile.value.aiType = aiType
+      if (gen === _generation && profile.value) {
+        profile.value.ai_type = aiType
+        profile.value.aiType = aiType
+      }
       return res
     })
   }

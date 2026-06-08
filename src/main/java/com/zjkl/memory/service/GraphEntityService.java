@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.zjkl.ai.prompt.service.PromptTemplateService;
 import com.zjkl.common.config.properties.MilvusProperties;
 import com.zjkl.common.util.MilvusQueryUtil;
-import com.zjkl.emotion.model.EmotionAnchorEvent;
+import com.zjkl.anchor.model.AnchorEvent;
 import com.zjkl.memory.constant.GraphRedisKeys;
 import dev.langchain4j.community.model.dashscope.QwenChatModel;
 import dev.langchain4j.data.embedding.Embedding;
@@ -27,6 +27,7 @@ import org.springframework.stereotype.Service;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -75,7 +76,7 @@ public class GraphEntityService {
         this.objectMapper = objectMapper;
     }
 
-    public void ingestAnchorEvent(EmotionAnchorEvent event) {
+    public void ingestAnchorEvent(AnchorEvent event) {
         if (event == null || event.getUserId() == null || event.getUserId().isBlank()) {
             return;
         }
@@ -162,34 +163,53 @@ public class GraphEntityService {
         log.info("图压缩任务完成: 处理 {} 个用户, 跳过 {} 个用户 (锁/超时)", processed, skipped);
     }
 
-    private void upsertGraph(String userId, EmotionAnchorEvent event, List<TripletRecord> triplets) {
+    private void upsertGraph(String userId, AnchorEvent event, List<TripletRecord> triplets) {
         String sourceId = buildSourceId(userId, event);
-        upsertPassage(userId, sourceId, buildGraphSourceContent(event));
-
         Map<String, String> entityTypeMap = new LinkedHashMap<>();
+        Map<String, List<String>> relationIdsByEntityId = new LinkedHashMap<>();
+        List<String> relationIds = new ArrayList<>();
         for (TripletRecord triplet : triplets) {
-            entityTypeMap.putIfAbsent(MilvusQueryUtil.normalizePhrase(triplet.subject()), inferType(triplet.subject(), triplet.type()));
-            entityTypeMap.putIfAbsent(MilvusQueryUtil.normalizePhrase(triplet.object()), inferType(triplet.object(), triplet.type()));
-        }
+            String subject = MilvusQueryUtil.normalizePhrase(triplet.subject());
+            String object = MilvusQueryUtil.normalizePhrase(triplet.object());
+            entityTypeMap.putIfAbsent(subject, inferType(subject, triplet.type()));
+            entityTypeMap.putIfAbsent(object, inferType(object, triplet.type()));
 
-        upsertEntities(userId, sourceId, entityTypeMap);
+            String relationId = relationId(userId, triplet.subject(), triplet.predicate(), triplet.object());
+            relationIds.add(relationId);
+            relationIdsByEntityId.computeIfAbsent(entityId(userId, subject), ignored -> new ArrayList<>()).add(relationId);
+            relationIdsByEntityId.computeIfAbsent(entityId(userId, object), ignored -> new ArrayList<>()).add(relationId);
+        }
+        List<String> entityIds = entityTypeMap.keySet().stream().map(name -> entityId(userId, name)).toList();
+
+        upsertPassage(userId, sourceId, event, buildGraphSourceContent(event), entityIds, relationIds);
+        upsertEntities(userId, sourceId, entityTypeMap, relationIdsByEntityId);
         upsertRelations(userId, sourceId, triplets);
         // 不在每次写入时 flush，依赖 Milvus 自动 flush 和每周 compaction 任务
     }
 
-    private void upsertPassage(String userId, String sourceId, String text) {
+    private void upsertPassage(String userId, String sourceId, AnchorEvent event,
+                               String text, List<String> entityIds, List<String> relationIds) {
+        Embedding embedding = embeddingModel.embed(text).content();
+        normalizeEmbedding(embedding);
+
         JsonObject row = new JsonObject();
         row.addProperty("id", sourceId);
         row.addProperty("user_id", userId);
         row.addProperty("text", text);
         row.addProperty("source_type", "anchor");
+        row.addProperty("source_ref_id", event.getId() == null ? sourceId : event.getId().toString());
+        row.addProperty("entity_ids", toJsonList(entityIds));
+        row.addProperty("relation_ids", toJsonList(relationIds));
+        row.addProperty("timestamp", eventTimestamp(event));
+        row.add("vector", toJsonArray(embedding.vector()));
         milvusClientV2.upsert(UpsertReq.builder()
                 .collectionName(milvusProperties.getGraphPassageCollectionName())
                 .data(List.of(row))
                 .build());
     }
 
-    private void upsertEntities(String userId, String sourceId, Map<String, String> entityTypeMap) {
+    private void upsertEntities(String userId, String sourceId, Map<String, String> entityTypeMap,
+                                Map<String, List<String>> relationIdsByEntityId) {
         if (entityTypeMap.isEmpty()) {
             return;
         }
@@ -197,7 +217,7 @@ public class GraphEntityService {
         Map<String, Map<String, Object>> existing = queryByIds(
                 milvusProperties.getGraphEntityCollectionName(),
                 entityIds,
-                List.of("id", "mention_count", "first_seen", "last_seen", "type", "source_ids")
+                List.of("id", "mention_count", "first_seen", "last_seen", "type", "source_ids", "passage_ids", "relation_ids")
         );
 
         // 批量 embedding，避免 N+1 API 调用
@@ -217,6 +237,9 @@ public class GraphEntityService {
             long firstSeen = current == null ? now : parseLong(current.get("first_seen"));
             String type = current != null && current.get("type") != null ? current.get("type").toString() : entityTypeMap.get(name);
             String sourceIds = appendJsonList(current == null ? null : current.get("source_ids"), sourceId);
+            String passageIds = appendJsonList(current == null ? null : current.get("passage_ids"), sourceId);
+            String relationIds = mergeJsonLists(current == null ? null : current.get("relation_ids"),
+                    toJsonList(relationIdsByEntityId.getOrDefault(id, List.of())));
 
             Embedding embedding = batchEmbeddings.get(idx);
             normalizeEmbedding(embedding);
@@ -230,6 +253,8 @@ public class GraphEntityService {
             row.addProperty("first_seen", firstSeen);
             row.addProperty("last_seen", now);
             row.addProperty("source_ids", sourceIds);
+            row.addProperty("passage_ids", passageIds);
+            row.addProperty("relation_ids", relationIds);
             row.add("vector", toJsonArray(embedding.vector()));
             rows.add(row);
         }
@@ -244,7 +269,7 @@ public class GraphEntityService {
         Map<String, Map<String, Object>> existing = queryByIds(
                 milvusProperties.getGraphRelationCollectionName(),
                 triplets.stream().map(t -> relationId(userId, t.subject(), t.predicate(), t.object())).toList(),
-                List.of("id", "confidence", "timestamp")
+                List.of("id", "confidence", "timestamp", "passage_ids")
         );
 
         // 批量 embedding
@@ -281,6 +306,11 @@ public class GraphEntityService {
             row.addProperty("confidence", confidence);
             row.addProperty("timestamp", current == null ? now : parseLong(current.get("timestamp")));
             row.addProperty("source_id", sourceId);
+            row.addProperty("entity_ids", toJsonList(List.of(
+                    entityId(userId, MilvusQueryUtil.normalizePhrase(triplet.subject())),
+                    entityId(userId, MilvusQueryUtil.normalizePhrase(triplet.object()))
+            )));
+            row.addProperty("passage_ids", appendJsonList(current == null ? null : current.get("passage_ids"), sourceId));
             row.add("vector", toJsonArray(embedding.vector()));
             rows.add(row);
         }
@@ -323,7 +353,7 @@ public class GraphEntityService {
         List<Map<String, Object>> rows = MilvusQueryUtil.queryByFilter(milvusClientV2,
                 milvusProperties.getGraphEntityCollectionName(),
                 MilvusQueryUtil.userFilter(userId),
-                List.of("id", "text", "type", "mention_count", "first_seen", "last_seen", "source_ids"),
+                List.of("id", "text", "type", "mention_count", "first_seen", "last_seen", "source_ids", "passage_ids", "relation_ids"),
                 ENTITY_LIMIT * 2
         );
         Set<String> deletedIds = new HashSet<>();
@@ -370,6 +400,8 @@ public class GraphEntityService {
         keepRow.addProperty("first_seen", Math.min(parseLong(keep.get("first_seen")), parseLong(remove.get("first_seen"))));
         keepRow.addProperty("last_seen", Math.max(parseLong(keep.get("last_seen")), parseLong(remove.get("last_seen"))));
         keepRow.addProperty("source_ids", mergeJsonLists(keep.get("source_ids"), remove.get("source_ids")));
+        keepRow.addProperty("passage_ids", mergeJsonLists(keep.get("passage_ids"), remove.get("passage_ids")));
+        keepRow.addProperty("relation_ids", mergeJsonLists(keep.get("relation_ids"), remove.get("relation_ids")));
         Embedding embedding = embeddingModel.embed(keepText).content();
         normalizeEmbedding(embedding);
         keepRow.add("vector", toJsonArray(embedding.vector()));
@@ -389,7 +421,7 @@ public class GraphEntityService {
         List<Map<String, Object>> relations = MilvusQueryUtil.queryByFilter(milvusClientV2,
                 milvusProperties.getGraphRelationCollectionName(),
                 MilvusQueryUtil.userFilter(userId) + " and (subject == \"" + MilvusQueryUtil.escape(removeText) + "\" or object == \"" + MilvusQueryUtil.escape(removeText) + "\")",
-                List.of("id", "subject", "predicate", "object", "relation_type", "confidence", "timestamp", "source_id")
+                List.of("id", "subject", "predicate", "object", "relation_type", "confidence", "timestamp", "source_id", "passage_ids")
         );
         if (relations.isEmpty()) {
             return;
@@ -437,6 +469,13 @@ public class GraphEntityService {
             row.addProperty("confidence", parseDouble(relation.get("confidence")));
             row.addProperty("timestamp", parseLong(relation.get("timestamp")));
             row.addProperty("source_id", relation.get("source_id").toString());
+            row.addProperty("entity_ids", toJsonList(List.of(
+                    entityId(userId, MilvusQueryUtil.normalizePhrase(newSubjects.get(i))),
+                    entityId(userId, MilvusQueryUtil.normalizePhrase(newObjects.get(i)))
+            )));
+            row.addProperty("passage_ids", relation.get("passage_ids") == null
+                    ? appendJsonList(null, relation.get("source_id").toString())
+                    : relation.get("passage_ids").toString());
             row.add("vector", toJsonArray(embedding.vector()));
             upserts.add(row);
         }
@@ -517,7 +556,7 @@ public class GraphEntityService {
         }
     }
 
-    private String buildGraphSourceContent(EmotionAnchorEvent event) {
+    private String buildGraphSourceContent(AnchorEvent event) {
         return String.join("\n",
                 nonNullLine("事件标题", event.getEventTitle()),
                 nonNullLine("触发原因", event.getTriggerReason()),
@@ -603,7 +642,7 @@ public class GraphEntityService {
         return md5(userId + ":" + subject + ":" + predicate + ":" + object);
     }
 
-    private String buildSourceId(String userId, EmotionAnchorEvent event) {
+    private String buildSourceId(String userId, AnchorEvent event) {
         if (event.getId() != null) {
             return userId + ":anchor:" + event.getId();
         }
@@ -612,6 +651,33 @@ public class GraphEntityService {
 
     private String appendJsonList(Object currentValue, String value) {
         return mergeJsonLists(currentValue, value == null ? null : "[\"" + MilvusQueryUtil.escape(value) + "\"]");
+    }
+
+    private String toJsonList(Collection<String> values) {
+        if (values == null || values.isEmpty()) {
+            return "[]";
+        }
+        try {
+            return objectMapper.writeValueAsString(values.stream()
+                    .filter(Objects::nonNull)
+                    .filter(value -> !value.isBlank())
+                    .collect(Collectors.toCollection(LinkedHashSet::new)));
+        } catch (Exception e) {
+            return "[]";
+        }
+    }
+
+    private long eventTimestamp(AnchorEvent event) {
+        if (event.getEndTime() != null) {
+            return event.getEndTime().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        }
+        if (event.getStartTime() != null) {
+            return event.getStartTime().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        }
+        if (event.getCreatedAt() != null) {
+            return event.getCreatedAt().atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+        }
+        return System.currentTimeMillis();
     }
 
     private String mergeJsonLists(Object left, Object right) {

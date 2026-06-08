@@ -56,10 +56,11 @@
 
         <div class="card-cover" :data-broken="item._imgBroken ? '' : undefined">
           <img v-if="(item.imageUrl || item.cover) && !item._imgBroken"
-               :src="item.imageUrl || item.cover"
+               :src="getOptimizedImageUrl(item.imageUrl || item.cover, { width: 560 })"
                :alt="item.title"
                @error="handleImgError(item)"
                loading="lazy"
+               decoding="async"
           >
           <div v-else class="cover-placeholder" :class="item.resourceType || item.type">
             <span class="placeholder-icon">{{ getPlaceholderIcon(item.resourceType || item.type) }}</span>
@@ -103,10 +104,12 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
+defineOptions({ name: 'ActionCenter' })
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue';
 import { useAsyncData } from '@/composables/useAsyncData';
 import request from '@/utils/request';
 import { API } from '@/config/api';
+import { getOptimizedImageUrl } from '@/utils/image';
 
 // --- 状态与分类 ---
 const currentCat = ref('all');
@@ -119,11 +122,18 @@ const categories = [
   { id: 'article', name: '深度阅读' }
 ];
 
-// --- 问候语逻辑（稳定 computed，避免每次返回新对象触发下游重渲染）---
-const _greetingHour = computed(() => new Date().getHours())
+// --- 问候语逻辑（定时器驱动 ref，避免 computed 对 Date.now() 不响应）---
+const currentHour = ref(new Date().getHours())
+let _hourTimer = null
+onMounted(() => {
+  _hourTimer = setInterval(() => { currentHour.value = new Date().getHours() }, 30000)
+})
+onBeforeUnmount(() => {
+  if (_hourTimer) { clearInterval(_hourTimer); _hourTimer = null }
+})
 
 const greeting = computed(() => {
-  const hour = _greetingHour.value;
+  const hour = currentHour.value;
   if (hour >= 5 && hour < 12) return '早安，开始新的一天';
   if (hour >= 12 && hour < 14) return '午安，稍作休息吧';
   if (hour >= 14 && hour < 18) return '下午好，继续保持专注';
@@ -132,7 +142,7 @@ const greeting = computed(() => {
 });
 
 const greetingClass = computed(() => {
-  const hour = _greetingHour.value;
+  const hour = currentHour.value;
   if (hour >= 5 && hour < 12) return 'greeting-morning';
   if (hour >= 12 && hour < 14) return 'greeting-noon';
   if (hour >= 14 && hour < 18) return 'greeting-afternoon';
@@ -250,7 +260,7 @@ const filteredResources = computed(() => {
   border-radius: 20px;
   font-size: 13px;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: background-color 0.3s ease, border-color 0.3s ease, opacity 0.3s ease, transform 0.3s ease;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -275,7 +285,7 @@ const filteredResources = computed(() => {
   font-size: 15px;
   opacity: 0.5;
   cursor: pointer;
-  transition: all 0.3s ease;
+  transition: opacity 0.3s ease, color 0.3s ease, transform 0.3s ease;
   position: relative;
   padding-bottom: 5px;
   font-weight: 400;
@@ -334,7 +344,7 @@ const filteredResources = computed(() => {
   overflow: hidden;
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+  transition: background-color 0.4s cubic-bezier(0.165, 0.84, 0.44, 1), border-color 0.4s cubic-bezier(0.165, 0.84, 0.44, 1), box-shadow 0.4s cubic-bezier(0.165, 0.84, 0.44, 1), transform 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
   opacity: 0;
   animation: cardFadeIn 0.6s forwards;
 }
@@ -378,7 +388,7 @@ const filteredResources = computed(() => {
   top: 12px; right: 12px;
   padding: 4px 10px;
   background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(4px);
   border-radius: 6px;
   font-size: 11px;
   color: #fff;
@@ -437,7 +447,7 @@ const filteredResources = computed(() => {
   font-size: 12px;
   cursor: pointer;
   text-decoration: none;
-  transition: all 0.3s ease;
+  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease, opacity 0.3s ease, transform 0.3s ease;
   display: inline-block;
 }
 .action-btn:hover {

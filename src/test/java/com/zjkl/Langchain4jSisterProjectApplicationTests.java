@@ -9,8 +9,8 @@ import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.test.context.ActiveProfiles;
 
+import com.zjkl.anchor.service.AnchorEventService;
 import com.zjkl.memory.service.PromptCacheService;
-import com.zjkl.emotion.service.EmotionAnchorService;
 import com.zjkl.wakeup.tool.UserStateTool;
 import com.zjkl.ai.peek.scheduler.PeekScheduler;
 
@@ -65,7 +65,7 @@ class Langchain4jSisterProjectApplicationTests {
     private RedissonClient redissonClient;
 
     @MockBean
-    private EmotionAnchorService emotionAnchorService;
+    private AnchorEventService anchorEventService;
 
     @MockBean
     private UserStateTool userStateTool;

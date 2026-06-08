@@ -1,6 +1,6 @@
 package com.zjkl.common.event;
 
-import com.zjkl.emotion.model.EmotionAnchorEvent;
+import com.zjkl.anchor.model.AnchorEvent;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 
@@ -14,7 +14,7 @@ import java.time.LocalDateTime;
 public class AnchorEndedEvent {
 
     private final String userId;
-    private final EmotionAnchorEvent event;
-    private final EmotionAnchorEvent.EndType endType;
+    private final AnchorEvent event;
+    private final AnchorEvent.EndType endType;
     private final LocalDateTime timestamp;
 }
