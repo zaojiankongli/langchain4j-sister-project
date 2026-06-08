@@ -45,6 +45,15 @@ public class ChatPushServiceImpl implements ChatPushService {
     }
 
     @Override
+    public void pushUserTranscript(String userId, String transcript) {
+        pushToMiniprogram(userId, new WebSocketMessage(MessageType.CHAT, Map.of(
+                "role", "user",
+                "text", transcript,
+                "source", "realtime_transcript"
+        )));
+    }
+
+    @Override
     public void pushPetExpression(String userId, String expression, double intensity, long durationMs) {
         connectionStateManager.pushPetExpression(userId, expression, intensity, durationMs);
         pushToMiniprogram(userId, WebSocketMessage.petExpression(expression, intensity, durationMs));

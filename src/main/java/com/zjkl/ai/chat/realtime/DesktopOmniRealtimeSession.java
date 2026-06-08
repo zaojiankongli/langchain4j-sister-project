@@ -290,6 +290,7 @@ class DesktopOmniRealtimeSession implements WebSocket.Listener {
             return;
         }
         latestSavedUserTranscript = transcript;
+        chatPushService.pushUserTranscript(userId, transcript);
         CompletableFutureSupport.runAsync(() -> converMessageService.saveMessage(
                 userId,
                 "user",
