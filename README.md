@@ -1,17 +1,18 @@
 # Sister Project
 
-Sister Project 是一个 AI 伴侣全栈系统。它用 Spring Boot 3、Java 21、LangChain4j、通义千问、Milvus、Redis、MySQL 和 Vue 3，把实时对话、多模态理解、长期记忆、情绪状态、主动唤醒和小程序接入放进同一个后端架构中。这个 README 重点说明系统设计、关键链路和工程取舍，方便技术评审或面试官快速判断项目深度。
+Sister Project 是一个“传统业务系统 + AI 对话中枢 + RAG 长期记忆层”的全栈项目。它用 Spring Boot 3、Java 21、LangChain4j、通义千问、Milvus、Redis、MySQL 和 Vue 3，把用户体系、实时通信、对象存储、可观测性、AI 客服式对话、多模态理解、长期记忆和主动交互放进同一个工程。这个 README 重点说明系统设计、RAG 路由、重排链路和工程取舍，方便技术评审或面试官快速判断项目深度。
 
 ## 项目亮点
 
-这个项目的重点不是调用一个大模型接口，而是把多个慢服务和有状态模块编排成稳定的产品链路：
+这个项目的重点不是调用一个大模型接口，而是把传统后端能力、AI 编排能力和 RAG 检索能力组合成一条稳定的产品链路：
 
-- **双路记忆检索**：同时维护摘要记忆和 Graph RAG，上下文由向量检索、全文检索、实体关系检索和大模型重排共同生成
+- **传统后端底座**：包含认证、用户画像、设置、邮件、对象存储、管理接口、监控指标和 Docker 化部署
+- **AI 客服式对话中枢**：聊天层像一个带长期记忆板的 AI 客服，把用户问题、历史记忆、情绪状态和多模态输入组织成可回复上下文
+- **RAG 长期记忆层**：Milvus 承担长期记忆检索，路由器决定使用 native hybrid RAG、Graph RAG 或两者并行
+- **多阶段重排链路**：native RAG 使用 dense vector + sparse BM25 + Reciprocal Rank Fusion，Graph RAG 使用实体召回、关系扩展和 LLM rerank
 - **实时交互链路**：后端通过 STOMP over WebSocket 推送文本、音频、情绪、动作、表情和系统消息
 - **情绪状态建模**：用 Pleasure、Arousal、Dominance 三维情绪模型驱动 TTS、主动交互和情绪锚点
 - **外部调用隔离**：大模型、语音合成、Milvus、图片处理分别使用有界线程池，避免慢调用拖垮主链路
-- **多端接入**：同一套后端同时服务 Web 前端、桌宠实时通道和微信小程序通道
-- **生产配置治理**：敏感配置通过环境变量注入，Docker Compose 只保留统一入口，公开仓库不提交真实密钥
 
 ## 技术栈
 
@@ -40,33 +41,35 @@ REST API + STOMP WebSocket + 小程序 WebSocket
         │
         ▼
 Chat orchestration
+        ├── Query analyzer / RAG router
         ├── LangChain4j streaming chat
         ├── Vision understanding
         ├── TTS streaming
         ├── Emotion engine
-        ├── Summary memory RAG
+        ├── Native hybrid RAG
         └── Graph RAG
         │
         ▼
 MySQL + Redis + Milvus + OSS + DashScope
 ```
 
-这种拆分让实时链路保持可控：用户消息进入后端后，系统可以并行准备记忆、情绪和多模态上下文，再把 LLM 的流式输出拆成文本、音频和状态事件推送给前端。
+这种拆分让实时链路保持可控：用户消息进入后端后，系统先由查询分析器判断是否需要长期记忆，再并行准备 native hybrid RAG、Graph RAG、情绪和多模态上下文，最后把 LLM 的流式输出拆成文本、音频和状态事件推送给前端。
 
 ## 核心链路设计
 
 ### 实时聊天链路
 
-聊天链路围绕“低等待时间”和“可降级”设计。文本回复通过 LangChain4j Streaming Chat Model 流式输出，后端再通过 STOMP 推给前端；音频合成和情绪更新不阻塞文本首包。
+聊天链路本质上是一个 AI 客服式对话中枢。它不直接把用户输入丢给模型，而是先读取用户身份、最近消息、长期记忆、图谱关系、情绪状态和多模态上下文，再组装成一次可解释、可降级的 LLM 请求。
 
 ```text
 用户输入
   │
   ├── 用户身份校验
   ├── 活跃状态更新
+  ├── QueryAnalyzer 判断 RAG 路由
   ├── 图片或截图理解
-  ├── 摘要记忆检索
-  ├── Graph RAG 检索
+  ├── native hybrid RAG 检索
+  ├── Graph RAG 检索与重排
   └── 情绪状态读取
         │
         ▼
@@ -75,9 +78,25 @@ Prompt 组装 → LLM 流式响应 → 文本推送 / TTS / 情绪更新 / 持�
 
 这个链路的工程点在于隔离慢操作。LLM、TTS、Milvus 和图片任务都有独立执行器，避免一个外部服务抖动导致 WebSocket 推送线程被占满。
 
-### 长期记忆链路
+### RAG 长期记忆链路
 
-长期记忆分成“摘要记忆”和“结构化图谱记忆”。摘要记忆把多轮对话压缩成可检索文本，Graph RAG 把对话里的实体、关系和来源片段拆成图谱向量集合。
+长期记忆层不是单一向量检索，而是一套路由式 RAG。`QueryAnalyzer` 先判断当前问题是否需要搜索历史记忆、是否需要搜索实体关系图谱，并提取 topic、date、sentiment 等过滤线索。聊天链路再根据路由结果选择 native hybrid RAG、Graph RAG 或两者并行。
+
+```text
+用户问题
+  │
+  ▼
+QueryAnalyzer
+  ├── needMemorySearch → native hybrid RAG
+  ├── needGraphSearch  → Graph RAG
+  ├── primarySource    → memory / graph / both
+  └── filters          → topic / date / sentiment
+        │
+        ▼
+跨路结果融合 → Prompt memory block → LLM 回复
+```
+
+Milvus 长期记忆分成两条检索路径。native hybrid RAG 负责“这段经历、这类历史对话、某天发生过什么”的召回；Graph RAG 负责“人物、事件、关系、事实链路”的召回。
 
 检索时系统同时使用三类信号：
 
@@ -85,7 +104,40 @@ Prompt 组装 → LLM 流式响应 → 文本推送 / TTS / 情绪更新 / 持�
 - **Sparse BM25**：用全文检索保留关键词命中能力
 - **Graph relation**：用实体和关系补充跨轮对话中的事实联系
 
-`SummaryMemoryService` 使用 Milvus Hybrid Search，把 dense vector 和 sparse BM25 结果用 Reciprocal Rank Fusion (RRF) 融合。`GraphQueryService` 先用 LLM 抽取查询实体，再批量 embedding，最后检索实体、关系和来源片段，并限制候选关系数量，控制 Prompt 长度。
+`SummaryMemoryService` 使用 Milvus Hybrid Search，把 dense vector 和 sparse BM25 结果用 Reciprocal Rank Fusion (RRF) 融合，再做阈值过滤、用户二次校验、去重和文本压缩。`GraphQueryService` 先用 LLM 抽取查询实体，再批量 embedding，随后检索实体、扩展候选关系、做关系向量召回，并用 LLM rerank 选出最有用的关系。最后系统按路由的 primary source 和检索分数融合 native RAG 与 Graph RAG 结果。
+
+### RAG 路由与重排
+
+RAG 路由解决的问题是“不是每个问题都需要查长期记忆，也不是每个问题都适合查图谱”。例如闲聊可以直接回答，问“上次我说的那件事”更适合 native hybrid RAG，问“某个人和某件事之间的关系”更适合 Graph RAG。
+
+```text
+QueryAnalyzer
+  │
+  ├── native hybrid RAG
+  │     ├── dense_vector search
+  │     ├── sparse BM25 search
+  │     ├── RRF(k=60)
+  │     ├── score threshold
+  │     ├── user_id defense check
+  │     └── dedupe + compress
+  │
+  └── Graph RAG
+        ├── LLM entity extraction
+        ├── batch embedding
+        ├── entity search
+        ├── relation id expansion
+        ├── relation vector search
+        ├── LLM relation rerank
+        └── passage fetch
+```
+
+这条链路能体现两个技术点：第一，Milvus 不只是存向量，而是同时承担向量检索、BM25、元数据过滤和多集合图谱检索；第二，LLM 不只负责最终回复，还参与查询理解、实体抽取和候选关系重排。
+
+### 传统业务系统能力
+
+AI 项目也需要传统后端底座。这个项目保留了完整业务系统常见的模块：JWT 认证、邮箱验证码、微信登录、用户画像、设置中心、OSS 上传、邮件通知、管理接口、监控指标和 Docker Compose 编排。
+
+这些模块让 AI 对话不是一个孤立 demo，而是可以接入真实用户、真实文件、真实消息和真实部署环境的应用后端。
 
 ### 情绪引擎链路
 
@@ -176,9 +228,9 @@ langchain4j_sister_backend/
 | 模块 | 能力 |
 | --- | --- |
 | Auth | 邮箱验证码、微信登录、绑定邮箱、刷新 Token、登出 |
-| Chat | 流式文本回复、消息持久化、历史查询、桌宠实时通道 |
+| Chat | AI 客服式对话中枢、流式文本回复、消息持久化、历史查询、桌宠实时通道 |
 | Image | 图片描述、Peek 截图理解、元素提取、图像生成 |
-| Memory | 摘要记忆、混合检索、记忆画廊、Graph RAG |
+| Memory | native hybrid RAG、Graph RAG、RAG 路由、重排、记忆画廊 |
 | Emotion | PAD 状态、心情标签、情绪演化、情绪历史、TTS 参数联动 |
 | WakeUp | 沉默检测、冷却控制、主动对话 |
 | Peek | 前端截图回调、视觉模型分析、主动关怀 |
@@ -271,7 +323,11 @@ npm run build
 如果把这个项目作为后端或 AI 应用项目讲，可以围绕这些问题展开：
 
 - **AI 应用不是单次调用**：系统把 LLM、Vision、TTS、RAG、情绪和推送拆成多个可降级阶段
-- **RAG 不只做向量相似度**：摘要记忆使用 dense + sparse + RRF，图谱记忆使用实体、关系和来源片段
+- **传统系统能力不能省**：认证、用户、设置、OSS、邮件、监控和部署让项目不是纯 demo
+- **聊天层是 AI 客服式中枢**：它负责整合用户问题、长期记忆、情绪状态、多模态输入和实时推送
+- **RAG 先路由再检索**：QueryAnalyzer 判断是否走 native hybrid RAG、Graph RAG 或双路并行
+- **Milvus 不只做向量相似度**：native RAG 使用 dense + sparse + RRF，Graph RAG 使用实体、关系和来源片段
+- **重排分两层**：native RAG 用 RRF 融合，Graph RAG 用 LLM 对候选关系 rerank
 - **实时系统需要背压**：慢外部调用走有界线程池，文本回复优先返回，音频和摘要异步处理
 - **状态一致性需要边界**：Redis 保存短期状态，Redisson 锁保护跨实例更新，MySQL 保存长期业务数据
 - **配置治理体现工程成熟度**：敏感信息只走环境变量，公开仓库只保留脱敏配置和统一 Docker Compose 入口
