@@ -207,7 +207,32 @@ Passage fetch and answer context assembly
 
 当前路由器已经会提取 topic、date、sentiment 等 hint，并把 topic hint 拼入 native RAG query 来增强召回。这个设计可以自然扩展成 query rewrite workflow：先把用户口语化问题改写成检索友好的查询，再分别派发给 native RAG 和 Vector Graph RAG。
 
+如果从策略角度拆解，query rewrite 可以承担三类任务：
+
+- **召回增强**：把“上次那个事情”这种口语表达改写成带主题词、时间词和情绪词的检索问题
+- **视角扩展**：把同一个问题扩成多种检索表述，例如实体视角、事件视角、关系视角，形成 multi-query recall
+- **假设驱动召回**：引入 HyDE 风格的思路，先生成一个可能答案或假设性片段，再拿这个片段反向做检索，提升稀疏问题或隐式关系问题的召回率
+
+在这个项目里，最现实的落地方式不是无条件开启所有 rewrite，而是按路由策略逐步启用：
+
+- **topic/date/sentiment hint**：低成本，适合默认开启
+- **multi-query expansion**：适合复杂回忆问题，但要控制 Milvus 查询次数
+- **HyDE-style rewrite**：适合事实稀疏、关系隐含的问题，但要评估额外 LLM 调用带来的时延和成本
+
 small-to-big 的思路也已经体现在图谱链路里：先用实体和关系这类小粒度结构定位，再取 relation 关联的 passage 作为更完整的上下文。这样能兼顾准确召回和回答完整性，避免直接把长文本块塞给模型导致噪声过多。
+
+### topK 之后的上下文控制
+
+RAG 的关键不只是“能不能检索到”，而是“检索到之后怎样把上下文控制在模型可消化的预算内”。这个项目在设计上已经考虑了 topK 之后的上下文治理。
+
+上下文预算控制分成四层：
+
+- **阈值过滤**：先按 RRF score 或 relation score 去掉弱命中，避免把低质量候选塞进 Prompt
+- **元数据过滤**：按 user_id、date hint、sentiment hint 等条件二次筛选，避免把相关性不高的历史带进来
+- **去重压缩**：native RAG 对文本做去重和压缩，跨路融合时做句子级去重，避免 memory 与 graph 重复讲同一件事
+- **LLM 压缩降级**：当 topK 后的上下文仍然过长时，先按 small-to-big 保留核心片段，再触发一次压缩；如果压缩失败，再降级到硬截断或有限条数返回
+
+从代码实现上看，`SummaryMemoryService` 已经在 `buildMemoryBlockWithScore()` 中把召回结果限制到固定条数，并在超出阈值时走 `compressMemoriesWithLLM()`。这使得“检索质量”和“上下文长度”不是两个互相冲突的问题，而是同一个 workflow 里的两个优化目标。
 
 ### 为什么用 workflow，而不是完全 agentic RAG
 
