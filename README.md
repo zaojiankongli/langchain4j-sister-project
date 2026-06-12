@@ -119,9 +119,7 @@ langchain4j_sister_backend/
 │   └── skills/                # AI Skill 相关资源
 ├── VectorGraphRag/            # 独立 Graph RAG / Milvus 向量图谱模块
 ├── frontend/                  # Vue 3 + Vite 前端
-├── docker-compose.yml         # 本地/生产基础设施编排
-├── docker-compose.test.yml    # 测试环境编排
-├── docker-compose.prod.yml    # 生产环境编排
+├── docker-compose.yml         # 统一基础设施编排（MySQL、Redis、Milvus、etcd、MinIO、应用）
 ├── pom.xml                    # 后端 Maven 配置
 └── README.md
 ```
@@ -225,12 +223,9 @@ npm run build
 
 ## 部署说明
 
-项目提供多个 Docker Compose 文件：
+项目仅保留一个主 Docker Compose 文件：
 
-- `docker-compose.yml`：主编排文件，包含 MySQL、Redis、Milvus、etcd、MinIO 和应用服务。
-- `docker-compose.test.yml`：测试环境编排。
-- `docker-compose.prod.yml`：生产环境编排。
-- `docker-compose.vm.yml`：虚拟机环境编排。
+- `docker-compose.yml`：统一编排文件，包含 MySQL、Redis、Milvus、etcd、MinIO 和应用服务。
 
 生产部署建议：
 
