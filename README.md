@@ -1,18 +1,19 @@
 # Sister Project
 
-Sister Project 是一个“传统业务系统 + AI 对话中枢 + RAG 长期记忆层”的全栈项目。它用 Spring Boot 3、Java 21、LangChain4j、通义千问、Milvus、Redis、MySQL 和 Vue 3，把用户体系、实时通信、对象存储、可观测性、AI 客服式对话、多模态理解、长期记忆和主动交互放进同一个工程。这个 README 重点说明系统设计、RAG 路由、重排链路和工程取舍，方便技术评审或面试官快速判断项目深度。
+Sister Project 是一个“传统业务系统 + AI 伴侣对话中枢 + RAG 长期记忆层”的全栈项目。它用 Spring Boot 3、Java 21、LangChain4j、通义千问、Milvus、Redis、MySQL 和 Vue 3，把用户体系、实时通信、对象存储、可观测性、AI 妹妹对话、多模态理解、长期记忆和主动交互放进同一个工程。这个 README 重点说明系统设计、RAG 路由、重排链路和工程取舍，方便技术评审或面试官快速判断项目深度。
 
 ## 项目亮点
 
 这个项目的重点不是调用一个大模型接口，而是把传统后端能力、AI 编排能力和 RAG 检索能力组合成一条稳定的产品链路：
 
 - **传统后端底座**：包含认证、用户画像、设置、邮件、对象存储、管理接口、监控指标和 Docker 化部署
-- **AI 客服式对话中枢**：聊天层像一个带长期记忆板的 AI 客服，把用户问题、历史记忆、情绪状态和多模态输入组织成可回复上下文
+- **AI 伴侣对话中枢**：聊天层像一个有长期记忆、情绪状态和多模态感知的 AI 妹妹，把用户问题组织成可回复、可降级、可追踪的上下文
 - **RAG 长期记忆层**：Milvus 承担长期记忆检索，路由器决定使用 native hybrid RAG、Graph RAG 或两者并行
 - **多阶段重排链路**：native RAG 使用 dense vector + sparse BM25 + Reciprocal Rank Fusion，Graph RAG 使用实体召回、关系扩展和 LLM rerank
 - **实时交互链路**：后端通过 STOMP over WebSocket 推送文本、音频、情绪、动作、表情和系统消息
 - **情绪状态建模**：用 Pleasure、Arousal、Dominance 三维情绪模型驱动 TTS、主动交互和情绪锚点
 - **外部调用隔离**：大模型、语音合成、Milvus、图片处理分别使用有界线程池，避免慢调用拖垮主链路
+- **企业级工程设计**：配置属性集中绑定、JWT 鉴权、Redisson 分布式锁、有界线程池背压、Actuator 指标、Prometheus 暴露和灰度式降级策略
 
 ## 技术栈
 
@@ -59,7 +60,7 @@ MySQL + Redis + Milvus + OSS + DashScope
 
 ### 实时聊天链路
 
-聊天链路本质上是一个 AI 客服式对话中枢。它不直接把用户输入丢给模型，而是先读取用户身份、最近消息、长期记忆、图谱关系、情绪状态和多模态上下文，再组装成一次可解释、可降级的 LLM 请求。
+聊天链路本质上是一个 AI 伴侣对话中枢。它不直接把用户输入丢给模型，而是先读取用户身份、最近消息、长期记忆、图谱关系、情绪状态和多模态上下文，再组装成一次可解释、可降级的 LLM 请求。
 
 ```text
 用户输入
@@ -138,6 +139,10 @@ QueryAnalyzer
 AI 项目也需要传统后端底座。这个项目保留了完整业务系统常见的模块：JWT 认证、邮箱验证码、微信登录、用户画像、设置中心、OSS 上传、邮件通知、管理接口、监控指标和 Docker Compose 编排。
 
 这些模块让 AI 对话不是一个孤立 demo，而是可以接入真实用户、真实文件、真实消息和真实部署环境的应用后端。
+
+### 企业级设计亮点
+
+项目在 AI 能力之外保留了后端系统的工程边界。配置通过 `@ConfigurationProperties` 集中绑定，敏感信息只从环境变量读取；慢外部调用通过有界线程池隔离；Redis 和 Redisson 处理短期状态、冷却时间和分布式一致性；Actuator、Micrometer 和 Prometheus 暴露运行状态；RAG、图谱、TTS、OSS 和邮件服务失败时可以局部降级，不让增强能力拖垮主对话链路。
 
 ### 情绪引擎链路
 
@@ -228,7 +233,7 @@ langchain4j_sister_backend/
 | 模块 | 能力 |
 | --- | --- |
 | Auth | 邮箱验证码、微信登录、绑定邮箱、刷新 Token、登出 |
-| Chat | AI 客服式对话中枢、流式文本回复、消息持久化、历史查询、桌宠实时通道 |
+| Chat | AI 伴侣对话中枢、流式文本回复、消息持久化、历史查询、桌宠实时通道 |
 | Image | 图片描述、Peek 截图理解、元素提取、图像生成 |
 | Memory | native hybrid RAG、Graph RAG、RAG 路由、重排、记忆画廊 |
 | Emotion | PAD 状态、心情标签、情绪演化、情绪历史、TTS 参数联动 |
@@ -324,7 +329,7 @@ npm run build
 
 - **AI 应用不是单次调用**：系统把 LLM、Vision、TTS、RAG、情绪和推送拆成多个可降级阶段
 - **传统系统能力不能省**：认证、用户、设置、OSS、邮件、监控和部署让项目不是纯 demo
-- **聊天层是 AI 客服式中枢**：它负责整合用户问题、长期记忆、情绪状态、多模态输入和实时推送
+- **聊天层是 AI 伴侣中枢**：它负责整合用户问题、长期记忆、情绪状态、多模态输入和实时推送
 - **RAG 先路由再检索**：QueryAnalyzer 判断是否走 native hybrid RAG、Graph RAG 或双路并行
 - **Milvus 不只做向量相似度**：native RAG 使用 dense + sparse + RRF，Graph RAG 使用实体、关系和来源片段
 - **重排分两层**：native RAG 用 RRF 融合，Graph RAG 用 LLM 对候选关系 rerank
@@ -332,6 +337,7 @@ npm run build
 - **状态一致性需要边界**：Redis 保存短期状态，Redisson 锁保护跨实例更新，MySQL 保存长期业务数据
 - **配置治理体现工程成熟度**：敏感信息只走环境变量，公开仓库只保留脱敏配置和统一 Docker Compose 入口
 - **可观测性不是附加项**：Actuator、Prometheus 和队列健康接口用于定位线上链路问题
+- **企业级设计能讲清楚**：鉴权、配置治理、分布式锁、背压、降级、指标和日志都能对应到代码模块
 
 ## 当前限制
 
