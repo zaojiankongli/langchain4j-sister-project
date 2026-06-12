@@ -100,6 +100,42 @@ QueryAnalyzer
 
 Milvus 长期记忆分成两条检索路径。native hybrid RAG 负责“这段经历、这类历史对话、某天发生过什么”的召回；Graph RAG 负责“人物、事件、关系、事实链路”的召回。
 
+RAG 总体架构如下：
+
+```text
+用户问题
+  │
+  ▼
+QueryAnalyzer / Router
+  │
+  ├── query rewrite / topic hint / date hint / sentiment hint
+  │
+  ├── native hybrid RAG
+  │     ├── Milvus dense_vector
+  │     ├── Milvus sparse BM25
+  │     ├── RRF 融合
+  │     ├── score threshold
+  │     ├── user_id 二次校验
+  │     └── 去重 + 压缩
+  │
+  └── Graph RAG
+        ├── LLM entity extraction
+        ├── entity vector search
+        ├── relation id expansion
+        ├── relation vector search
+        ├── LLM relation rerank
+        └── passage small-to-big fetch
+              │
+              ▼
+跨路融合排序 + 句子级去重
+              │
+              ▼
+Prompt memory block
+              │
+              ▼
+Streaming LLM response
+```
+
 检索时系统同时使用三类信号：
 
 - **Dense vector**：用 embedding 匹配语义相似内容
@@ -108,32 +144,40 @@ Milvus 长期记忆分成两条检索路径。native hybrid RAG 负责“这段�
 
 `SummaryMemoryService` 使用 Milvus Hybrid Search，把 dense vector 和 sparse BM25 结果用 Reciprocal Rank Fusion (RRF) 融合，再做阈值过滤、用户二次校验、去重和文本压缩。`GraphQueryService` 先用 LLM 抽取查询实体，再批量 embedding，随后检索实体、扩展候选关系、做关系向量召回，并用 LLM rerank 选出最有用的关系。最后系统按路由的 primary source 和检索分数融合 native RAG 与 Graph RAG 结果。它的优势不只是“能记住”，而是“知道该查哪里、怎么查、查完怎么排、最后怎么说”。
 
-### RAG 路由与重排
+### Graph RAG 设计
 
-RAG 路由解决的问题是“不是每个问题都需要查长期记忆，也不是每个问题都适合查图谱”。例如闲聊可以直接回答，问“上次我说的那件事”更适合 native hybrid RAG，问“某个人和某件事之间的关系”更适合 Graph RAG。
+Graph RAG 的 Java 实现参考了 Zilliz `vector-graph-rag` 的思路，但没有照搬 Python 生态。这个项目把图谱记忆拆成实体、关系和来源片段三类集合，并用 Java 服务把抽取、召回、扩展、重排和格式化串成一条可控 workflow。
 
-```text
-QueryAnalyzer
-  │
-  ├── native hybrid RAG
-  │     ├── dense_vector search
-  │     ├── sparse BM25 search
-  │     ├── RRF(k=60)
-  │     ├── score threshold
-  │     ├── user_id defense check
-  │     └── dedupe + compress
-  │
-  └── Graph RAG
-        ├── LLM entity extraction
-        ├── batch embedding
-        ├── entity search
-        ├── relation id expansion
-        ├── relation vector search
-        ├── LLM relation rerank
-        └── passage fetch
-```
+核心设计点：
 
-这条链路能体现两个技术点：第一，Milvus 不只是存向量，而是同时承担向量检索、BM25、元数据过滤和多集合图谱检索；第二，LLM 不只负责最终回复，还参与查询理解、实体抽取和候选关系重排。
+- **实体层**：从用户问题中抽取人物、地点、事件和偏好等实体，用向量检索找到历史中最接近的节点
+- **关系层**：通过实体上挂载的 relation ids 扩展候选关系，再补充一次 relation vector search，避免只依赖实体命中
+- **片段层**：通过 passage ids 找回来源片段，实现 small-to-big 检索：先用小粒度实体和关系定位，再取更完整的片段给 LLM
+- **重排层**：用 LLM 对候选关系做 rerank，只保留和当前问题最相关的关系，减少无关图谱信息进入 Prompt
+- **安全层**：Milvus 查询按 user_id 过滤，实体文本进入 filter 前做字符校验，避免跨用户记忆污染和 filter 注入
+
+这种设计比“把所有历史对话都塞进向量库”更适合 AI 伴侣场景。AI 妹妹需要记住“谁、什么事、为什么、后来怎样”，而不是只找几段语义相似文本。Graph RAG 能把长期陪伴中形成的人物关系、偏好变化和事件因果保存成结构化线索。
+
+### Query rewrite 和 small-to-big 方向
+
+当前路由器已经会提取 topic、date、sentiment 等 hint，并把 topic hint 拼入 native RAG query 来增强召回。这个设计可以自然扩展成 query rewrite workflow：先把用户口语化问题改写成检索友好的查询，再分别派发给 native RAG 和 Graph RAG。
+
+small-to-big 的思路也已经体现在图谱链路里：先用实体和关系这类小粒度结构定位，再取 relation 关联的 passage 作为更完整的上下文。这样能兼顾准确召回和回答完整性，避免直接把长文本块塞给模型导致噪声过多。
+
+### 为什么用 workflow，而不是完全 agentic RAG
+
+这个项目没有把 RAG 做成完全自由的 agentic RAG，而是选择可控 workflow。原因不是能力不足，而是用户体验要求不同。
+
+AI 伴侣对话需要稳定、低延迟、可解释和可降级。完全 agentic RAG 会让模型自己决定查什么、查几轮、什么时候停止，灵活性更高，但延迟、成本和结果稳定性更难控制。这个项目把“是否检索、查哪一路、怎么重排、怎么融合”固化成 workflow，让每一步都能记录、超时、降级和打点。
+
+这种取舍更接近生产系统：
+
+- **用户体验优先**：文本回复先回来，RAG、TTS、多模态能力不能无限阻塞主链路
+- **可观测性优先**：每次 RAG 都能记录 routeMemory、routeGraph、primarySource、hit、score、timeout 和 injectedChars
+- **成本可控**：减少无意义多轮 agent 调用，把 LLM 用在查询理解、关系重排和最终回复这些高价值节点
+- **可降级**：native RAG、Graph RAG、snapshot、TTS 或图片理解失败时，聊天仍能继续
+
+RAG 可以继续向 workflow 化增强，例如加入 query rewrite、multi-query expansion、small-to-big chunk expansion、cross-encoder rerank 或 answer verification，但核心仍保持“可控流程”，而不是让 agent 自由游走。
 
 ### 传统业务系统能力
 
@@ -162,6 +206,44 @@ AI 项目也需要传统后端底座。这个项目保留了完整业务系统�
 主动交互由 WakeUp、Peek、Anchor 和 Recommendation 组成。WakeUp 根据沉默时间和冷却时间决定是否发起对话；Peek 请求前端截图并交给视觉模型分析；Anchor 根据情绪区域触发事件；Recommendation 用 Agentic 工作流生成推荐内容。
 
 主动链路和聊天链路共享推送层。`ChatPushServiceImpl` 把文本、音频、情绪、动作和系统消息统一转成 WebSocket 消息，同时转发给小程序实时通道。
+
+### 多模态编排链路
+
+多模态不是独立功能，而是进入同一套 AI 伴侣编排层。文本、图片、截图、语音、情绪和主动事件都会被转换成对话上下文或推送事件。
+
+```text
+用户输入 / 主动事件
+  │
+  ├── text message
+  ├── image upload / image URL
+  ├── Peek screenshot callback
+  ├── realtime transcript
+  ├── emotion state
+  └── wakeup / anchor / recommendation event
+        │
+        ▼
+Conversation orchestration
+  ├── identity + profile
+  ├── RAG memory block
+  ├── graph relation block
+  ├── vision description
+  ├── PAD emotion state
+  └── prompt template
+        │
+        ▼
+LLM / VLM / TTS
+        │
+        ▼
+STOMP push
+  ├── text tokens
+  ├── audio chunks
+  ├── emotion update
+  ├── pet expression
+  ├── pet motion
+  └── miniprogram realtime message
+```
+
+这个设计的好处是用户体验统一。用户发图片、沉默太久触发唤醒、前端回传截图或语音转文本时，后端都能复用同一套身份、记忆、情绪和推送能力。
 
 ## 工程设计
 
@@ -340,10 +422,6 @@ npm run build
 - **配置治理体现工程成熟度**：敏感信息只走环境变量，公开仓库只保留脱敏配置和统一 Docker Compose 入口
 - **可观测性不是附加项**：Actuator、Prometheus 和队列健康接口用于定位线上链路问题
 - **企业级设计能讲清楚**：鉴权、配置治理、分布式锁、背压、降级、指标和日志都能对应到代码模块
-
-## 当前限制
-
-这个仓库仍有一些测试用例和当前源码不一致，`mvn test` 可能失败。`mvn compile` 可以作为 README 变更后的基础验证。后续需要同步测试构造器、Lombok 生成方法和 Mockito inline mock 配置。
 
 ## License
 
