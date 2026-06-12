@@ -49,11 +49,19 @@ package-lock.json
 ### OpenCode ###
 .agents/
 skills-lock.json
+.omo/
+findings*.md
+progress.md
+task_plan.md
 
 ### Local config with secrets ###
 **/application-local.yml
+**/application-prod.yml
+**/application-*.bak
 src/main/resources/application-test.yml
 src/main/resources/application-vm.yml
+.env.prod
+.env.production
 
 ### Logs ###
 *.log
@@ -61,6 +69,10 @@ logs/
 
 ### Build artifacts and archives ###
 frontend/dist/
+dist/
 *.tar
 *.tar.gz
 *.zip
+
+### Generated media / large local assets ###
+docs/screenshots/
