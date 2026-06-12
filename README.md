@@ -1,6 +1,6 @@
 # Sister Project
 
-Sister Project 是一个“传统业务系统 + 多模态交互 + native and graph RAG 伴侣系统”的全栈项目。它用 Spring Boot 3、Java 21、LangChain4j、通义千问、Milvus、Redis、MySQL 和 Vue 3，把用户体系、实时通信、对象存储、可观测性、AI 妹妹对话、多模态理解、长期记忆和主动交互放进同一个工程。这个 README 重点说明系统设计、RAG 路由、重排链路和工程取舍，方便技术评审或面试官快速判断项目深度。
+Sister Project 是一个“传统业务系统 + 多模态交互 + 双路 RAG 伴侣系统”的全栈项目。它用 Spring Boot 3、Java 21、LangChain4j、通义千问、Milvus、Redis、MySQL 和 Vue 3，把用户体系、实时通信、对象存储、可观测性、AI 妹妹对话、多模态理解、长期记忆和主动交互放进同一个工程。这个 README 重点说明系统设计、RAG 路由、重排链路和工程取舍，方便技术评审或面试官快速判断项目深度。
 
 ## 项目亮点
 
@@ -8,7 +8,7 @@ Sister Project 是一个“传统业务系统 + 多模态交互 + native and gra
 
 - **传统后端底座**：包含认证、用户画像、设置、邮件、对象存储、管理接口、监控指标和 Docker 化部署
 - **AI 伴侣对话中枢**：聊天层像一个有长期记忆、情绪状态和多模态感知的 AI 妹妹，把用户问题组织成可回复、可降级、可追踪的上下文
-- **RAG 长期记忆层**：Milvus 承担长期记忆检索，路由器决定是否使用rag以及使用哪些rag 例如 native hybrid RAG、Graph RAG 或两者并行
+- **RAG 长期记忆层**：Milvus 承担长期记忆检索，路由器决定走 native hybrid RAG、Graph RAG，或双路并行
 - **多阶段重排链路**：native RAG 使用 dense vector + sparse BM25 + Reciprocal Rank Fusion，Graph RAG 使用实体召回、关系扩展和 LLM rerank
 - **多模态统一编排**：文本、图片、截图、语音、情绪和主动唤醒共用同一条会话链路，不是分散的功能 Demo
 - **实时交互链路**：后端通过 STOMP over WebSocket 推送文本、音频、情绪、动作、表情和系统消息
@@ -257,7 +257,7 @@ STOMP push
 
 这个设计的好处是用户体验统一。用户发图片、沉默太久触发唤醒、前端回传截图或语音转文本时，后端都能复用同一套身份、记忆、情绪和推送能力。对用户来说，这是一位能看、能听、能记、能响应的 AI 妹妹，而不是几个功能拼起来的页面。
 
-## 工程设计
+## 工程设计与稳定性
 
 ### 并发模型
 
