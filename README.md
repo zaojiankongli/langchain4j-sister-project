@@ -145,11 +145,18 @@ Streaming LLM response
 
 `SummaryMemoryService` 使用 Milvus Hybrid Search，把 dense vector 和 sparse BM25 结果用 Reciprocal Rank Fusion (RRF) 融合，再做阈值过滤、用户二次校验、去重和文本压缩。`GraphQueryService` 先用 LLM 抽取查询实体，再批量 embedding，随后检索实体、扩展候选关系、做关系向量召回，并用 LLM rerank 选出最有用的关系。最后系统按路由的 primary source 和检索分数融合 native RAG 与 Graph RAG 结果。它的优势不只是“能记住”，而是“知道该查哪里、怎么查、查完怎么排、最后怎么说”。
 
-### Graph RAG 设计
+### Vector Graph RAG 设计
 
-Graph RAG 的 Java 实现参考了 Zilliz `vector-graph-rag` 的思路，但没有照搬 Python 生态。这个项目把图谱记忆拆成实体、关系和来源片段三类集合，并用 Java 服务把抽取、召回、扩展、重排和格式化串成一条可控 workflow。
+Vector Graph RAG 的 Java 实现参考了 Zilliz `vector-graph-rag` 的思路，但没有照搬 Python 生态。核心思想是：**不用传统图数据库，而是把实体、关系和片段都编码进 Milvus，用纯向量检索 + 单次重排来完成多跳问题召回**。这个项目把图谱记忆拆成实体、关系和来源片段三类集合，并用 Java 服务把抽取、召回、扩展、重排和格式化串成一条可控 workflow。
 
-核心设计点：
+和官方思路一致，这条链路强调四个关键词：
+
+- **No graph database**：不引入 Neo4j 一类独立图数据库
+- **Pure vector search**：实体、关系、片段都通过 Milvus 检索
+- **Single-pass reranking**：用一次 LLM 重排，而不是多轮 agent 反射
+- **Multi-hop reasoning**：通过关系扩展和片段回捞完成多跳信息拼接
+
+在这个项目里的落地方式是：
 
 - **实体层**：从用户问题中抽取人物、地点、事件和偏好等实体，用向量检索找到历史中最接近的节点
 - **关系层**：通过实体上挂载的 relation ids 扩展候选关系，再补充一次 relation vector search，避免只依赖实体命中
@@ -157,15 +164,40 @@ Graph RAG 的 Java 实现参考了 Zilliz `vector-graph-rag` 的思路，但没�
 - **重排层**：用 LLM 对候选关系做 rerank，只保留和当前问题最相关的关系，减少无关图谱信息进入 Prompt
 - **安全层**：Milvus 查询按 user_id 过滤，实体文本进入 filter 前做字符校验，避免跨用户记忆污染和 filter 注入
 
-这种设计比“把所有历史对话都塞进向量库”更适合 AI 伴侣场景。AI 妹妹需要记住“谁、什么事、为什么、后来怎样”，而不是只找几段语义相似文本。Graph RAG 能把长期陪伴中形成的人物关系、偏好变化和事件因果保存成结构化线索。
+执行流程可以概括成：
+
+```text
+Question
+  │
+  ▼
+Entity extraction
+  │
+  ▼
+Vector search on Milvus
+  │
+  ├── entity retrieval
+  ├── relation expansion
+  └── relation vector retrieval
+        │
+        ▼
+Subgraph expansion
+        │
+        ▼
+Single-pass LLM reranking
+        │
+        ▼
+Passage fetch and answer context assembly
+```
+
+这种设计比“把所有历史对话都塞进向量库”更适合 AI 伴侣场景。AI 妹妹需要记住“谁、什么事、为什么、后来怎样”，而不是只找几段语义相似文本。Vector Graph RAG 能把长期陪伴中形成的人物关系、偏好变化和事件因果保存成结构化线索，同时避免引入新的图库运维复杂度。
 
 ### 为什么不用传统图数据库
 
 如果采用传统图数据库，系统通常要维护独立图存储、图 schema、图查询语言和额外的同步链路。对于 AI 伴侣这类以检索和重排为核心的场景，这会把工程复杂度拉得很高，但不一定显著提高用户体验。
 
-这个项目选择向量图谱路线，原因有三点：
+这个项目选择 Vector Graph RAG 路线，原因有三点：
 
-- **部署更轻**：Milvus 已经承担了 native RAG、Graph RAG 和部分 metadata 过滤，不需要再引入 Neo4j 一类独立图数据库
+- **部署更轻**：Milvus 已经承担了 native RAG、Vector Graph RAG 和部分 metadata 过滤，不需要再引入 Neo4j 一类独立图数据库
 - **检索更统一**：实体、关系、片段都能向量化，查询层可以复用 embedding、rerank 和过滤逻辑
 - **体验更稳定**：图谱能力被包装成 workflow，不需要让模型在图数据库、向量库和工具调用之间自由跳转
 
@@ -173,7 +205,7 @@ Graph RAG 的 Java 实现参考了 Zilliz `vector-graph-rag` 的思路，但没�
 
 ### Query rewrite 和 small-to-big 方向
 
-当前路由器已经会提取 topic、date、sentiment 等 hint，并把 topic hint 拼入 native RAG query 来增强召回。这个设计可以自然扩展成 query rewrite workflow：先把用户口语化问题改写成检索友好的查询，再分别派发给 native RAG 和 Graph RAG。
+当前路由器已经会提取 topic、date、sentiment 等 hint，并把 topic hint 拼入 native RAG query 来增强召回。这个设计可以自然扩展成 query rewrite workflow：先把用户口语化问题改写成检索友好的查询，再分别派发给 native RAG 和 Vector Graph RAG。
 
 small-to-big 的思路也已经体现在图谱链路里：先用实体和关系这类小粒度结构定位，再取 relation 关联的 passage 作为更完整的上下文。这样能兼顾准确召回和回答完整性，避免直接把长文本块塞给模型导致噪声过多。
 
@@ -188,7 +220,7 @@ AI 伴侣对话需要稳定、低延迟、可解释和可降级。完全 agentic
 - **用户体验优先**：文本回复先回来，RAG、TTS、多模态能力不能无限阻塞主链路
 - **可观测性优先**：每次 RAG 都能记录 routeMemory、routeGraph、primarySource、hit、score、timeout 和 injectedChars
 - **成本可控**：减少无意义多轮 agent 调用，把 LLM 用在查询理解、关系重排和最终回复这些高价值节点
-- **可降级**：native RAG、Graph RAG、snapshot、TTS 或图片理解失败时，聊天仍能继续
+- **可降级**：native RAG、Vector Graph RAG、snapshot、TTS 或图片理解失败时，聊天仍能继续
 
 RAG 可以继续向 workflow 化增强，例如加入 query rewrite、multi-query expansion、small-to-big chunk expansion、cross-encoder rerank 或 answer verification，但核心仍保持“可控流程”，而不是让 agent 自由游走。
 
