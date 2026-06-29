@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://live2d-desktop-pet.local/protocol/pet-ws-v1/assistant.message.done.schema.json",
+  "title": "assistant.message.done",
+  "allOf": [
+    {
+      "$ref": "./envelope.schema.json"
+    }
+  ],
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "type",
+    "conversationId",
+    "messageId"
+  ],
+  "properties": {
+    "version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "assistant.message.done"
+    },
+    "conversationId": {
+      "$ref": "./envelope.schema.json#/$defs/conversationId"
+    },
+    "messageId": {
+      "$ref": "./envelope.schema.json#/$defs/messageId"
+    }
+  }
+}

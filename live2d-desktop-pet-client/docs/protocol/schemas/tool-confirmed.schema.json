@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://live2d-desktop-pet.local/protocol/pet-ws-v1/tool.confirmed.schema.json",
+  "title": "tool.confirmed",
+  "allOf": [
+    {
+      "$ref": "./envelope.schema.json"
+    }
+  ],
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "type",
+    "toolCallId"
+  ],
+  "properties": {
+    "version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "tool.confirmed"
+    },
+    "toolCallId": {
+      "$ref": "./envelope.schema.json#/$defs/toolCallId"
+    }
+  }
+}

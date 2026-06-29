@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://live2d-desktop-pet.local/protocol/pet-ws-v1/pet.motion.schema.json",
+  "title": "pet.motion",
+  "allOf": [
+    {
+      "$ref": "./envelope.schema.json"
+    }
+  ],
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "type",
+    "motion"
+  ],
+  "properties": {
+    "version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "pet.motion"
+    },
+    "motion": {
+      "$ref": "./envelope.schema.json#/$defs/semanticMotion"
+    },
+    "priority": {
+      "$ref": "./envelope.schema.json#/$defs/motionPriority"
+    }
+  }
+}

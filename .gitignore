@@ -70,6 +70,7 @@ logs/
 ### Build artifacts and archives ###
 frontend/dist/
 dist/
+**/src-tauri/target/
 *.tar
 *.tar.gz
 *.zip

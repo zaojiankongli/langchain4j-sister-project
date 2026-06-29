@@ -1,0 +1,35 @@
+{
+  "name": "live2d-desktop-pet-client",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "protocol:validate": "node docs/protocol/validate-protocol.mjs"
+  },
+  "dependencies": {
+    "@pixi/unsafe-eval": "^6.5.10",
+    "@stomp/stompjs": "^7.3.0",
+    "@tauri-apps/api": "^2.11.0",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@tauri-apps/plugin-fs": "^2.5.1",
+    "@tauri-apps/plugin-notification": "^2.3.3",
+    "live2dcubismcore": "^1.0.2",
+    "modern-gif": "^2.1.0",
+    "pixi-live2d-display": "^0.4.0",
+    "pixi.js": "6.5.10",
+    "sockjs-client": "^1.6.1",
+    "vue": "^3.5.34"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.2",
+    "@types/node": "^24.12.3",
+    "@vitejs/plugin-vue": "^6.0.6",
+    "@vue/tsconfig": "^0.9.1",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.12",
+    "vue-tsc": "^3.2.8"
+  }
+}

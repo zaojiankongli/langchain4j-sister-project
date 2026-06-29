@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Live2D Companion</title>
+    <script src="/vendor/live2d/live2dcubismcore.min.js"></script>
+    <script>
+      window.__live2dRuntimeProbe = {
+        windowTypeBeforeBridge: typeof window.Live2DCubismCore,
+        globalThisTypeBeforeBridge: typeof globalThis.Live2DCubismCore,
+        bareTypeBeforeBridge: typeof Live2DCubismCore,
+      };
+      if (typeof window.Live2DCubismCore === 'undefined' && typeof Live2DCubismCore !== 'undefined') {
+        window.Live2DCubismCore = Live2DCubismCore;
+      }
+      if (typeof globalThis.Live2DCubismCore === 'undefined' && typeof Live2DCubismCore !== 'undefined') {
+        globalThis.Live2DCubismCore = Live2DCubismCore;
+      }
+      window.__live2dRuntimeProbe.windowTypeAfterBridge = typeof window.Live2DCubismCore;
+      window.__live2dRuntimeProbe.globalThisTypeAfterBridge = typeof globalThis.Live2DCubismCore;
+      window.__live2dRuntimeProbe.bareTypeAfterBridge = typeof Live2DCubismCore;
+      console.info('live2d-runtime-probe', window.__live2dRuntimeProbe);
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

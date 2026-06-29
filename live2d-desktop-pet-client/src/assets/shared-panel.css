@@ -1,0 +1,140 @@
+/**
+ * Shared CSS for slide-panel, backdrop, and card patterns.
+ * Import in components via: @import '../../assets/shared-panel.css';
+ *
+ * Components that use the panel-slide transition should define:
+ *   <Transition name="panel-slide"> on the panel root.
+ */
+
+/* ── Panel backdrop (modal overlay) ── */
+.panel-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 99;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* ── Slide transition (left-to-right panels) ── */
+.panel-slide-enter-active,
+.panel-slide-leave-active {
+  transition: transform 250ms ease;
+}
+
+.panel-slide-enter-from,
+.panel-slide-leave-to {
+  transform: translateX(-100%);
+}
+
+/* ── Slide transition (right-to-left panels) ── */
+.panel-slide-rtl-enter-active {
+  transition: transform 250ms ease, opacity 250ms ease;
+}
+
+.panel-slide-rtl-leave-active {
+  transition: transform 200ms ease, opacity 200ms ease;
+}
+
+.panel-slide-rtl-enter-from {
+  transform: translateX(100%);
+  opacity: 0;
+}
+
+.panel-slide-rtl-leave-to {
+  transform: translateX(100%);
+  opacity: 0;
+}
+
+/* ── Panel close button ── */
+.panel-close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: var(--font-size-body);
+  cursor: pointer;
+  transition:
+    color var(--duration-fast) ease,
+    background var(--duration-fast) ease;
+}
+
+.panel-close-btn:hover {
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+}
+
+.panel-close-btn:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-offset);
+}
+
+/* ── Debug card pattern ── */
+.debug-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-surface);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.card-heading {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.card-heading .eyebrow {
+  margin: 0;
+  font-size: var(--font-size-caption);
+  letter-spacing: var(--letter-spacing-wide);
+  text-transform: uppercase;
+  color: var(--color-accent);
+}
+
+/* ── Action button ── */
+.action-btn {
+  border: var(--border-width) solid var(--color-accent);
+  border-radius: var(--radius-pill);
+  padding: var(--space-2) var(--space-4);
+  color: var(--color-action-text);
+  background: var(--color-accent);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    transform var(--duration-fast) ease,
+    box-shadow var(--duration-fast) ease;
+}
+
+.action-btn:hover {
+  transform: translateY(var(--motion-lift));
+  box-shadow: var(--shadow-action);
+}
+
+.action-btn:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-offset);
+}
+
+.action-btn--secondary {
+  color: var(--color-heading);
+  background: var(--color-surface-subtle);
+  border-color: var(--color-border-strong);
+  box-shadow: none;
+}
+
+/* ── Reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  .panel-slide-enter-active,
+  .panel-slide-leave-active,
+  .panel-slide-rtl-enter-active,
+  .panel-slide-rtl-leave-active {
+    transition: none;
+  }
+}

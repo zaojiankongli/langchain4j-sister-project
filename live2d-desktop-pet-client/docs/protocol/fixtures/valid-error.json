@@ -1,0 +1,7 @@
+{
+  "version": "1",
+  "type": "error",
+  "code": "INVALID_MESSAGE",
+  "message": "Message is missing required field version",
+  "correlationId": "msg-001"
+}

@@ -1,0 +1,103 @@
+:root {
+  --color-bg: #100f14;
+  --color-surface: rgba(25, 23, 31, 0.84);
+  --color-surface-raised: rgba(34, 31, 43, 0.9);
+  --color-surface-subtle: rgba(255, 255, 255, 0.04);
+  --color-canvas-bg: #15131c;
+  --color-border: rgba(255, 255, 255, 0.12);
+  --color-border-strong: rgba(255, 246, 232, 0.2);
+  --color-grid: rgba(255, 255, 255, 0.05);
+  --color-glow-warm: rgba(244, 116, 88, 0.34);
+  --color-glow-cool: rgba(71, 167, 235, 0.28);
+  --color-text: #d8d2c8;
+  --color-text-muted: #a89f94;
+  --color-heading: #fff6e8;
+  --color-accent: #f2b35f;
+  --color-accent-soft: rgba(242, 179, 95, 0.12);
+  --color-action-text: #22170c;
+  --color-code-bg: rgba(255, 246, 232, 0.1);
+  --color-log-bg: rgba(255, 255, 255, 0.06);
+  --color-success: #7edfa0;
+  --color-danger: #ff8f7c;
+  --color-warning: #ffd166;
+  --color-info: #8fd7ff;
+  --color-focus: #8fd7ff;
+  --color-field-bg: rgba(0, 0, 0, 0.2);
+  --grid-line: var(--color-grid);
+
+  --font-body: Bahnschrift, 'Segoe UI Variable', 'Trebuchet MS', sans-serif;
+  --font-display: Cambria, Georgia, serif;
+  --font-mono: 'Cascadia Mono', 'SFMono-Regular', Consolas, monospace;
+  --font-size-hero: clamp(2.75rem, 5vw, 5rem);
+  --font-size-title: 1.35rem;
+  --font-size-subtitle: 1.08rem;
+  --font-size-body: 1rem;
+  --font-size-small: 0.9rem;
+  --font-size-caption: 0.78rem;
+  --font-size-code: 0.86rem;
+  --line-height-tight: 0.94;
+  --line-height-body: 1.55;
+  --letter-spacing-tight: -0.055em;
+  --letter-spacing-wide: 0.18em;
+
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --space-8: 4rem;
+
+  --radius-sm: 0.375rem;
+  --radius-md: 1rem;
+  --radius-lg: 1.5rem;
+  --radius-pill: 999rem;
+  --border-width: 1px;
+  --focus-width: 2px;
+  --focus-offset: 3px;
+  --shadow-panel: 0 1.5rem 4rem rgba(0, 0, 0, 0.34);
+  --shadow-action: 0 0.75rem 1.5rem rgba(242, 179, 95, 0.24);
+  --duration-fast: 160ms;
+  --motion-lift: -0.125rem;
+
+  --size-page-max: 78rem;
+  --size-shell-state-min: 26rem;
+  --size-control-min: 21rem;
+  --size-trace-label: 8rem;
+  --size-canvas-min: 22rem;
+  --size-canvas-height: 35rem;
+  --size-stream-min-height: 4.5rem;
+  --measure-heading-debug: 10ch;
+  --measure-heading: 9ch;
+  --measure-body: 38rem;
+
+  font: var(--font-size-body) / var(--line-height-body) var(--font-body);
+  color: var(--color-text);
+  background: transparent;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  border: none;
+  outline: none;
+}
+
+button,
+canvas {
+  font: inherit;
+}
+
+#app {
+  min-height: 100svh;
+  background: transparent;
+  overflow: hidden;
+}

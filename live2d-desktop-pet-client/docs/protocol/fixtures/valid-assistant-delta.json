@@ -1,0 +1,7 @@
+{
+  "version": "1",
+  "type": "assistant.message.delta",
+  "conversationId": "default",
+  "messageId": "msg-001",
+  "text": "你好呀，"
+}

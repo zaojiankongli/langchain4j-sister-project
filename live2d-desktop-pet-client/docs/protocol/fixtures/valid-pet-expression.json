@@ -1,0 +1,7 @@
+{
+  "version": "1",
+  "type": "pet.expression",
+  "expression": "happy",
+  "intensity": 0.8,
+  "durationMs": 3000
+}

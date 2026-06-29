@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://live2d-desktop-pet.local/protocol/pet-ws-v1/envelope.schema.json",
+  "title": "Pet WebSocket v1 Envelope",
+  "type": "object",
+  "required": [
+    "version",
+    "type"
+  ],
+  "properties": {
+    "version": {
+      "const": "1"
+    },
+    "type": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "$defs": {
+    "conversationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "messageId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "toolCallId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 8000
+    },
+    "semanticExpression": {
+      "type": "string",
+      "enum": [
+        "neutral",
+        "happy",
+        "sad",
+        "surprised",
+        "thinking",
+        "error"
+      ]
+    },
+    "semanticMotion": {
+      "type": "string",
+      "enum": [
+        "idle",
+        "greet",
+        "wave",
+        "nod",
+        "shake_head",
+        "thinking",
+        "speaking"
+      ]
+    },
+    "motionPriority": {
+      "type": "string",
+      "enum": [
+        "low",
+        "normal",
+        "high"
+      ]
+    },
+    "errorCode": {
+      "type": "string",
+      "enum": [
+        "INVALID_MESSAGE",
+        "UNKNOWN_MESSAGE_TYPE",
+        "UNSUPPORTED_VERSION",
+        "TOOL_NOT_ALLOWED",
+        "INTERNAL_ERROR"
+      ]
+    }
+  }
+}

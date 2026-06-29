@@ -1,0 +1,6 @@
+{
+  "version": "1",
+  "type": "tool.rejected",
+  "toolCallId": "tool-001",
+  "reason": "user_rejected"
+}

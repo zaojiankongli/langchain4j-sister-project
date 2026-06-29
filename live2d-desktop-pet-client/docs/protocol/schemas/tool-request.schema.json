@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://live2d-desktop-pet.local/protocol/pet-ws-v1/tool.request.schema.json",
+  "title": "tool.request",
+  "allOf": [
+    {
+      "$ref": "./envelope.schema.json"
+    }
+  ],
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "type",
+    "toolCallId",
+    "tool",
+    "args",
+    "requiresConfirmation",
+    "message"
+  ],
+  "properties": {
+    "version": {
+      "const": "1"
+    },
+    "type": {
+      "const": "tool.request"
+    },
+    "toolCallId": {
+      "$ref": "./envelope.schema.json#/$defs/toolCallId"
+    },
+    "tool": {
+      "type": "string",
+      "enum": [
+        "open_url"
+      ]
+    },
+    "args": {
+      "type": "object"
+    },
+    "requiresConfirmation": {
+      "const": true
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    }
+  }
+}

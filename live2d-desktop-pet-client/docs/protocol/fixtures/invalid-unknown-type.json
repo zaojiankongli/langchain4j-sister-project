@@ -1,0 +1,6 @@
+{
+  "version": "1",
+  "type": "pet.live2d.setParameter",
+  "parameter": "ParamMouthOpenY",
+  "value": 1
+}

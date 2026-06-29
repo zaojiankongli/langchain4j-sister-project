@@ -1,0 +1,6 @@
+{
+  "version": "1",
+  "type": "assistant.message.done",
+  "conversationId": "default",
+  "messageId": "msg-001"
+}

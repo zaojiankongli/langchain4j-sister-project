@@ -1,0 +1,6 @@
+{
+  "version": "1",
+  "type": "pet.motion",
+  "motion": "/live2d/sample/motions/wave.motion3.json",
+  "priority": "normal"
+}

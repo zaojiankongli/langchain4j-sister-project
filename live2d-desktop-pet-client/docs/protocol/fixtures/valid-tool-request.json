@@ -1,0 +1,11 @@
+{
+  "version": "1",
+  "type": "tool.request",
+  "toolCallId": "tool-001",
+  "tool": "open_url",
+  "args": {
+    "url": "https://example.com"
+  },
+  "requiresConfirmation": true,
+  "message": "要帮你打开这个网页吗？"
+}

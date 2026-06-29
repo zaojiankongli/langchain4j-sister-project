@@ -1,0 +1,7 @@
+{
+  "version": "1",
+  "type": "user.message",
+  "conversationId": "default",
+  "messageId": "msg-001",
+  "text": "Hello pet"
+}
