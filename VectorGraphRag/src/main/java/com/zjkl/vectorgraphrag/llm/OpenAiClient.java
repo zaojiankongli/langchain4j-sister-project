@@ -47,7 +47,9 @@ public class OpenAiClient {
      * Used by extractors and rerankers that need parsed JSON responses.
      */
     public String chat(String systemPrompt, List<Map<String, String>> fewShotExamples, String userPrompt) {
-        String fullPrompt = systemPrompt + "\n" + userPrompt;
+        // 缓存键必须包含 few-shot examples，避免不同 examples 的请求返回相同的缓存结果
+        String fewShotKey = fewShotExamples.isEmpty() ? "" : fewShotExamples.toString();
+        String fullPrompt = systemPrompt + "\n" + fewShotKey + "\n" + userPrompt;
         if (cache != null && settings.isUseLlmCache()) {
             String cached = cache.get(settings.getLlmModel(), fullPrompt, settings.getLlmTemperature());
             if (cached != null) return cached;

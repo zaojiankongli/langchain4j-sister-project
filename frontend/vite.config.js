@@ -33,6 +33,10 @@ export default defineConfig({
         target: process.env.VITE_API_TARGET || 'http://localhost:8080',
         changeOrigin: true,
       },
+      '/actuator': {
+        target: process.env.VITE_API_TARGET || 'http://localhost:8080',
+        changeOrigin: true,
+      },
       '/ws': {
         target: process.env.VITE_API_TARGET || 'http://localhost:8080',
         changeOrigin: true,
@@ -51,7 +55,7 @@ export default defineConfig({
         manualChunks: {
           vendor: ['vue', 'vue-router', 'pinia'],
           live2d: ['oh-my-live2d'],
-          stomp: ['sockjs-client', 'stompjs'],
+          stomp: ['sockjs-client', '@stomp/stompjs'],
           gsap: ['gsap'],
         },
         // 长效缓存 hash

@@ -444,6 +444,8 @@ public class VectorGraphRAG {
     public void reset() {
         store.dropCollections();
         store.createCollections(true);
+        graphBuilder.clear();
+        graph.reset();
         this.extractionResult = null;
         this.retriever = null;
     }

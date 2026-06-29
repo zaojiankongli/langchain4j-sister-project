@@ -34,10 +34,10 @@ public class MoodDescriptionGenerator {
         } else if (a > 0.2) {
             mood.append("有点紧张，手指轻轻按在胸口，试图让心跳平复下来");
         }
-        // 平静
-        else if (a < -0.5) {
+        // 平静（arousal 范围 [0,1]，低值代表平静）
+        else if (a < 0.15) {
             mood.append("整个人很放松，像躺在云朵上一样，说话声音轻柔得像呢喃");
-        } else if (a < -0.2) {
+        } else if (a < 0.2) {
             mood.append("感觉很安心，身体放松地靠在那里，眼神柔和");
         }
         else {
@@ -66,8 +66,8 @@ public class MoodDescriptionGenerator {
         if (p < -0.15) return "有点失落";
         if (a > 0.5) return "有些紧张";
         if (a > 0.2) return "有点紧张";
-        if (a < -0.5) return "很平静";
-        if (a < -0.2) return "平静";
+        if (a < 0.15) return "很平静";
+        if (a < 0.2) return "平静";
         return "安静";
     }
 

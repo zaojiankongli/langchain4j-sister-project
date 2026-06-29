@@ -1,6 +1,7 @@
 import { ref } from 'vue'
-import Stomp from 'stompjs'
+import { Stomp } from '@stomp/stompjs'
 import SockJS from 'sockjs-client'
+import { useAuthStore } from '@/stores/auth'
 import { STORAGE_KEYS } from '@/config/storage'
 import { WS } from '@/config/api'
 import { safeGet, safeRemove } from '@/utils/storage'
@@ -184,15 +185,15 @@ export function connect(userId) {
 
     // 认证失败：通过 auth store 清理状态（而非直接操作 localStorage）
     if (error && error.toString().includes('Access token')) {
-      import('@/stores/auth').then(({ useAuthStore }) => {
+      try {
         useAuthStore().clearAuth()
-      }).catch(() => {
+      } catch {
         // 降级：store 不可用时直接清理
         setAccessTokenCache('')
         safeRemove(STORAGE_KEYS.ACCESS_TOKEN)
         safeRemove(STORAGE_KEYS.REFRESH_TOKEN)
         safeRemove(STORAGE_KEYS.USER)
-      })
+      }
       return
     }
 

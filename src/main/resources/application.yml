@@ -7,7 +7,7 @@ spring:
   datasource:
     password: ${MYSQL_PASSWORD}
     username: ${MYSQL_USERNAME}
-    url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/zjkl_sister?useUnicode=true&characterEncoding=utf-8&serverTimezone=UTC${MYSQL_JDBC_OPTIONS:}
+    url: jdbc:mysql://${MYSQL_HOST}:${MYSQL_PORT}/zjkl_sister?useUnicode=true&characterEncoding=utf-8&serverTimezone=Asia/Shanghai${MYSQL_JDBC_OPTIONS:}
     driverClassName: com.mysql.cj.jdbc.Driver
     hikari:
       pool-name: MyHikariPool

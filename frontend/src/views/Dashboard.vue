@@ -19,6 +19,14 @@
         <div v-if="live2dLoadStatus === 'loading'" class="live2d-loading-overlay">
           <div class="live2d-loading-spinner"></div>
         </div>
+        <div v-else-if="live2dLoadStatus === 'idle' && live2dLoadMode === 'manual'" class="live2d-deferred-overlay">
+          <button class="live2d-load-btn" type="button" @click.stop="requestLive2DLoad">加载 Live2D</button>
+          <span>{{ live2dLoadHint }}</span>
+        </div>
+        <div v-else-if="live2dLoadStatus === 'fail'" class="live2d-deferred-overlay">
+          <button class="live2d-load-btn" type="button" @click.stop="requestLive2DLoad">重新加载</button>
+          <span>Live2D 加载失败，可稍后重试。</span>
+        </div>
       </div>
 
       <NavigationMenu
@@ -46,7 +54,7 @@
       </div>
       <div ref="panelBodyRef" class="panel-body">
           <div class="global-module-wrapper">
-            <keep-alive include="UserProfile,MemoryFragment,EmotionPulse,ActionCenter,SettingsPanel">
+            <keep-alive include="UserProfile,MemoryFragment,EmotionPulse,ActionCenter,SettingsPanel,PerformanceDiagnostics">
               <component :is="currentView" />
             </keep-alive>
           </div>
@@ -82,6 +90,7 @@ import { useUiStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import { useUserStore } from '@/stores/user'
 import { OML2D_KEY } from '@/symbols'
+import { isDiagnosticsEnabled } from '@/utils/diagnosticsAccess'
 // ── ChatWindow 同步导入（输入框必须在首屏就绪） ──
 import ChatWindow from "@/components/chat/ChatWindow.vue"
 // ── 其余首屏不用的组件延迟加载 ──
@@ -92,8 +101,10 @@ const MemoryFragment = defineAsyncComponent(() => import('@/components/dashboard
 const EmotionPulse = defineAsyncComponent(() => import("@/components/dashboard/EmotionPulse.vue"))
 const ActionCenter = defineAsyncComponent(() => import('@/components/dashboard/ActionCenter.vue'))
 const SettingsPanel = defineAsyncComponent(() => import('@/components/settings/SettingsPanel.vue'))
+const PerformanceDiagnostics = defineAsyncComponent(() => import('@/components/dashboard/PerformanceDiagnostics.vue'))
 const MailBox = defineAsyncComponent(() => import("@/components/Panel/MailBox.vue"))
 const StatusPanel = defineAsyncComponent(() => import("@/components/Panel/StatusPanel.vue"))
+const diagnosticsEnabled = isDiagnosticsEnabled()
 
 const backgroundMap = {
   default: new URL('../assets/bk1.webp', import.meta.url).href,
@@ -104,7 +115,7 @@ const backgroundMap = {
 }
 
 // 模块级常量：避免 computed 每次求值都创建新对象
-const viewMap = { 'user': UserProfile, 'memory': MemoryFragment, 'emotion': EmotionPulse, 'relation': EmotionPulse, 'action': ActionCenter, 'settings': SettingsPanel }
+const viewMap = { 'user': UserProfile, 'memory': MemoryFragment, 'emotion': EmotionPulse, 'relation': EmotionPulse, 'action': ActionCenter, 'settings': SettingsPanel, 'diagnostics': PerformanceDiagnostics }
 // 模型配置缓存：initLive2D 重试时复用，避免重复 map
 // 缓存源为 live2d-models.json 静态 import，运行时不可变，因此不会过期
 let modelsCache = null
@@ -144,11 +155,61 @@ const lastPanelActionTime = ref(0)
 // --- Live2D 相关（使用 oml2d 内置功能，去掉自定义 motionManager）---
 const oml2dInstance = ref(null)
 const live2dLoadStatus = ref('idle') // idle | loading | success | fail
+const live2dLoadMode = ref('auto') // auto | manual
 let _initLive2Ding = false // 防并发
 
 provide(OML2D_KEY, oml2dInstance)
 
 let _savedOnCopy = undefined  // 保存 oml2d 初始化前的 document.oncopy
+
+const live2dLoadHint = computed(() => (
+  live2dLoadMode.value === 'manual'
+    ? '当前环境优先省流，点击后再下载 Live2D 资源。'
+    : 'Live2D 将在浏览器空闲时自动加载。'
+))
+
+const shouldDeferLive2D = () => {
+  if (typeof window === 'undefined') return false
+  const isSmallScreen = window.matchMedia?.('(max-width: 768px)').matches
+  const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection
+  const saveData = Boolean(connection?.saveData)
+  const effectiveType = connection?.effectiveType || ''
+  const slowConnection = /(^|-)2g$|slow-2g/.test(effectiveType)
+  return Boolean(isSmallScreen || prefersReducedMotion || saveData || slowConnection)
+}
+
+const cancelScheduledLive2DInit = () => {
+  if (live2dIdleCbId !== null && 'cancelIdleCallback' in window) {
+    cancelIdleCallback(live2dIdleCbId)
+    live2dIdleCbId = null
+  }
+  if (live2dInitTimer) {
+    clearTimeout(live2dInitTimer)
+    live2dInitTimer = null
+  }
+}
+
+const scheduleLive2DInit = () => {
+  cancelScheduledLive2DInit()
+  if (shouldDeferLive2D()) {
+    live2dLoadMode.value = 'manual'
+    return
+  }
+
+  live2dLoadMode.value = 'auto'
+  if ('requestIdleCallback' in window) {
+    live2dIdleCbId = requestIdleCallback(() => { live2dIdleCbId = null; initLive2D() }, { timeout: LIVE2D_IDLE_TIMEOUT })
+    return
+  }
+  live2dInitTimer = setTimeout(initLive2D, 500)
+}
+
+const requestLive2DLoad = () => {
+  live2dLoadMode.value = 'auto'
+  cancelScheduledLive2DInit()
+  initLive2D()
+}
 
 /** 销毁 oml2d 实例，清理所有资源 */
 const destroyOml2d = () => {
@@ -473,6 +534,7 @@ const openNav = (e) => {
 }
 
 const handleNavClick = (item) => {
+  if (item.path === 'diagnostics' && !diagnosticsEnabled) return
   activeTab.value = item.path
 }
 
@@ -529,9 +591,14 @@ const parallaxStyle = computed(() => {
   })
 })
 
-const currentView = computed(() => viewMap[activeTab.value] || null)
+const effectiveViewMap = computed(() => {
+  if (diagnosticsEnabled) return viewMap
+  const { diagnostics: _diagnostics, ...rest } = viewMap
+  return rest
+})
+const currentView = computed(() => effectiveViewMap.value[activeTab.value] || null)
 
-const tabNames = { 'user': '你的样子', 'memory': '与我的回忆', 'emotion': '灵魂的颜色', 'relation': '成长轨迹', 'action': '为你推荐', 'settings': '灵魂调谐' }
+const tabNames = { 'user': '你的样子', 'memory': '与我的回忆', 'emotion': '灵魂的颜色', 'relation': '成长轨迹', 'action': '为你推荐', 'settings': '灵魂调谐', 'diagnostics': '性能诊断' }
 const activeTabName = computed(() => tabNames[activeTab.value] || '')
 
 const ambientHour = ref(new Date().getHours())
@@ -552,12 +619,8 @@ onMounted(() => {
   if (!settingsStore.settings) settingsStore.fetchSettings()
 
   // Live2D 延后到空闲时初始化，避免阻塞首屏渲染
-  // 低带宽场景：requestIdleCallback timeout 兜底 + import() 内部超时由 LIVE2D_LOAD_TIMEOUT 控制
-  if ('requestIdleCallback' in window) {
-    live2dIdleCbId = requestIdleCallback(() => { live2dIdleCbId = null; initLive2D() }, { timeout: LIVE2D_IDLE_TIMEOUT })
-  } else {
-    live2dInitTimer = setTimeout(initLive2D, 500)
-  }
+  // 小屏/省流/慢网环境改为点击后再下载 Live2D 大 chunk。
+  scheduleLive2DInit()
 
   // 周期性更新 ambientHour，使 ambientStyle 在小时边界生效
   ambientTimer = setInterval(() => { ambientHour.value = new Date().getHours() }, 60000)
@@ -580,8 +643,7 @@ onBeforeUnmount(() => {
   _isAlive = false  // 组件卸载标记，必须在 destroyOml2d 之前设置
   destroyOml2d()
   disposeAppLevel()  // 清除 WebSocket 残留定时器，阻止后续重连
-  if (live2dIdleCbId !== null && 'cancelIdleCallback' in window) { cancelIdleCallback(live2dIdleCbId); live2dIdleCbId = null }
-  if (live2dInitTimer) { clearTimeout(live2dInitTimer); live2dInitTimer = null }
+  cancelScheduledLive2DInit()
   if (gsapEnterTimer) { clearTimeout(gsapEnterTimer); gsapEnterTimer = null }
   if (ambientTimer) { clearInterval(ambientTimer); ambientTimer = null }
 })
@@ -643,6 +705,44 @@ onBeforeUnmount(() => {
   justify-content: center;
   pointer-events: none;
 }
+.live2d-deferred-overlay {
+  position: absolute;
+  left: 50%;
+  bottom: 12%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: min(260px, 80vw);
+  padding: 14px 16px;
+  border: 1px solid rgba(94, 234, 212, 0.2);
+  border-radius: 14px;
+  background: rgba(7, 17, 33, 0.58);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.24);
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+
+.live2d-load-btn {
+  min-height: 34px;
+  padding: 0 14px;
+  border: 1px solid rgba(94, 234, 212, 0.36);
+  border-radius: 999px;
+  background: rgba(94, 234, 212, 0.12);
+  color: #b9fff4;
+  cursor: pointer;
+}
+
+.live2d-load-btn:hover {
+  border-color: rgba(94, 234, 212, 0.68);
+  background: rgba(94, 234, 212, 0.2);
+}
+
 .live2d-loading-spinner {
   width: 32px;
   height: 32px;

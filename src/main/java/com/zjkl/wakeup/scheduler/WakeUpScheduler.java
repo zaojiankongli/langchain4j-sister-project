@@ -115,6 +115,7 @@ public class WakeUpScheduler {
                 java.time.Duration.ofSeconds(PROCESSING_KEY_TTL_SECONDS));
         if (Boolean.FALSE.equals(alreadyProcessing)) {
             wakeupConcurrency.release();
+            semAcquired = false;  // 防止 finally 中重复释放 Semaphore
             log.debug("用户正在被其他线程处理中，跳过：userId={}", userId);
             return 0;
         }

@@ -1,26 +1,21 @@
-import axios from 'axios';
-import router from '@/router';
-import { STORAGE_KEYS } from '@/config/storage';
-import { safeGet, safeRemove } from '@/utils/storage';
+import axios from 'axios'
+import router from '@/router'
+import { useAuthStore } from '@/stores/auth'
+import { STORAGE_KEYS } from '@/config/storage'
+import { safeGet, safeRemove } from '@/utils/storage'
 import { getAccessToken } from '@/utils/auth'
 import { setAccessTokenCache } from '@/utils/tokenCache'
+import { recordAuthMetric, recordRequestMetric } from '@/utils/metrics'
+
 export { base64UrlDecode } from '@/utils/jwt'
 
-// ── Token 续期管理 ──
+let refreshPromise = null
 
-/**
- * 执行刷新（模块级单例 Promise，防止并发 401 触发多次刷新）
- * 委托给 auth store 实现单一事实来源
- */
-let _refreshPromise = null
-
-async function _doRefreshImpl() {
-  // 懒加载 store 以避免循环依赖
-  const useAuthStore = (await import('@/stores/auth')).useAuthStore
+async function doRefreshImpl() {
   const authStore = useAuthStore()
 
   if (!authStore.refreshToken) {
-    throw new Error('无 refreshToken')
+    throw new Error('missing refresh token')
   }
 
   const res = await authStore.refreshTokens()
@@ -29,9 +24,13 @@ async function _doRefreshImpl() {
 }
 
 function doRefresh() {
-  if (_refreshPromise) return _refreshPromise
-  _refreshPromise = _doRefreshImpl().finally(() => { _refreshPromise = null })
-  return _refreshPromise
+  if (refreshPromise) {
+    return refreshPromise
+  }
+  refreshPromise = doRefreshImpl().finally(() => {
+    refreshPromise = null
+  })
+  return refreshPromise
 }
 
 function normalizeRequestError(error) {
@@ -64,69 +63,115 @@ function normalizeRequestError(error) {
   return error
 }
 
-// ── 创建 axios 实例 ──
 const request = axios.create({
   baseURL: '/api',
   timeout: 60000,
 })
 
-// ── 请求拦截器：自动添加 token ──
 request.interceptors.request.use(
   async (config) => {
+    config.metadata = {
+      ...(config.metadata || {}),
+      startedAt: Date.now(),
+      retried: Boolean(config._retry),
+    }
+
     const accessToken = getAccessToken() || safeGet(STORAGE_KEYS.ACCESS_TOKEN)
-    if (accessToken) config.headers.Authorization = `Bearer ${accessToken}`
+    if (accessToken) {
+      config.headers.Authorization = `Bearer ${accessToken}`
+    }
     return config
   },
-  (error) => Promise.reject(error)
+  (error) => Promise.reject(error),
 )
 
-// ── 响应拦截器：滑动过期 + 401 自动重试 ──
 request.interceptors.response.use(
   (response) => {
+    const startedAt = response.config?.metadata?.startedAt || Date.now()
+    recordRequestMetric({
+      url: response.config?.url || '',
+      method: response.config?.method || 'get',
+      statusCode: response.status,
+      durationMs: Date.now() - startedAt,
+      success: true,
+      retried: Boolean(response.config?._retry),
+    })
+
     const newAccessToken = response.headers?.['new-access-token']
     if (newAccessToken) {
-      // 通过 auth store 更新，保证单一数据源
-      import('@/stores/auth').then(({ useAuthStore }) => {
+      recordAuthMetric('refresh_header_token')
+      try {
         const authStore = useAuthStore()
-        authStore.setTokens(newAccessToken, authStore.refreshToken)
-      }).catch(() => {
-        // 降级：直接写 localStorage
+        authStore.setTokens(
+          newAccessToken,
+          authStore.refreshToken,
+          authStore.user,
+          authStore.profileComplete,
+        )
+      } catch {
         setAccessTokenCache(newAccessToken)
-        try { localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, newAccessToken) } catch { /* localStorage 不可用时静默忽略 */ }
-      })
+        try {
+          localStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, newAccessToken)
+        } catch {
+          // Ignore storage fallback failures.
+        }
+      }
     }
+
     return response.data
   },
   (error) => {
+    const startedAt = error.config?.metadata?.startedAt || Date.now()
+    recordRequestMetric({
+      url: error.config?.url || '',
+      method: error.config?.method || 'get',
+      statusCode: error.response?.status || 0,
+      durationMs: Date.now() - startedAt,
+      success: false,
+      retried: Boolean(error.config?._retry),
+      message: error.message || 'request failed',
+    })
+
     const originalConfig = error.config
 
     if (error.response?.status === 401 && originalConfig && !originalConfig._retry && !originalConfig._skipRefresh) {
+      recordAuthMetric('401_received', { url: originalConfig.url || '' })
       const refreshToken = safeGet(STORAGE_KEYS.REFRESH_TOKEN)
 
       if (refreshToken) {
         originalConfig._retry = true
+        recordAuthMetric('refresh_attempt', { url: originalConfig.url || '' })
 
         return doRefresh()
           .then((newToken) => {
+            recordAuthMetric('refresh_success', { url: originalConfig.url || '' })
             originalConfig.headers.Authorization = `Bearer ${newToken}`
             return request(originalConfig)
           })
+          .catch((refreshError) => {
+            recordAuthMetric('refresh_failed', {
+              url: originalConfig.url || '',
+              message: refreshError?.message || 'refresh failed',
+            })
+            return Promise.reject(normalizeRequestError(refreshError))
+          })
       }
 
-      // 无 refreshToken，通过 auth store 清除认证状态
-      import('@/stores/auth').then(({ useAuthStore }) => {
+      try {
+        recordAuthMetric('refresh_missing', { url: originalConfig.url || '' })
         useAuthStore().clearAuth()
-      }).catch(() => {
+      } catch {
         setAccessTokenCache('')
         safeRemove(STORAGE_KEYS.ACCESS_TOKEN)
         safeRemove(STORAGE_KEYS.REFRESH_TOKEN)
         safeRemove(STORAGE_KEYS.USER)
-      })
+        safeRemove(STORAGE_KEYS.PROFILE_COMPLETE)
+      }
       router.push({ name: 'Login' }).catch(() => {})
     }
 
     return Promise.reject(normalizeRequestError(error))
-  }
+  },
 )
 
-export default request;
+export default request

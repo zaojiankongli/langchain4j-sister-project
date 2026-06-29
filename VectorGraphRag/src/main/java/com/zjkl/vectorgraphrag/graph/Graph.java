@@ -159,85 +159,49 @@ public class Graph {
         String normObject = normalizePhrase(object);
         String relationText = normSubject + " " + normPredicate + " " + normObject;
 
-        if (relationTextToId.containsKey(relationText)) {
-            String existingId = relationTextToId.get(relationText);
-            if (existingId != null && passageIds != null && !passageIds.isEmpty()) {
-                List<Map<String, Object>> existing = store.getRelationsByIds(List.of(existingId));
-                if (!existing.isEmpty()) {
-                    List<String> currentPids = safeGetList(existing.get(0), "passage_ids");
-                    Set<String> merged = new LinkedHashSet<>(currentPids);
-                    merged.addAll(passageIds);
-                    store.upsertRelation(existingId, null, null, null, new ArrayList<>(merged),
-                            null, null, null);
-                }
+        return relationTextToId.computeIfAbsent(relationText, key -> {
+            // 仅在 Map 中不存在时执行，保证同一 relationText 只有一个线程执行插入
+            String relationId = id != null ? id : UUID.randomUUID().toString();
+
+            String subjectId = createEntity(subject, List.of(relationId), passageIds);
+            String objectId = createEntity(object, List.of(relationId), passageIds);
+
+            List<Float> embedding = embeddingClient.embed(relationText);
+
+            Map<String, Object> metadata = new HashMap<>();
+            metadata.put("entity_ids", List.of(subjectId, objectId));
+            metadata.put("subject", normSubject);
+            metadata.put("predicate", normPredicate);
+            metadata.put("object", normObject);
+            if (passageIds != null && !passageIds.isEmpty()) {
+                metadata.put("passage_ids", passageIds);
             }
-            return existingId;
-        }
 
-        String relationId = id != null ? id : UUID.randomUUID().toString();
+            store.insertRelations(List.of(relationText), List.of(relationId),
+                    List.of(embedding), List.of(metadata), false);
 
-        String subjectId = createEntity(subject, List.of(relationId), passageIds);
-        String objectId = createEntity(object, List.of(relationId), passageIds);
-
-        List<Float> embedding = embeddingClient.embed(relationText);
-
-        Map<String, Object> metadata = new HashMap<>();
-        metadata.put("entity_ids", List.of(subjectId, objectId));
-        metadata.put("subject", normSubject);
-        metadata.put("predicate", normPredicate);
-        metadata.put("object", normObject);
-        if (passageIds != null && !passageIds.isEmpty()) {
-            metadata.put("passage_ids", passageIds);
-        }
-
-        store.insertRelations(List.of(relationText), List.of(relationId),
-                List.of(embedding), List.of(metadata), false);
-
-        String canonical = relationTextToId.putIfAbsent(relationText, relationId);
-        if (canonical != null && !canonical.equals(relationId)) {
-            // 另一个线程已创建该关系，跳过 Milvus 插入避免重复
-            return canonical;
-        }
-        return canonical != null ? canonical : relationId;
+            return relationId;
+        });
     }
 
     private String createEntity(String name, List<String> relationIds, List<String> passageIds) {
         String normalized = normalizePhrase(name);
-        if (entityNameToId.containsKey(normalized)) {
-            String existingId = entityNameToId.get(normalized);
-            if (existingId != null && (relationIds != null || passageIds != null)) {
-                List<Map<String, Object>> existing = store.getEntitiesByIds(List.of(existingId));
-                if (!existing.isEmpty()) {
-                    List<String> currentRels = safeGetList(existing.get(0), "relation_ids");
-                    List<String> currentPids = safeGetList(existing.get(0), "passage_ids");
-                    Set<String> mergedRels = new LinkedHashSet<>(currentRels);
-                    if (relationIds != null) mergedRels.addAll(relationIds);
-                    Set<String> mergedPids = new LinkedHashSet<>(currentPids);
-                    if (passageIds != null) mergedPids.addAll(passageIds);
-                    store.upsertEntity(existingId, null, null,
-                            new ArrayList<>(mergedRels), new ArrayList<>(mergedPids));
-                }
-            }
-            return existingId;
-        }
 
-        String entityId = UUID.randomUUID().toString();
-        List<Float> embedding = embeddingClient.embed(normalized);
+        return entityNameToId.computeIfAbsent(normalized, key -> {
+            // 仅在 Map 中不存在时执行，保证同一 entity name 只有一个线程执行插入
+            String entityId = UUID.randomUUID().toString();
+            List<Float> embedding = embeddingClient.embed(normalized);
 
-        Map<String, Object> metadata = new HashMap<>();
-        if (relationIds != null && !relationIds.isEmpty()) metadata.put("relation_ids", relationIds);
-        if (passageIds != null && !passageIds.isEmpty()) metadata.put("passage_ids", passageIds);
+            Map<String, Object> metadata = new HashMap<>();
+            if (relationIds != null && !relationIds.isEmpty()) metadata.put("relation_ids", relationIds);
+            if (passageIds != null && !passageIds.isEmpty()) metadata.put("passage_ids", passageIds);
 
-        List<Map<String, Object>> metadatas = metadata.isEmpty() ? null : List.of(metadata);
-        store.insertEntities(List.of(normalized), List.of(entityId),
-                List.of(embedding), metadatas, false);
+            List<Map<String, Object>> metadatas = metadata.isEmpty() ? null : List.of(metadata);
+            store.insertEntities(List.of(normalized), List.of(entityId),
+                    List.of(embedding), metadatas, false);
 
-        String canonical = entityNameToId.putIfAbsent(normalized, entityId);
-        if (canonical != null && !canonical.equals(entityId)) {
-            // 另一个线程已创建该实体，跳过 Milvus 插入避免重复
-            return canonical;
-        }
-        return canonical != null ? canonical : entityId;
+            return entityId;
+        });
     }
 
     // ==================== SubGraph Creation ====================

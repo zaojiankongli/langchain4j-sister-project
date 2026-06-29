@@ -138,7 +138,7 @@ public class GraphBuilder {
                         .id(rid)
                         .text(relations.get(rid))
                         .triplet(relationIdToTriplet.get(rid))
-                        .sourcePassageIds(new ArrayList<>(relationToPassageIds.getOrDefault(rid, List.of())))
+                        .sourcePassageIds(new ArrayList<>(relationToPassageIds.getOrDefault(rid, Set.of())))
                         .build())
                 .collect(Collectors.toList());
 

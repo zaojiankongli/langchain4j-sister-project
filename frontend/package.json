@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "smoke": "node scripts/smoke.mjs",
     "lint": "eslint src/ --max-warnings 50",
     "lint:fix": "eslint src/ --fix --max-warnings 50"
   },
@@ -16,7 +17,7 @@
     "oh-my-live2d": "^0.19.3",
     "pinia": "^3.0.4",
     "sockjs-client": "^1.6.1",
-    "stompjs": "^2.3.3",
+    "@stomp/stompjs": "^7.3.0",
     "vue": "^3.5.33",
     "vue-router": "^4.6.4"
   },

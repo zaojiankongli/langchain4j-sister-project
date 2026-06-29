@@ -175,16 +175,7 @@ public class AuthService {
             throw new IllegalArgumentException("验证码不能为空");
         }
 
-        // 1. 原子化验证+删除验证码
-        Long result = redisTemplate.execute(verifyAndDelScript, List.of(CODE_PREFIX + email), code);
-        if (result == null || result == -1) {
-            throw new UnauthorizedException("验证码已过期，请重新获取");
-        }
-        if (result == 0) {
-            throw new UnauthorizedException("验证码错误");
-        }
-
-        // 2. 分布式锁防止并发注册同一邮箱
+        // 1. 先获取分布式锁（防止验证码被消费后锁获取失败）
         String lockKey = "auth:login:lock:" + email;
         String lockToken = UUID.randomUUID().toString();
         Boolean locked = redisTemplate.opsForValue().setIfAbsent(lockKey, lockToken, 10, TimeUnit.SECONDS);
@@ -192,6 +183,14 @@ public class AuthService {
             throw new IllegalArgumentException("操作过于频繁，请稍后重试");
         }
         try {
+            // 2. 获取锁成功后再原子化验证+删除验证码
+            Long result = redisTemplate.execute(verifyAndDelScript, List.of(CODE_PREFIX + email), code);
+            if (result == null || result == -1) {
+                throw new UnauthorizedException("验证码已过期，请重新获取");
+            }
+            if (result == 0) {
+                throw new UnauthorizedException("验证码错误");
+            }
             // 3. 查找用户
             User user = userMapper.findByEmail(email);
             boolean isNewUser = false;
@@ -285,6 +284,23 @@ public class AuthService {
             throw new UnauthorizedException("微信登录已过期，请重新登录");
         }
 
+        // 分布式锁防止同一 openid 并发绑定
+        String bindLockKey = "auth:wx:bind:lock:" + openid;
+        String bindLockToken = UUID.randomUUID().toString();
+        Boolean bindLocked = redisTemplate.opsForValue().setIfAbsent(bindLockKey, bindLockToken, 10, TimeUnit.SECONDS);
+        if (Boolean.FALSE.equals(bindLocked)) {
+            throw new IllegalArgumentException("操作过于频繁，请稍后重试");
+        }
+        try {
+            return doBindEmail(email, request, wechatAppid, openid, unionid, bindPayload, bindToken);
+        } finally {
+            redisTemplate.execute(compareAndDeleteLockScript, List.of(bindLockKey), bindLockToken);
+        }
+    }
+
+    private Map<String, Object> doBindEmail(String email, BindEmailRequest request,
+                                             String wechatAppid, String openid, String unionid,
+                                             String bindPayload, String bindToken) {
         Long verified = redisTemplate.execute(verifyAndDelScript, List.of(CODE_PREFIX + email), request.code());
         if (verified == null || verified == -1) {
             throw new UnauthorizedException("验证码已过期，请重新获取");
@@ -368,21 +384,23 @@ public class AuthService {
             throw new IllegalArgumentException("refreshToken 不能为空");
         }
 
+        // 1. 先验证 Token 合法性（避免无效 Token 被误加入黑名单）
+        String userId = jwtUtil.parseRefreshToken(refreshToken);
+        if (userId == null) {
+            throw new UnauthorizedException("请重新登录");
+        }
+
+        // 2. Token 有效后再加入黑名单（防止重放攻击）
         String tokenHash = HashUtil.sha256Hex(refreshToken);
         String blacklistKey = TOKEN_BLACKLIST_PREFIX + tokenHash;
 
-        // Atomic check-and-blacklist to prevent TOCTOU race condition
         Long blacklisted = redisTemplate.execute(atomicBlacklistScript,
                 List.of(blacklistKey), "1", String.valueOf(getRefreshTokenExpireSeconds()));
         if (blacklisted == null || blacklisted == 0) {
             throw new UnauthorizedException("请重新登录");
         }
 
-        String userId = jwtUtil.parseRefreshToken(refreshToken);
-        if (userId == null) {
-            throw new UnauthorizedException("请重新登录");
-        }
-
+        // 3. 查找用户并签发新 Token
         User user = userMapper.findById(userId);
         if (user == null) {
             throw new IllegalArgumentException("用户不存在");

@@ -1,3 +1,38 @@
+<script setup>
+import { computed } from 'vue'
+import { isDiagnosticsEnabled } from '@/utils/diagnosticsAccess'
+
+const props = defineProps({
+  visible: { type: Boolean, default: false },
+  activeTab: { type: String, default: null },
+})
+
+defineEmits(['navigate'])
+
+const allNavItems = [
+  { name: '你的样子', shortName: '状态', path: 'user' },
+  { name: '与我的回忆', shortName: '回忆', path: 'memory' },
+  { name: '灵魂的颜色', shortName: '情绪', path: 'emotion' },
+  { name: '成长轨迹', shortName: '轨迹', path: 'relation' },
+  { name: '为你推荐', shortName: '推荐', path: 'action' },
+  { name: '灵魂调谐', shortName: '调谐', path: 'settings' },
+  { name: '性能诊断', shortName: '诊断', path: 'diagnostics' },
+]
+
+const navItems = computed(() => allNavItems.filter((item) => item.path !== 'diagnostics' || isDiagnosticsEnabled()))
+
+const RADIUS = 240
+const bubbleStyles = computed(() => navItems.value.map((_, index) => {
+  const total = Math.max(navItems.value.length - 1, 1)
+  const angle = 135 + (index * (225 - 135) / total)
+  const radian = (angle * Math.PI) / 180
+  return {
+    transform: `translate(${Math.cos(radian) * RADIUS}px, ${Math.sin(radian) * RADIUS}px)`,
+    transitionDelay: `${index * 50}ms`,
+  }
+}))
+</script>
+
 <template>
   <transition name="menu-pop">
     <div v-if="visible" class="radial-menu-container">
@@ -16,36 +51,6 @@
     </div>
   </transition>
 </template>
-
-<script setup>
-const props = defineProps({
-  visible: { type: Boolean, default: false },
-  activeTab: { type: String, default: null },
-})
-
-defineEmits(['navigate'])
-
-const navItems = [
-  { name: '你的样子', shortName: '状态', path: 'user' },
-  { name: '与我的回忆', shortName: '回忆', path: 'memory' },
-  { name: '灵魂的颜色', shortName: '设置', path: 'emotion' },
-  { name: '成长轨迹', shortName: '轨迹', path: 'relation' },
-  { name: '为你推荐', shortName: '推荐', path: 'action' },
-  { name: '灵魂调谐', shortName: '调谐', path: 'settings' },
-]
-
-// 预计算气泡位置样式（navItems 是静态的，避免每次渲染创建新对象）
-const RADIUS = 240
-const TOTAL = navItems.length
-const bubbleStyles = navItems.map((_, index) => {
-  const angle = 135 + (index * (225 - 135) / (TOTAL - 1))
-  const radian = (angle * Math.PI) / 180
-  return {
-    transform: `translate(${Math.cos(radian) * RADIUS}px, ${Math.sin(radian) * RADIUS}px)`,
-    transitionDelay: `${index * 50}ms`
-  }
-})
-</script>
 
 <style scoped>
 .radial-menu-container {
@@ -92,7 +97,6 @@ const bubbleStyles = navItems.map((_, index) => {
   font-weight: 300;
 }
 
-/* Animations */
 .menu-pop-enter-active {
   transition: opacity 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275), transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }

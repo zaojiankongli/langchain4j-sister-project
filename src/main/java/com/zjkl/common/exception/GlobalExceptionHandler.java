@@ -86,11 +86,16 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * 业务参数校验失败
+     * 业务参数校验失败 — 透传业务代码中面向用户的中文提示
      */
     @ExceptionHandler(IllegalArgumentException.class)
     public Result<?> handleIllegalArgument(IllegalArgumentException e, HttpServletRequest request) {
         log.warn("业务参数错误 [{} {}]: {}", request.getMethod(), request.getRequestURI(), e.getMessage());
+        String message = e.getMessage();
+        // 如果消息看起来是框架级别的（含类名、包名等技术信息），则脱敏
+        if (message != null && !message.isEmpty() && !message.contains("class ") && !message.contains("package ")) {
+            return Result.badRequest(message);
+        }
         return Result.badRequest("请求参数不合法，请检查输入");
     }
 

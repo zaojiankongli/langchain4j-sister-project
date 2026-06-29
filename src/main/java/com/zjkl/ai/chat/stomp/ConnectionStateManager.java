@@ -46,12 +46,13 @@ public class ConnectionStateManager {
         this.stateRegistry = stateRegistry;
         this.threadPoolProperties = threadPoolProperties;
 
-        // 可配置的调度线程池（默认 2 核，通过 application.yml 调整）
+        // 调度线程池必须使用平台线程，虚拟线程不适合长期驻留在 ScheduledThreadPool 核心线程上
         this.cleanupScheduler = Executors.newScheduledThreadPool(
                 threadPoolProperties.getWebsocketSenderCoreSize(),
                 r -> {
-                    Thread t = Thread.ofVirtual().unstarted(r);
-                    t.setName("ws-cleanup-" + r.hashCode());
+                    Thread t = new Thread(r);
+                    t.setName("ws-cleanup-" + t.threadId());
+                    t.setDaemon(true);
                     return t;
                 }
         );
@@ -292,7 +293,8 @@ public class ConnectionStateManager {
                 }
             }
         } finally {
-            senderThreads.remove(queueKey);
+            // 条件移除：仅当 Map 中存的仍是当前线程时才移除，避免误删新创建的 sender 线程
+            senderThreads.remove(queueKey, Thread.currentThread());
             if (shuttingDown) {
                 log.debug("发送线程正常退出（关闭中）：queueKey={}", queueKey);
             } else {

@@ -147,14 +147,8 @@ public class SummaryMemoryService {
 
             updateMetadata(memoryId, messagesSnapshot.size());
 
-            String title = "对话摘要 - " + LocalDate.now(ZONE).format(DATE_FORMATTER);
-            String emotionLabel = extractEmotionLabel(newSummary);
-            double sentimentScore = extractSentimentScore(newSummary);
-
-            saveToVectorStore(memoryId, title, newSummary, emotionLabel, sentimentScore);
-
-            log.info("用户 {} 的摘要生成完成，长度：{} 字，情绪={}, 情感分={}",
-                    memoryId, newSummary.length(), emotionLabel, sentimentScore);
+            log.info("用户 {} 的中间摘要生成完成，长度：{} 字，已更新 Redis，等待每日摘要任务写入 Milvus",
+                    memoryId, newSummary.length());
 
         } catch (Exception e) {
             log.error("用户 {} 的摘要生成失败（步骤将被跳过，下次对话压缩时重试）", memoryId, e);

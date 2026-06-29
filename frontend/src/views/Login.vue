@@ -146,7 +146,7 @@ const handleLogin = async () => {
     if (response.code === 200) {
       const { accessToken, refreshToken, user, requiresProfileComplete } = response.data;
       const authStore = useAuthStore();
-      authStore.setTokens(accessToken, refreshToken, user);
+      authStore.setTokens(accessToken, refreshToken, user, !requiresProfileComplete);
 
       if (requiresProfileComplete) {
         userData.value = user;
@@ -172,6 +172,7 @@ const handleLogin = async () => {
 };
 
 const handleProfileComplete = () => {
+  useAuthStore().setProfileComplete(true);
   router.push({ name: 'Dashboard' }).catch(() => {});
 };
 

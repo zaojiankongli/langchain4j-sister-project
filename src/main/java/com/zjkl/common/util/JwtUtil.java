@@ -20,6 +20,9 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class JwtUtil {
 
+    private static final String TOKEN_TYPE_ACCESS = "access";
+    private static final String TOKEN_TYPE_REFRESH = "refresh";
+
     private final AuthProperties authProperties;
 
     private volatile SecretKey cachedSigningKey;
@@ -29,22 +32,22 @@ public class JwtUtil {
     }
 
     public String generateAccessToken(User user) {
-        return createToken(user.getId(), user.getEmail(), user.getUsername(), authProperties.getAccessTokenExpiration());
+        return createToken(user.getId(), user.getEmail(), user.getUsername(), authProperties.getAccessTokenExpiration(), TOKEN_TYPE_ACCESS);
     }
 
     /**
      * 根据用户信息直接生成 Access Token（无需查询 DB）
      */
     public String generateAccessToken(String userId, String email, String username) {
-        return createToken(userId, email, username, authProperties.getAccessTokenExpiration());
+        return createToken(userId, email, username, authProperties.getAccessTokenExpiration(), TOKEN_TYPE_ACCESS);
     }
 
     public String generateRefreshToken(User user) {
-        return createToken(user.getId(), user.getEmail(), user.getUsername(), authProperties.getRefreshTokenExpiration());
+        return createToken(user.getId(), user.getEmail(), user.getUsername(), authProperties.getRefreshTokenExpiration(), TOKEN_TYPE_REFRESH);
     }
 
     public String parseAccessToken(String token) {
-        return parseTokenSubject(token);
+        return parseTokenSubject(token, TOKEN_TYPE_ACCESS);
     }
 
     /**
@@ -59,6 +62,9 @@ public class JwtUtil {
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
+            if (!isExpectedTokenType(claims, TOKEN_TYPE_ACCESS)) {
+                return null;
+            }
             Map<String, String> result = new java.util.HashMap<>();
             result.put("userId", claims.getSubject());
             result.put("email", claims.get("email", String.class));
@@ -76,6 +82,9 @@ public class JwtUtil {
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
+            if (!isExpectedTokenType(claims, TOKEN_TYPE_ACCESS)) {
+                return -1;
+            }
             return claims.getExpiration().getTime() - System.currentTimeMillis();
         } catch (Exception e) {
             return -1;
@@ -83,7 +92,7 @@ public class JwtUtil {
     }
 
     public String parseRefreshToken(String token) {
-        return parseTokenSubject(token);
+        return parseTokenSubject(token, TOKEN_TYPE_REFRESH);
     }
 
     public JwtParseResult parseAccessTokenWithRemaining(String token) {
@@ -93,6 +102,9 @@ public class JwtUtil {
                     .build()
                     .parseSignedClaims(token)
                     .getPayload();
+            if (!isExpectedTokenType(claims, TOKEN_TYPE_ACCESS)) {
+                return new JwtParseResult(null, -1);
+            }
             long remaining = claims.getExpiration().getTime() - System.currentTimeMillis();
             if (remaining <= 0) {
                 return new JwtParseResult(null, -1);
@@ -105,29 +117,39 @@ public class JwtUtil {
 
     public record JwtParseResult(String userId, long remainingTimeMs) {}
 
-    private String createToken(String userId, String email, String username, Long expiration) {
+    private String createToken(String userId, String email, String username, Long expiration, String type) {
         return Jwts.builder()
             .subject(userId)
             .claim("email", email)
             .claim("username", username)
+            .claim("type", type)
             .issuedAt(new Date())
             .expiration(new Date(System.currentTimeMillis() + expiration))
             .signWith(getSigningKey())
             .compact();
     }
 
-    private String parseTokenSubject(String token) {
+    private String parseTokenSubject(String token, String expectedType) {
         try {
             Claims claims = Jwts.parser()
                 .verifyWith(getSigningKey())
                 .build()
                 .parseSignedClaims(token)
                 .getPayload();
+            if (!isExpectedTokenType(claims, expectedType)) {
+                return null;
+            }
             // Jwts.parser() 已自动验证过期时间，过期的 token 会抛出 ExpiredJwtException
             return claims.getSubject();
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private boolean isExpectedTokenType(Claims claims, String expectedType) {
+        String type = claims.get("type", String.class);
+        // 兼容上线前已签发的旧 token：没有 type 时仍按旧逻辑接受，到过期后自然淘汰。
+        return type == null || expectedType.equals(type);
     }
 
     private SecretKey getSigningKey() {

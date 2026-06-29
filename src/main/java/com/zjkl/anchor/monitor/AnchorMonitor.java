@@ -34,6 +34,49 @@ public class AnchorMonitor {
 
     private final ConcurrentHashMap<String, MonitorState> monitors = new ConcurrentHashMap<>();
 
+    /**
+     * 定时清理长时间 IDLE 的 MonitorState，防止内存泄漏
+     */
+    @Scheduled(fixedDelay = 60 * 60 * 1000) // 每小时执行一次
+    public void cleanupIdleMonitors() {
+        LocalDateTime cutoff = LocalDateTime.now().minusHours(CLEANUP_HOURS);
+        int removed = 0;
+        for (var entry : monitors.entrySet()) {
+            MonitorState state = entry.getValue();
+            synchronized (state) {
+                if (state.status == MonitorState.Status.IDLE
+                        && state.lastMsgTime != null
+                        && state.lastMsgTime.isBefore(cutoff)) {
+                    monitors.remove(entry.getKey());
+                    removed++;
+                }
+            }
+        }
+        if (removed > 0) {
+            log.debug("清理 IDLE MonitorState：移除={}, 剩余={}", removed, monitors.size());
+        }
+        // 容量保护：超过上限时强制清理最旧的 IDLE 条目
+        if (monitors.size() > MAX_MONITOR_CAPACITY) {
+            log.warn("MonitorState 容量超限({})，强制清理", monitors.size());
+            monitors.entrySet().stream()
+                    .filter(e -> {
+                        synchronized (e.getValue()) {
+                            return e.getValue().status == MonitorState.Status.IDLE;
+                        }
+                    })
+                    .sorted((a, b) -> {
+                        LocalDateTime ta = a.getValue().lastMsgTime;
+                        LocalDateTime tb = b.getValue().lastMsgTime;
+                        if (ta == null && tb == null) return 0;
+                        if (ta == null) return -1;
+                        if (tb == null) return 1;
+                        return ta.compareTo(tb);
+                    })
+                    .limit(monitors.size() - MAX_MONITOR_CAPACITY)
+                    .forEach(e -> monitors.remove(e.getKey()));
+        }
+    }
+
     private Consumer<AnchorEvent> onTriggerCallback;
     private Consumer<AnchorEvent> onEndCallback;
 

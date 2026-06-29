@@ -99,17 +99,18 @@ public class PromptCacheService {
      * 查模板
      */
     public String getTemplate(String key) {
-        String content = localCache.getIfPresent(key);
-        if (content != null) {
-            log.debug("命中本地缓存：{}", key);
-            return content;
+        String content = localCache.get(key, this::loadTemplateForCache);
+        if (content == null) {
+            throw new IllegalArgumentException("未找到 Prompt 模板：" + key);
         }
-        
+        return content;
+    }
+
+    private String loadTemplateForCache(String key) {
         String redisKey = REDIS_KEY_PREFIX + key;
-        content = stringRedisTemplate.opsForValue().get(redisKey);
+        String content = stringRedisTemplate.opsForValue().get(redisKey);
         if (content != null) {
             log.debug("命中 Redis 缓存：{}", key);
-            localCache.put(key, content);
             return content;
         }
         
@@ -118,12 +119,11 @@ public class PromptCacheService {
         if (content != null) {
             // 回填 Redis 和本地缓存
             stringRedisTemplate.opsForValue().set(redisKey, content, Duration.ofSeconds(appProperties.getPromptCacheTtl()));
-            localCache.put(key, content);
             loadedTemplateKeys.add(key);
             return content;
         }
         
-        throw new IllegalArgumentException("未找到 Prompt 模板：" + key);
+        return null;
     }
     
     /** 从文件加载 */

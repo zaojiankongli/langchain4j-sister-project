@@ -6,30 +6,24 @@ import request from '@/utils/request'
 import { safeGet, safeSet, safeRemove, safeGetJSON, safeSetJSON } from '@/utils/storage'
 import { getUserIdFromToken } from '@/utils/jwt'
 import { setAccessTokenCache } from '@/utils/tokenCache'
+import { recordAuthMetric } from '@/utils/metrics'
 
-/**
- * 认证状态管理 Store
- *
- * 统一管理 token 生命周期，与 localStorage 保持双向同步。
- * 作为 auth.js 工具函数的后备数据源，逐步替代直接 localStorage 访问。
- */
 export const useAuthStore = defineStore('auth', () => {
-  // ── 状态 ──
   const accessToken = ref(safeGet(STORAGE_KEYS.ACCESS_TOKEN, ''))
   const refreshToken = ref(safeGet(STORAGE_KEYS.REFRESH_TOKEN, ''))
   const user = ref(parseUser())
+  const profileComplete = ref(safeGet(STORAGE_KEYS.PROFILE_COMPLETE, '') === 'true')
   const loading = ref(false)
   const error = ref('')
 
-  // ── 计算属性 ──
   const isAuthenticated = computed(() => !!accessToken.value)
+  const isProfileComplete = computed(() => profileComplete.value)
   const userId = computed(() => user.value?.id || getUserIdFromToken(accessToken.value))
   const username = computed(() => user.value?.username || '')
 
-  // ── 内部工具 ──
-    function parseUser() {
-      return safeGetJSON(STORAGE_KEYS.USER)
-    }
+  function parseUser() {
+    return safeGetJSON(STORAGE_KEYS.USER)
+  }
 
   function syncLocalStorage() {
     if (accessToken.value) {
@@ -37,25 +31,35 @@ export const useAuthStore = defineStore('auth', () => {
     } else {
       safeRemove(STORAGE_KEYS.ACCESS_TOKEN)
     }
+
     if (refreshToken.value) {
       safeSet(STORAGE_KEYS.REFRESH_TOKEN, refreshToken.value)
     } else {
       safeRemove(STORAGE_KEYS.REFRESH_TOKEN)
     }
+
     if (user.value) {
       safeSetJSON(STORAGE_KEYS.USER, user.value)
     } else {
       safeRemove(STORAGE_KEYS.USER)
     }
+
+    safeSet(STORAGE_KEYS.PROFILE_COMPLETE, profileComplete.value ? 'true' : 'false')
   }
 
-  // ── 动作 ──
-  function setTokens(token, refresh, userData) {
+  function setTokens(token, refresh, userData, nextProfileComplete = profileComplete.value) {
     accessToken.value = token
     refreshToken.value = refresh
-    if (userData) user.value = userData
+    if (userData) {
+      user.value = userData
+    }
+    profileComplete.value = Boolean(nextProfileComplete)
     error.value = ''
     setAccessTokenCache(token)
+    recordAuthMetric('set_tokens', {
+      hasUser: Boolean(userData),
+      profileComplete: profileComplete.value,
+    })
     syncLocalStorage()
   }
 
@@ -63,8 +67,10 @@ export const useAuthStore = defineStore('auth', () => {
     accessToken.value = ''
     refreshToken.value = ''
     user.value = null
+    profileComplete.value = false
     error.value = ''
     setAccessTokenCache('')
+    recordAuthMetric('clear_auth')
     syncLocalStorage()
   }
 
@@ -78,27 +84,27 @@ export const useAuthStore = defineStore('auth', () => {
         return res
       }
       const data = res.data || res
-      setTokens(data.accessToken, data.refreshToken, data.user)
+      setTokens(data.accessToken, data.refreshToken, data.user, !data.requiresProfileComplete)
       return res
-    } catch (e) {
-      error.value = e?.message || '登录失败'
-      throw e
+    } catch (requestError) {
+      error.value = requestError?.message || '登录失败'
+      throw requestError
     } finally {
       loading.value = false
     }
   }
 
-  /**
-   * 刷新令牌（单例，防止并发重复刷新）
-   */
-  let _refreshPromise = null
+  let refreshPromise = null
 
   async function refreshTokens() {
-    // 已有进行中的刷新 → 复用
-    if (_refreshPromise) return _refreshPromise
-    if (!refreshToken.value) throw new Error('无 refreshToken')
+    if (refreshPromise) {
+      return refreshPromise
+    }
+    if (!refreshToken.value) {
+      throw new Error('missing refresh token')
+    }
 
-    _refreshPromise = (async () => {
+    refreshPromise = (async () => {
       try {
         const res = await request.post(API.AUTH_REFRESH, { refreshToken: refreshToken.value }, { _skipRefresh: true })
         if (res.code !== 200) {
@@ -109,15 +115,15 @@ export const useAuthStore = defineStore('auth', () => {
         refreshToken.value = data.refreshToken
         syncLocalStorage()
         return res
-      } catch (e) {
+      } catch (requestError) {
         clearAuth()
-        throw e
+        throw requestError
       } finally {
-        _refreshPromise = null
+        refreshPromise = null
       }
     })()
 
-    return _refreshPromise
+    return refreshPromise
   }
 
   function logout() {
@@ -126,22 +132,28 @@ export const useAuthStore = defineStore('auth', () => {
     return uid
   }
 
+  function setProfileComplete(value) {
+    profileComplete.value = Boolean(value)
+    recordAuthMetric('set_profile_complete', { profileComplete: profileComplete.value })
+    syncLocalStorage()
+  }
+
   return {
-    // 状态
     accessToken,
     refreshToken,
     user,
+    profileComplete,
     loading,
     error,
-    // 计算
     isAuthenticated,
+    isProfileComplete,
     userId,
     username,
-    // 动作
     setTokens,
     clearAuth,
     login,
     refreshTokens,
     logout,
+    setProfileComplete,
   }
 })

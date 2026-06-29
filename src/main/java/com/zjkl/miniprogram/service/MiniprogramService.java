@@ -25,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.net.URI;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -246,11 +247,13 @@ public class MiniprogramService {
         if (nickname != null) {
             user.setUsername(nickname);
         }
-        if (request.avatarUrl() != null && !request.avatarUrl().isBlank()) {
-            user.setAvatarUrl(request.avatarUrl().trim());
+        String avatarUrl = normalizeRemoteUrl(request.avatarUrl());
+        if (avatarUrl != null) {
+            user.setAvatarUrl(avatarUrl);
         }
-        if (request.backgroundUrl() != null && !request.backgroundUrl().isBlank()) {
-            user.setBackgroundUrl(request.backgroundUrl().trim());
+        String backgroundUrl = normalizeRemoteUrl(request.backgroundUrl());
+        if (backgroundUrl != null) {
+            user.setBackgroundUrl(backgroundUrl);
         }
 
         userMapper.update(user);
@@ -331,5 +334,24 @@ public class MiniprogramService {
             }
         }
         return null;
+    }
+
+    private String normalizeRemoteUrl(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        String url = value.trim();
+        URI uri;
+        try {
+            uri = URI.create(url);
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(400, "图片地址格式不正确");
+        }
+        String scheme = uri.getScheme();
+        String host = uri.getHost();
+        if (!"https".equalsIgnoreCase(scheme) || host == null || host.isBlank()) {
+            throw new BusinessException(400, "图片地址必须是合法的 HTTPS URL");
+        }
+        return url;
     }
 }

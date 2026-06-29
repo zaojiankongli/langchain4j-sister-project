@@ -41,6 +41,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 
 /**
  * 单用户唤醒工作流。
@@ -153,9 +154,24 @@ public class WakeUpWorkflow {
                 () -> callGen3(generator3Agent, _cc, _tod, _sm, _md, _ms, _sh, _ah, _un, _uh, _uid),
                 wakeupExecutor).exceptionally(e -> { log.warn("Generator3 失败: {}", e.getMessage()); return null; });
 
-        String raw1 = future1.join();
-        String raw2 = future2.join();
-        String raw3 = future3.join();
+        String raw1;
+        String raw2;
+        String raw3;
+        try {
+            raw1 = future1.get(60, TimeUnit.SECONDS);
+            raw2 = future2.get(60, TimeUnit.SECONDS);
+            raw3 = future3.get(60, TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            log.error("LLM 生成超时（60s），放弃本次唤醒：userId={}", userId);
+            return 0;
+        } catch (java.util.concurrent.ExecutionException e) {
+            log.error("LLM 生成执行异常：userId={}", userId, e);
+            return 0;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("LLM 生成被中断：userId={}", userId);
+            return 0;
+        }
 
         log.info("生成结果：userId={}, candidateLens=[{},{},{}]", userId,
                 lengthOf(raw1), lengthOf(raw2), lengthOf(raw3));
@@ -234,9 +250,24 @@ public class WakeUpWorkflow {
                     state.moodDescription(), state.moodScore(), anchorHint, state.silentHours(), userId);
         }, wakeupExecutor).exceptionally(e -> "{\"score\":5,\"reason\":\"评分失败\"}");
 
-        String scoreJson1 = scoreFuture1.join();
-        String scoreJson2 = scoreFuture2.join();
-        String scoreJson3 = scoreFuture3.join();
+        String scoreJson1;
+        String scoreJson2;
+        String scoreJson3;
+        try {
+            scoreJson1 = scoreFuture1.get(60, TimeUnit.SECONDS);
+            scoreJson2 = scoreFuture2.get(60, TimeUnit.SECONDS);
+            scoreJson3 = scoreFuture3.get(60, TimeUnit.SECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            log.error("LLM 评分超时（60s）：userId={}", userId);
+            scoreJson1 = scoreJson2 = scoreJson3 = "{\"score\":5,\"reason\":\"评分超时\"}";
+        } catch (java.util.concurrent.ExecutionException e) {
+            log.error("LLM 评分执行异常：userId={}", userId, e);
+            scoreJson1 = scoreJson2 = scoreJson3 = "{\"score\":5,\"reason\":\"评分异常\"}";
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("LLM 评分被中断：userId={}", userId);
+            scoreJson1 = scoreJson2 = scoreJson3 = "{\"score\":5,\"reason\":\"评分中断\"}";
+        }
 
         WakeUpScoreResult sr1 = scorer.parseScoreResult(scoreJson1);
         WakeUpScoreResult sr2 = scorer.parseScoreResult(scoreJson2);

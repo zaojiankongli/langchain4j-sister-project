@@ -175,7 +175,7 @@ const submitData = async () => {
       if (res.code === 200) {
         // 通过 authStore 同步更新 store 状态和 localStorage
         const authStore = useAuthStore();
-        authStore.setTokens(authStore.accessToken, authStore.refreshToken, { ...authStore.user, ...profile });
+        authStore.setTokens(authStore.accessToken, authStore.refreshToken, { ...authStore.user, ...profile }, true);
         // 短暂展示完成状态后跳转
         await new Promise(r => { closeDelayTimer = setTimeout(r, 1500); });
         if (!_isMounted) return;
