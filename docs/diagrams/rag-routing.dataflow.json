@@ -1,0 +1,190 @@
+{
+  "schema_version": 1,
+  "diagram_type": "dataflow",
+  "meta": {
+    "title": "双路 RAG 检索与上下文治理",
+    "viewBox": [1160, 500],
+    "quality_profile": "showcase",
+    "visual_preset": "signal-flow",
+    "views": [
+      {
+        "id": "hybrid-route",
+        "label": "Hybrid RAG",
+        "focus": ["query", "router", "hybrid", "rrf", "context"],
+        "note": "Dense 与 Sparse 两类信号通过 RRF 合并后进入统一上下文治理。"
+      },
+      {
+        "id": "graph-route",
+        "label": "Vector Graph RAG",
+        "focus": ["query", "router", "graph", "rerank", "context"],
+        "note": "实体召回后扩展关系，并通过单次 LLM 重排回捞来源片段。"
+      },
+      {
+        "id": "context-route",
+        "label": "上下文注入",
+        "focus": ["rrf", "rerank", "context"],
+        "note": "双路结果按用户、分数和预算治理，最终注入流式回答。"
+      }
+    ]
+  },
+  "stages": [
+    { "label": "查询理解" },
+    { "label": "路由" },
+    { "label": "双路召回" },
+    { "label": "融合与重排" },
+    { "label": "上下文与回答" }
+  ],
+  "nodes": [
+    {
+      "id": "query",
+      "type": "frontend",
+      "label": "用户问题",
+      "sublabel": "message + user context",
+      "stage": 0,
+      "row": 1,
+      "tag": "QUERY"
+    },
+    {
+      "id": "router",
+      "type": "backend",
+      "label": "Query Analyzer",
+      "sublabel": "memory / graph / both",
+      "stage": 1,
+      "row": 1,
+      "tag": "TOPIC + DATE + SENTIMENT"
+    },
+    {
+      "id": "hybrid",
+      "type": "backend",
+      "label": "Hybrid 检索",
+      "sublabel": "Dense Vector + Sparse BM25",
+      "stage": 2,
+      "row": 0,
+      "tag": "MEMORY ROUTE"
+    },
+    {
+      "id": "rrf",
+      "type": "backend",
+      "label": "RRF 融合",
+      "sublabel": "rank fusion + threshold",
+      "stage": 3,
+      "row": 0,
+      "tag": "NATIVE RESULT"
+    },
+    {
+      "id": "graph",
+      "type": "backend",
+      "label": "图谱检索",
+      "sublabel": "entity + relation recall",
+      "stage": 2,
+      "row": 2,
+      "tag": "GRAPH ROUTE"
+    },
+    {
+      "id": "rerank",
+      "type": "backend",
+      "label": "LLM 重排与回捞",
+      "sublabel": "single pass + source passage",
+      "stage": 3,
+      "row": 2,
+      "tag": "GRAPH RESULT"
+    },
+    {
+      "id": "context",
+      "type": "security",
+      "label": "上下文治理与回答",
+      "sublabel": "filter + budget + stream",
+      "stage": 4,
+      "row": 1,
+      "tag": "CONTROLLED CONTEXT"
+    }
+  ],
+  "flows": [
+    {
+      "id": "query-router",
+      "from": "query",
+      "to": "router",
+      "label": "question",
+      "classification": "user scoped",
+      "variant": "emphasis",
+      "route": "straight"
+    },
+    {
+      "id": "router-hybrid",
+      "from": "router",
+      "to": "hybrid",
+      "label": "needMemorySearch",
+      "classification": "memory route",
+      "variant": "emphasis"
+    },
+    {
+      "id": "router-entity",
+      "from": "router",
+      "to": "graph",
+      "label": "needGraphSearch",
+      "classification": "graph route",
+      "variant": "emphasis"
+    },
+    {
+      "id": "hybrid-rrf",
+      "from": "hybrid",
+      "to": "rrf",
+      "label": "dense + sparse ranks",
+      "classification": "scored candidates",
+      "variant": "emphasis",
+      "route": "straight",
+      "labelAt": [638, 200]
+    },
+    {
+      "id": "graph-rerank",
+      "from": "graph",
+      "to": "rerank",
+      "label": "relation candidates",
+      "classification": "subgraph",
+      "variant": "emphasis",
+      "route": "straight"
+    },
+    {
+      "id": "rrf-context",
+      "from": "rrf",
+      "to": "context",
+      "label": "native result",
+      "classification": "memory snippets",
+      "variant": "emphasis"
+    },
+    {
+      "id": "rerank-context",
+      "from": "rerank",
+      "to": "context",
+      "label": "graph result",
+      "classification": "source passages",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Native Hybrid RAG",
+      "items": [
+        "Dense Vector 捕获语义相似，Sparse BM25 保留关键词命中",
+        "RRF 在不强行统一分数尺度的前提下融合两路排序"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Vector Graph RAG",
+      "items": [
+        "实体命中后扩展关系，并补充关系向量召回",
+        "单次 LLM 重排筛选关系，再回捞对应来源片段"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "上下文边界",
+      "items": [
+        "按 user_id、分数与路由线索过滤，避免跨用户污染",
+        "双路结果去重并受字符预算约束，超限时压缩或截断"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,269 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Sister Project 运行时架构",
+    "quality_profile": "showcase",
+    "visual_preset": "signal-flow",
+    "views": [
+      {
+        "id": "conversation-path",
+        "label": "实时对话主链路",
+        "focus": ["web", "desktop", "access", "orchestrator", "dashscope"],
+        "note": "从交互端进入统一编排，并以流式事件返回客户端。"
+      },
+      {
+        "id": "memory-path",
+        "label": "长期记忆链路",
+        "focus": ["orchestrator", "router", "hybrid", "graph", "milvus"],
+        "note": "按问题意图选择 Hybrid RAG、Vector Graph RAG 或双路并行。"
+      },
+      {
+        "id": "state-path",
+        "label": "业务与状态",
+        "focus": ["access", "orchestrator", "mysql", "redis"],
+        "note": "MySQL 保存持久业务数据，Redis 承载高频状态与分布式协调。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "Vue Web",
+      "sublabel": "Chat / Live2D",
+      "brand": "vue",
+      "pos": [48, 212],
+      "size": [148, 66]
+    },
+    {
+      "id": "desktop",
+      "type": "frontend",
+      "label": "Tauri 桌面端",
+      "sublabel": "Live2D Pet",
+      "pos": [48, 332],
+      "size": [148, 66]
+    },
+    {
+      "id": "mini",
+      "type": "frontend",
+      "label": "微信小程序",
+      "sublabel": "Realtime Client",
+      "pos": [48, 452],
+      "size": [148, 66]
+    },
+    {
+      "id": "access",
+      "type": "security",
+      "label": "统一接入层",
+      "sublabel": "REST + STOMP + JWT",
+      "tag": "USER CONTEXT",
+      "pos": [278, 326],
+      "size": [170, 76]
+    },
+    {
+      "id": "orchestrator",
+      "type": "backend",
+      "label": "AI 对话编排",
+      "sublabel": "Prompt / Vision / TTS / PAD",
+      "tag": "STREAMING",
+      "pos": [536, 326],
+      "size": [190, 76]
+    },
+    {
+      "id": "router",
+      "type": "backend",
+      "label": "RAG Router",
+      "sublabel": "Query Analyzer",
+      "tag": "ROUTE + FALLBACK",
+      "pos": [818, 326],
+      "size": [166, 76]
+    },
+    {
+      "id": "hybrid",
+      "type": "backend",
+      "label": "Hybrid RAG",
+      "sublabel": "Dense + BM25 + RRF",
+      "pos": [1072, 218],
+      "size": [174, 70]
+    },
+    {
+      "id": "graph",
+      "type": "backend",
+      "label": "Vector Graph RAG",
+      "sublabel": "Entity + Relation + Passage",
+      "pos": [1072, 430],
+      "size": [174, 70]
+    },
+    {
+      "id": "mysql",
+      "type": "database",
+      "label": "MySQL",
+      "sublabel": "Users / Messages / Settings",
+      "pos": [282, 590],
+      "size": [166, 68]
+    },
+    {
+      "id": "redis",
+      "type": "database",
+      "label": "Redis",
+      "sublabel": "State / Lock / Cooldown",
+      "pos": [548, 590],
+      "size": [166, 68]
+    },
+    {
+      "id": "dashscope",
+      "type": "external",
+      "label": "DashScope Models",
+      "sublabel": "Chat / Vision / Embedding / TTS",
+      "pos": [814, 590],
+      "size": [182, 68]
+    },
+    {
+      "id": "milvus",
+      "type": "database",
+      "label": "Milvus",
+      "sublabel": "Memory / Entity / Relation / Passage",
+      "pos": [1072, 590],
+      "size": [174, 68]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Spring Boot Application",
+      "wraps": ["access", "orchestrator", "router", "hybrid", "graph"]
+    },
+    {
+      "kind": "region",
+      "label": "Data & Model Services",
+      "wraps": ["mysql", "redis", "dashscope", "milvus"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "web-access",
+      "from": "web",
+      "to": "access",
+      "label": "HTTPS / STOMP",
+      "variant": "emphasis"
+    },
+    {
+      "id": "desktop-access",
+      "from": "desktop",
+      "to": "access",
+      "label": "STOMP",
+      "variant": "emphasis",
+      "labelAt": [276, 416]
+    },
+    {
+      "id": "mini-access",
+      "from": "mini",
+      "to": "access",
+      "label": "REST / WebSocket",
+      "variant": "emphasis"
+    },
+    {
+      "id": "access-orchestrator",
+      "from": "access",
+      "to": "orchestrator",
+      "label": "user event",
+      "variant": "emphasis",
+      "labelAt": [492, 312]
+    },
+    {
+      "id": "orchestrator-router",
+      "from": "orchestrator",
+      "to": "router",
+      "label": "analyze query",
+      "variant": "emphasis"
+    },
+    {
+      "id": "router-hybrid",
+      "from": "router",
+      "to": "hybrid",
+      "label": "memory route",
+      "variant": "emphasis"
+    },
+    {
+      "id": "router-graph",
+      "from": "router",
+      "to": "graph",
+      "label": "relation route",
+      "variant": "emphasis"
+    },
+    {
+      "id": "access-mysql",
+      "from": "access",
+      "to": "mysql",
+      "label": "business data",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "orchestrator-redis",
+      "from": "orchestrator",
+      "to": "redis",
+      "label": "runtime state",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [637, 520]
+    },
+    {
+      "id": "orchestrator-models",
+      "from": "orchestrator",
+      "to": "dashscope",
+      "label": "model calls",
+      "variant": "dashed"
+    },
+    {
+      "id": "hybrid-milvus",
+      "from": "hybrid",
+      "to": "milvus",
+      "label": "hybrid search",
+      "variant": "dashed",
+      "fromSide": "right",
+      "toSide": "right",
+      "via": [[1290, 253], [1290, 624]],
+      "labelAt": [1302, 370]
+    },
+    {
+      "id": "graph-milvus",
+      "from": "graph",
+      "to": "milvus",
+      "label": "graph retrieval",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelAt": [1159, 548]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "统一编排",
+      "items": [
+        "文本、视觉、语音、情绪与主动事件进入同一会话上下文",
+        "输出拆分为文本、音频、情绪、表情与动作事件"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "双路记忆",
+      "items": [
+        "Hybrid RAG 负责语义与关键词召回",
+        "Vector Graph RAG 负责实体、关系与来源片段"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "故障边界",
+      "items": [
+        "LLM、TTS、Milvus 与图片任务使用独立有界执行器",
+        "增强链路局部失败时优先保留基础聊天能力"
+      ]
+    }
+  ]
+}

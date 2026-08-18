@@ -31,52 +31,9 @@ Sister Project 是一个围绕“长期交互”构建的全栈 AI 伴侣项目�
 
 ## 系统设计
 
-```mermaid
-flowchart TB
-    subgraph Clients["交互端"]
-        Web["Vue Web"]
-        Desktop["Tauri + Live2D 桌面端"]
-        Mini["微信小程序"]
-    end
+[![Sister Project 运行时架构](./docs/diagrams/system-runtime.svg)](https://raw.githack.com/zaojiankongli/langchain4j-sister-project/main/docs/diagrams/system-runtime.html)
 
-    subgraph Access["接入层"]
-        REST["REST API"]
-        WS["STOMP / WebSocket"]
-        Auth["JWT 认证与用户上下文"]
-    end
-
-    subgraph Orchestration["AI 编排层"]
-        Chat["流式对话编排"]
-        Router["Query Analyzer / RAG Router"]
-        Multi["Vision / TTS / Prompt"]
-        State["PAD 情绪 / WakeUp / Peek / Anchor"]
-    end
-
-    subgraph Memory["记忆与知识层"]
-        Native["Native Hybrid RAG"]
-        Graph["Vector Graph RAG"]
-        Context["融合、去重与上下文治理"]
-    end
-
-    subgraph Infra["基础设施"]
-        MySQL[(MySQL)]
-        Redis[(Redis)]
-        Milvus[(Milvus)]
-        OSS[(OSS)]
-        DashScope["DashScope Models"]
-    end
-
-    Clients --> Access
-    Access --> Orchestration
-    Chat --> Router
-    Router --> Native
-    Router --> Graph
-    Native --> Context
-    Graph --> Context
-    Context --> Chat
-    Orchestration --> Infra
-    Chat --> WS
-```
+> 图中呈现客户端、统一接入、AI 编排、双路 RAG 与数据服务之间的运行时关系。点击图表可查看交互版本。
 
 系统按接入、编排、领域与基础设施划分职责。用户消息进入后，聊天编排层会结合身份、近期消息、长期记忆、关系图谱、情绪状态和多模态信息组装上下文；模型输出则被拆分为文本、音频和状态事件，实时推送到不同客户端。
 
@@ -98,28 +55,9 @@ flowchart TB
 
 并非每句话都需要检索历史。`RagRouter` 先通过模型分析问题，判断是否需要记忆检索、关系检索及优先数据源；当模型路由不可用时，系统保留关键词规则作为回退。路由结果还可以携带 topic、date、sentiment 等线索，用于收窄候选范围。
 
-```mermaid
-flowchart LR
-    Q["用户问题"] --> R["Query Analyzer"]
-    R -->|"needMemorySearch"| N["Native Hybrid RAG"]
-    R -->|"needGraphSearch"| G["Vector Graph RAG"]
+[![双路 RAG 检索与上下文治理](./docs/diagrams/rag-routing.svg)](https://raw.githack.com/zaojiankongli/langchain4j-sister-project/main/docs/diagrams/rag-routing.html)
 
-    N --> D["Dense Vector"]
-    N --> S["Sparse BM25"]
-    D --> F["RRF 融合"]
-    S --> F
-
-    G --> E["实体提取与召回"]
-    E --> X["关系 ID 扩展"]
-    X --> V["关系向量召回"]
-    V --> L["单次 LLM 重排"]
-    L --> P["来源片段回捞"]
-
-    F --> C["跨路融合"]
-    P --> C
-    C --> B["过滤 / 去重 / 压缩"]
-    B --> A["Prompt Context"]
-```
+> 图中聚焦 Query Analyzer 对两条检索链路的调度，以及候选结果进入受控上下文的汇聚过程。点击图表可查看交互版本。
 
 ### Native Hybrid RAG
 
